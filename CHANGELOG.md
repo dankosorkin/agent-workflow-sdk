@@ -16,6 +16,12 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `PrometheusHooks` (in the `prometheus` extra): a `Hooks` listener that records
+  run/node/step counters, a node-duration histogram, and backend-event counts as
+  Prometheus metrics, for operators who scrape Prometheus rather than run an OTel
+  collector. Uses a private `CollectorRegistry` by default; `exposition()`
+  renders the text format for a `/metrics` endpoint (the HTTP layer is the
+  caller's).
 - `ToolAllowlist` permission policy for least-privilege tool scoping, with a
   configurable fallback (`DenyAll` by default).
 - Capability matrix in the README documenting which backends route tool

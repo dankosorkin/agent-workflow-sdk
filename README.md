@@ -158,6 +158,25 @@ from agentflow.otel import OtelHooks
 app = g.compile(hooks=OtelHooks())   # uses the global tracer/provider
 ```
 
+For operators who scrape Prometheus instead of running an OTel collector,
+`agentflow.prometheus.PrometheusHooks` (install the `prometheus` extra) is a
+`Hooks` that records run/node/step counters, a node-duration histogram, and
+backend-event counts. It uses a private registry by default; call
+`exposition()` to render the text format for a `/metrics` endpoint (you own the
+HTTP layer).
+
+```python
+from agentflow.prometheus import PrometheusHooks
+
+metrics = PrometheusHooks()
+app = g.compile(hooks=metrics)
+# ... inside your /metrics handler:
+body, content_type = metrics.exposition()
+```
+
+Compose several listeners with `MultiHooks(RunMetrics(), OtelHooks(),
+PrometheusHooks())`.
+
 ## Backends
 
 Two kinds of backend share one event stream, so a node calls either the same
@@ -483,3 +502,10 @@ KIRO_AGENT=vibe pytest -m live   # include the Kiro backend
 
 Each live test skips itself when its backend is absent, so `pytest -m live`
 never fails on a missing CLI.
+
+## License
+
+This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
+See the [LICENSE](LICENSE) file for details.
+
+Copyright (C) 2026 Daniel Sorkin

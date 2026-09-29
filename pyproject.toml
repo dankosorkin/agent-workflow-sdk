@@ -30,6 +30,7 @@ ollama = ["httpx>=0.27"]
 otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 redis = ["redis>=5"]
 postgres = ["asyncpg>=0.29"]
+prometheus = ["prometheus-client>=0.20"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",
@@ -38,6 +39,7 @@ dev = [
     "mypy>=1.11",
     "pip-audit>=2.7",
     "fakeredis>=2.20",
+    "prometheus-client>=0.20",
 ]
 
 [project.urls]
