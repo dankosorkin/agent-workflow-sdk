@@ -8,15 +8,17 @@ version = "0.1.0"
 description = "Async-first, LangGraph-style SDK for building agent workflows with pluggable agent and LLM backends."
 readme = "README.md"
 requires-python = ">=3.11"
-license = { text = "MIT" }
-authors = [{ name = "AgentFlow" }]
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "AgentFlow contributors" }]
 keywords = ["agents", "workflow", "graph", "llm", "orchestration", "async"]
 classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Framework :: AsyncIO",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: MIT License",
+    "Development Status :: 4 - Beta",
+    "Typing :: Typed",
 ]
 
 # Core is dependency-free (stdlib only). Backends that need extra libraries
@@ -35,7 +37,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://example.com/agentic-workflow-sdk"
+Homepage = "https://github.com/agentflow/agentic-workflow-sdk"
+Repository = "https://github.com/agentflow/agentic-workflow-sdk"
+Changelog = "https://github.com/agentflow/agentic-workflow-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/agentflow/agentic-workflow-sdk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentflow"]

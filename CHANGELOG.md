@@ -46,6 +46,9 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Tooling: Ruff (lint + format), mypy (type check, `agentflow` clean), and
   pip-audit added to the `dev` extra and CI. Codebase formatted and typed to
   zero findings.
+- Release artifacts: `LICENSE` (MIT, SPDX metadata, shipped in the wheel), real
+  project URLs, `CONTRIBUTING.md` (with a release process), and `SECURITY.md`
+  (reporting + security-relevant design notes).
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and
