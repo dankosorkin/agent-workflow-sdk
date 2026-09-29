@@ -35,6 +35,7 @@ class CompiledGraph:
         step_limit: int = 100,
         hooks: Any = None,
         max_node_concurrency: int | None = None,
+        isolate_state: str = "fanout",
     ) -> None:
         from agentflow.observability import Hooks
 
@@ -48,6 +49,7 @@ class CompiledGraph:
             branches=branches,
             step_limit=step_limit,
             max_node_concurrency=max_node_concurrency,
+            isolate_state=isolate_state,
         )
 
     # ------------------------------------------------------------------

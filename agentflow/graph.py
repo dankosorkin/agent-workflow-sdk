@@ -157,13 +157,18 @@ class Graph:
     # ------------------------------------------------------------------
 
     def compile(self, *, checkpointer: Any = None, step_limit: int = 100, hooks: Any = None,
-                max_node_concurrency: int | None = None):
+                max_node_concurrency: int | None = None, isolate_state: str = "fanout"):
         """Validate the graph and return a :class:`CompiledGraph`.
 
         ``hooks`` is an optional :class:`~agentflow.observability.Hooks` for
         lifecycle callbacks / metrics. Imports :mod:`agentflow.compiled` lazily
         so the builder module has no import cycle with the runtime.
         """
+        if isolate_state not in ("fanout", "always", "never"):
+            raise CompilationError(
+                f"isolate_state must be 'fanout', 'always', or 'never', "
+                f"got {isolate_state!r}"
+            )
         self._validate()
         from agentflow.compiled import CompiledGraph
 
@@ -177,6 +182,7 @@ class Graph:
             step_limit=step_limit,
             hooks=hooks,
             max_node_concurrency=max_node_concurrency,
+            isolate_state=isolate_state,
         )
 
     def _validate(self) -> None:

@@ -120,6 +120,18 @@ State values are treated as immutable between super-steps. A node returns a
 partial update `dict[channel, update]`; it never mutates the state it was
 given. The runtime produces the next state by applying each channel's reducer.
 
+Isolation enforcement. The immutable-input contract is backed by a defensive
+copy on concurrent steps, controlled by `compile(isolate_state=...)`:
+
+- `"fanout"` (default) — deep-copy each node's input only when more than one
+  node runs in the same super-step. Linear graphs pay nothing; concurrent
+  fan-out is protected against a node mutating a shared nested container and
+  racing a sibling.
+- `"always"` — deep-copy every node's input (safest; costs a copy per node).
+- `"never"` — share one state object (fastest; the caller guarantees nodes do
+  not mutate their input). Only the returned update is ever merged, so a
+  well-behaved node is unaffected by the choice.
+
 Special channels:
 
 - Every state carries engine-managed channels under reserved names

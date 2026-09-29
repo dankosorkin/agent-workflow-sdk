@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import copy
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -125,6 +126,9 @@ class _Graph:
     step_limit: int
     #: Max nodes run concurrently within one super-step (None = unbounded).
     max_node_concurrency: int | None = None
+    #: State-isolation mode: "fanout" (deep-copy input only when >1 node runs
+    #: this step), "always", or "never".
+    isolate_state: str = "fanout"
 
 
 def _now() -> str:
@@ -244,17 +248,27 @@ async def run(
         for name in frontier:
             await _emit(StreamEvent("node_start", step, node=name))
 
-        # Run the whole frontier concurrently against the same input state,
-        # bounded by max_node_concurrency so a wide fan-out to one external API
-        # does not spike request pressure.
+        # Optionally isolate each node's input so an in-place mutation of a
+        # nested container can't race a sibling. "fanout" (default) pays the
+        # deep-copy cost only when >1 node runs this step; linear graphs pay
+        # nothing. The engine still merges only returned updates via reducers.
+        isolate = graph.isolate_state
+        do_copy = isolate == "always" or (isolate == "fanout" and len(frontier) > 1)
+
+        def _input_for(_name: str) -> Mapping[str, Any]:
+            return copy.deepcopy(state) if do_copy else state
+
+        # Run the whole frontier concurrently, bounded by max_node_concurrency
+        # so a wide fan-out to one external API does not spike request pressure.
         limit = graph.max_node_concurrency
         sem = asyncio.Semaphore(limit) if limit else None
 
         async def _run_bounded(name: str):
+            node_state = _input_for(name)
             if sem is None:
-                return await _run_node(graph, name, state, contexts[name], hooks)
+                return await _run_node(graph, name, node_state, contexts[name], hooks)
             async with sem:
-                return await _run_node(graph, name, state, contexts[name], hooks)
+                return await _run_node(graph, name, node_state, contexts[name], hooks)
 
         coros = [_run_bounded(name) for name in frontier]
         results = await asyncio.gather(*coros, return_exceptions=True)

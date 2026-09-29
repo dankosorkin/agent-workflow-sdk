@@ -35,6 +35,10 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   `retry_after`. HTTP LLM backends accept `max_concurrency` to bound in-flight
   requests, and `compile(max_node_concurrency=...)` bounds how many nodes run
   concurrently within a super-step (limits fan-out request pressure).
+- State isolation: `compile(isolate_state="fanout"|"always"|"never")` (default
+  `"fanout"`) deep-copies a node's input on concurrent super-steps so an
+  in-place mutation of a shared nested container cannot race a sibling. Linear
+  graphs pay no copy cost.
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and
