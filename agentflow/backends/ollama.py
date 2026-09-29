@@ -1,12 +1,16 @@
-# Copyright (C) 2026 Daniel Sorkin
+# Copyright 2026 Daniel Sorkin
 #
-# This file is part of agent-workflow-sdk.
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
 #
-# agent-workflow-sdk is free software: you can redistribute it and/or modify
-# it under the terms of the GNU Affero General Public License
-# as published by the Free Software Foundation, version 3.
+#     http://www.apache.org/licenses/LICENSE-2.0
 #
-# See the LICENSE file for the full license text.
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 """Ollama LLM backend — async HTTP over the local ``/api/chat`` endpoint.
 
@@ -47,8 +51,7 @@ try:
     import httpx
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
-        "OllamaBackend requires httpx. Install the extra: "
-        "pip install 'agent-workflow-sdk[ollama]'"
+        "OllamaBackend requires httpx. Install the extra: pip install 'agent-workflow-sdk[ollama]'"
     ) from exc
 
 __all__ = ["OllamaBackend"]

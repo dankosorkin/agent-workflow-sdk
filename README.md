@@ -518,7 +518,7 @@ never fails on a missing CLI.
 
 ## License
 
-This project is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0).
-See the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License, Version 2.0 (Apache-2.0).
+See the [LICENSE](LICENSE) and [NOTICE](NOTICE) files for details.
 
-Copyright (C) 2026 Daniel Sorkin
+Copyright 2026 Daniel Sorkin

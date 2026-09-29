@@ -54,7 +54,8 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Tooling: Ruff (lint + format), mypy (type check, `agentflow` clean), and
   pip-audit added to the `dev` extra and CI. Codebase formatted and typed to
   zero findings.
-- Release artifacts: `LICENSE` (MIT, SPDX metadata, shipped in the wheel), real
+- Release artifacts: `LICENSE` (Apache-2.0) and `NOTICE`, SPDX metadata,
+  shipped in the wheel; real
   project URLs, `CONTRIBUTING.md` (with a release process), and `SECURITY.md`
   (reporting + security-relevant design notes).
 - `DESIGN.md`: architecture and the invariants/contracts a change must
