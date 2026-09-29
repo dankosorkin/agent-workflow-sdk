@@ -17,7 +17,7 @@ from typing import Any, AsyncIterator, Mapping
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import CheckpointError, GraphError, RunTimeout
 from agentflow.runtime import StreamEvent, _Graph, run
-from agentflow.state import Channel
+from agentflow.state import RESERVED_NAMES, RESERVED_PREFIX, Channel
 
 __all__ = ["CompiledGraph"]
 
@@ -33,9 +33,13 @@ class CompiledGraph:
         branches: Mapping[str, Any],
         checkpointer: Any = None,
         step_limit: int = 100,
+        hooks: Any = None,
     ) -> None:
+        from agentflow.observability import Hooks
+
         self.schema = schema
         self.checkpointer = checkpointer
+        self.hooks = hooks or Hooks()
         self._graph = _Graph(
             channels=channels,
             nodes=nodes,
@@ -66,13 +70,15 @@ class CompiledGraph:
         completed step's checkpoint is intact, so a checkpointed run resumes
         from there.
         """
+        data = self._validate_input(input)
         coro = run(
             self._graph,
-            dict(input or {}),
+            data,
             thread=thread,
             start_frontier=None,
             start_step=0,
             checkpointer=self.checkpointer,
+            hooks=self.hooks,
         )
         cp = await self._run_with_timeout(coro, thread, timeout)
         return dict(cp.state)
@@ -83,7 +89,7 @@ class CompiledGraph:
         """Run from ``input``, yielding :class:`StreamEvent`s as they occur."""
         async for ev in self._stream_run(
             thread=thread,
-            initial_state=dict(input or {}),
+            initial_state=self._validate_input(input),
             start_frontier=None,
             start_step=0,
         ):
@@ -107,6 +113,7 @@ class CompiledGraph:
             start_step=cp.step,
             checkpointer=self.checkpointer,
             resume_values=resume_values,
+            hooks=self.hooks,
         )
         result = await self._run_with_timeout(coro, thread, timeout)
         return dict(result.state)
@@ -145,6 +152,27 @@ class CompiledGraph:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    def _validate_input(self, input: Mapping[str, Any] | None) -> dict[str, Any]:
+        """Reject input keys that are not declared channels, before running.
+
+        A typo in an input key would otherwise sit silently in the state until
+        a node happened to read it. Fail fast with a clear message instead.
+        """
+        data = dict(input or {})
+        if not data:
+            return data
+        declared = set(self._graph.channels)
+        unknown = [
+            k for k in data
+            if k not in declared or k.startswith(RESERVED_PREFIX) or k in RESERVED_NAMES
+        ]
+        if unknown:
+            raise GraphError(
+                f"input has undeclared channel(s) {sorted(unknown)}; "
+                f"declared channels: {sorted(declared)}"
+            )
+        return data
 
     async def _run_with_timeout(self, coro, thread: str, timeout: float | None):
         if timeout is None:
@@ -195,6 +223,7 @@ class CompiledGraph:
                     checkpointer=self.checkpointer,
                     resume_values=resume_values,
                     emit_queue=queue,
+                    hooks=self.hooks,
                 )
             finally:
                 queue.put_nowait(done)

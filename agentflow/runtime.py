@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import contextvars
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Mapping
@@ -24,6 +25,7 @@ from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import InterruptError, NodeError
 from agentflow.events import BackendEvent
 from agentflow.graph import END, START, _ConditionalEdge
+from agentflow.observability import Hooks, _NOOP, _safe
 from agentflow.state import Channel, apply_updates
 
 __all__ = ["Context", "StreamEvent", "run", "current_context"]
@@ -144,17 +146,24 @@ async def _run_node(
     node: str,
     state: Mapping[str, Any],
     ctx: Context,
+    hooks: Hooks = _NOOP,
 ) -> Mapping[str, Any] | None:
     fn = graph.nodes[node]
     token = current_context.set(ctx)
+    await _safe(hooks.on_node_start(ctx.thread, ctx.step, node))
+    t0 = time.monotonic()
     try:
         result = fn(state, ctx)
         if asyncio.iscoroutine(result):
             result = await result
+        await _safe(hooks.on_node_end(ctx.thread, ctx.step, node, time.monotonic() - t0))
         return result
     except InterruptError:
+        # A suspend is not an error; still record the elapsed time.
+        await _safe(hooks.on_node_end(ctx.thread, ctx.step, node, time.monotonic() - t0))
         raise
     except Exception as exc:  # noqa: BLE001 - wrap any node failure
+        await _safe(hooks.on_node_error(ctx.thread, ctx.step, node, exc))
         raise NodeError(node, str(exc)) from exc
     finally:
         current_context.reset(token)
@@ -170,6 +179,7 @@ async def run(
     checkpointer: Any,
     resume_values: Mapping[str, Any] | None = None,
     emit_queue: "asyncio.Queue[StreamEvent] | None" = None,
+    hooks: Hooks = _NOOP,
 ) -> Checkpoint:
     """Drive super-steps until the graph ends, interrupts, or hits the limit.
 
@@ -191,6 +201,8 @@ async def run(
     async def _emit(ev: StreamEvent) -> None:
         if emit_queue is not None:
             emit_queue.put_nowait(ev)
+
+    await _safe(hooks.on_run_start(thread, step))
 
     while frontier:
         if step - start_step >= graph.step_limit:
@@ -218,7 +230,7 @@ async def run(
             await _emit(StreamEvent("node_start", step, node=name))
 
         # Run the whole frontier concurrently against the same input state.
-        coros = [_run_node(graph, name, state, contexts[name]) for name in frontier]
+        coros = [_run_node(graph, name, state, contexts[name], hooks) for name in frontier]
         results = await asyncio.gather(*coros, return_exceptions=True)
 
         # Handle interrupts: if any node interrupted, suspend the run now. The
@@ -226,6 +238,7 @@ async def run(
         for name, res in zip(frontier, results):
             if isinstance(res, InterruptError):
                 await _emit(StreamEvent("interrupt", step, node=name, data=res.payload))
+                await _safe(hooks.on_run_end(thread, step, completed=False))
                 cp = Checkpoint(
                     thread=thread, step=step, state=state, next=tuple(frontier),
                     parent=parent_id, ts=_now(),
@@ -235,6 +248,7 @@ async def run(
                     parent_id = await checkpointer.put(cp)
                 return cp
             if isinstance(res, BaseException):
+                await _safe(hooks.on_run_end(thread, step, completed=False))
                 raise res  # NodeError or a real crash
 
         # No interrupts: fold updates in deterministic frontier order.
@@ -258,8 +272,10 @@ async def run(
         if checkpointer is not None:
             parent_id = await checkpointer.put(cp)
         await _emit(StreamEvent("step", step, data=tuple(next_frontier)))
+        await _safe(hooks.on_step_end(thread, step, tuple(frontier)))
 
         frontier = next_frontier
 
     await _emit(StreamEvent("done", step, data=state))
+    await _safe(hooks.on_run_end(thread, step, completed=True))
     return Checkpoint(thread=thread, step=step, state=state, next=(), parent=parent_id, ts=_now())

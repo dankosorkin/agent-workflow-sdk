@@ -156,11 +156,12 @@ class Graph:
     # Compilation
     # ------------------------------------------------------------------
 
-    def compile(self, *, checkpointer: Any = None, step_limit: int = 100):
+    def compile(self, *, checkpointer: Any = None, step_limit: int = 100, hooks: Any = None):
         """Validate the graph and return a :class:`CompiledGraph`.
 
-        Imports :mod:`agentflow.compiled` lazily so the builder module has no
-        import cycle with the runtime.
+        ``hooks`` is an optional :class:`~agentflow.observability.Hooks` for
+        lifecycle callbacks / metrics. Imports :mod:`agentflow.compiled` lazily
+        so the builder module has no import cycle with the runtime.
         """
         self._validate()
         from agentflow.compiled import CompiledGraph
@@ -173,6 +174,7 @@ class Graph:
             branches=dict(self._branches),
             checkpointer=checkpointer,
             step_limit=step_limit,
+            hooks=hooks,
         )
 
     def _validate(self) -> None:

@@ -20,6 +20,7 @@ from agentflow.state import (
 from agentflow.graph import Graph, START, END, Node, Router
 from agentflow.compiled import CompiledGraph
 from agentflow.runtime import Context, StreamEvent
+from agentflow.observability import Hooks, RunMetrics, NodeStat
 from agentflow.events import (
     Message,
     ToolSpec,
@@ -63,6 +64,8 @@ __all__ = [
     # graph
     "Graph", "START", "END", "Node", "Router", "CompiledGraph",
     "Context", "StreamEvent",
+    # observability
+    "Hooks", "RunMetrics", "NodeStat",
     # events
     "Message", "ToolSpec", "ToolCallSpec",
     "TextRequest", "ChatRequest",
