@@ -89,12 +89,48 @@ concurrently against the same immutable state, their updates are folded
 through the reducers in a deterministic order, and the next frontier is
 computed from the edges. A `step_limit` guards against runaway loops.
 
+Super-steps are all-or-nothing: if any node in a step raises, that step's
+updates are discarded before they touch the state and no checkpoint is written
+for it, so the run stays at the last committed checkpoint. Input to a run is
+validated at start — an undeclared channel key is rejected with a clear error
+rather than sitting unused in the state.
+
 `CompiledGraph` gives you:
 
-- `await app.invoke(input, thread=...)` — run to completion, return state.
+- `await app.invoke(input, thread=..., timeout=...)` — run to completion,
+  return state. `timeout` bounds the whole run; on expiry it raises
+  `RunTimeout` and the last checkpoint is preserved for resume.
 - `app.stream(input, thread=...)` — async-iterate `StreamEvent`s as they occur.
 - `await app.resume(thread, value=...)` — continue a suspended run.
 - `await app.get_state(thread)` / `app.history(thread)` — inspect checkpoints.
+
+### Subgraphs
+
+A compiled graph composes as a node in another graph:
+
+```python
+parent.add_node("sub", compiled_subgraph)              # channels shared by name
+parent.add_subgraph("sub", compiled_subgraph,          # or map explicitly
+                    input_map={"query": "q"}, output_map={"answer": "result"})
+```
+
+A subgraph runs on an isolated checkpoint sub-thread and merges its result
+back through the parent's reducers. Use `output_map` to route a result into a
+distinct parent channel and avoid double-counting accumulator channels.
+
+### Observability
+
+Pass a `Hooks` implementation to `compile(hooks=...)` for lifecycle callbacks
+(`on_run_start`, `on_node_start/end/error`, `on_step_end`, `on_run_end`). A
+hook raising never breaks a run. `RunMetrics` is a ready-made `Hooks` that
+records per-node call counts, errors, and durations:
+
+```python
+from agentflow import RunMetrics
+m = RunMetrics()
+await g.compile(hooks=m).invoke({...})
+print(m.summary())   # {"steps": 3, "completed": True, "nodes": {...}}
+```
 
 ## Backends
 
@@ -107,9 +143,9 @@ way.
   (`claude -p --output-format stream-json`).
 - LLM backends (`LLMBackend`) are stateless: messages in, token stream out.
   They never run tools themselves — a tool call is a request the graph
-  fulfils. Available: `OllamaBackend` (local `/api/chat`) and `OpenAIBackend`
+  fulfils. Available: `OllamaBackend` (local `/api/chat`), `OpenAIBackend`
   (any `/v1/chat/completions` endpoint — OpenAI, Groq, Together, vLLM, LM
-  Studio, and Ollama's own `/v1` shim).
+  Studio, and Ollama's own `/v1` shim), and `AnthropicBackend` (Messages API).
 
 ```python
 from agentflow.backends.kiro import KiroBackend
@@ -117,12 +153,14 @@ from agentflow.backends.codex import CodexBackend
 from agentflow.backends.claude_code import ClaudeCodeBackend
 from agentflow.backends.ollama import OllamaBackend
 from agentflow.backends.openai import OpenAIBackend
+from agentflow.backends.anthropic import AnthropicBackend
 
 agent = KiroBackend("vibe", engine="v3")          # persistent session
 codex = CodexBackend(sandbox="read-only")          # one-shot per turn
 claude = ClaudeCodeBackend(model="sonnet")         # one-shot per turn
 llm = OllamaBackend("llama3.2")                     # local HTTP
 openai = OpenAIBackend("gpt-4o-mini", api_key="...")  # any OpenAI-compatible API
+anthropic = AnthropicBackend("claude-sonnet-4", api_key="...")  # Messages API
 
 await agent.start()
 async for event in agent.prompt("summarize the repo"):
@@ -216,6 +254,12 @@ See `examples/tool_loop_ollama.py` for a runnable version, and
 backend (Codex/Claude/Kiro) with an LLM tool loop, composing a compiled
 sub-graph inside a node.
 
+`agentflow.prebuilt` also ships `with_retry(node, retries=..., on=...)` and
+`with_timeout(node, seconds=...)` — composable wrappers that add retry with
+exponential backoff and per-node timeouts. Both let an `InterruptError`
+through untouched, so human-in-the-loop suspends are never retried or timed
+out.
+
 ## Project layout
 
 ```text
@@ -226,11 +270,12 @@ agentflow/
   compiled.py         CompiledGraph runnable
   events.py           messages, requests, streaming events
   errors.py           exception hierarchy
-  backends/           base protocols + kiro + ollama adapters
+  observability.py    Hooks + RunMetrics
+  backends/           base protocols + kiro/codex/claude_code/ollama/openai/anthropic
   checkpoint/         Checkpointer protocol + memory + file
-  prebuilt/           iterate_until_converged
+  prebuilt/           iterate_until_converged, tool_loop, with_retry/with_timeout
 examples/             runnable examples
-tests/                pytest suite (async)
+tests/                pytest suite (async; offline by default, `-m live` for real backends)
 DESIGN.md             architecture and contracts
 ```
 
