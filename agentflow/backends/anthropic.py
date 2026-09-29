@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Anthropic LLM backend — streaming Messages API (``/v1/messages``).
 
 An :class:`~agentflow.backends.base.LLMBackend` speaking Anthropic's Messages
@@ -12,7 +22,7 @@ wire format over Server-Sent Events. Distinct from the OpenAI shape:
   (carries the final ``stop_reason``), ``message_stop``.
 
 Requires the ``ollama`` extra (which provides ``httpx`` — the dependency is
-shared): ``pip install 'agentic-workflow-sdk[ollama]'``.
+shared): ``pip install 'agent-workflow-sdk[ollama]'``.
 """
 
 from __future__ import annotations
@@ -41,7 +51,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
         "AnthropicBackend requires httpx. Install the extra: "
-        "pip install 'agentic-workflow-sdk[ollama]'"
+        "pip install 'agent-workflow-sdk[ollama]'"
     ) from exc
 
 __all__ = ["AnthropicBackend"]

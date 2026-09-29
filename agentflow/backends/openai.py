@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """OpenAI-compatible LLM backend — streaming ``/v1/chat/completions``.
 
 An :class:`~agentflow.backends.base.LLMBackend` speaking the OpenAI Chat
@@ -14,7 +24,7 @@ Two things differ from the Ollama backend:
   string pieces), so they must be assembled across chunks.
 
 Requires the ``ollama`` extra (which provides ``httpx``); the dependency is
-shared. Install: ``pip install 'agentic-workflow-sdk[ollama]'``.
+shared. Install: ``pip install 'agent-workflow-sdk[ollama]'``.
 """
 
 from __future__ import annotations
@@ -42,7 +52,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
         "OpenAIBackend requires httpx. Install the extra: "
-        "pip install 'agentic-workflow-sdk[ollama]'"
+        "pip install 'agent-workflow-sdk[ollama]'"
     ) from exc
 
 __all__ = ["OpenAIBackend"]

@@ -1,13 +1,13 @@
-# agentic-workflow-sdk
+# agent-workflow-sdk
 
 An async-first, LangGraph-style SDK for building agent workflows from
 composable pieces. You describe a workflow as a graph of nodes over a typed,
 reducer-based state, and run it against a pluggable backend — a coding agent
-(Kiro, and later Codex or Claude Code) or a plain LLM (Ollama and any
-OpenAI-compatible endpoint).
+(Kiro, Codex, or Claude Code) or a plain LLM (Ollama, any OpenAI-compatible
+endpoint, or Anthropic).
 
 The import root is `agentflow`. The distribution name is
-`agentic-workflow-sdk`.
+`agent-workflow-sdk`.
 
 ## Why
 

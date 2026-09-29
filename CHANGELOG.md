@@ -1,21 +1,16 @@
 # Changelog
 
-All notable changes to `agentic-workflow-sdk` are documented here. The format
+All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
-### Changed (breaking)
-
-- Agent backends now require an explicit `permission` policy — `AllowAll` is no
-  longer the default. Construct with `permission=AllowAll()` (trusted local
-  sandbox), `DenyAll()`, `Interactive()`, or `ToolAllowlist(...)`. Migration:
-  add `permission=...` to every `KiroBackend`/`CodexBackend`/`ClaudeCodeBackend`
-  call.
-
 ### Added
 
+- Agent backends require an explicit `permission` policy — there is no
+  auto-approve default. Construct with `permission=AllowAll()` (trusted local
+  sandbox only), `DenyAll()`, `Interactive()`, or `ToolAllowlist(...)`.
 - Control-plane health/monitoring surface: `RunQueue.stats()` returns a
   `QueueStats` (queue depth by status plus `expired_leases`, the running runs
   whose lease is past due and await re-claim), and `WorkerPool.health()` returns
@@ -62,6 +57,10 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Release artifacts: `LICENSE` (MIT, SPDX metadata, shipped in the wheel), real
   project URLs, `CONTRIBUTING.md` (with a release process), and `SECURITY.md`
   (reporting + security-relevant design notes).
+- `DESIGN.md`: architecture and the invariants/contracts a change must
+  preserve (dependency direction, execution model, checkpointer/store/control-
+  plane contracts, security posture, out-of-scope). Referenced from
+  `CONTRIBUTING.md` and the README layout.
 - `OtelHooks` (in the `otel` extra): an OpenTelemetry `Hooks` exporter emitting
   a span per run and per node, recording errors and backend events, with a
   versioned attribute schema (`EVENT_SCHEMA_VERSION`).
@@ -167,5 +166,5 @@ workflows with pluggable agent and LLM backends.
   GitHub Actions CI (offline suite + wheel build), and a `live` pytest marker
   separating opt-in real-backend smoke tests from the hermetic default run.
 
-[Unreleased]: https://example.com/agentic-workflow-sdk/compare/v0.1.0...HEAD
-[0.1.0]: https://example.com/agentic-workflow-sdk/releases/tag/v0.1.0
+[Unreleased]: https://github.com/dankosorkin/agent-workflow-sdk/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/dankosorkin/agent-workflow-sdk/releases/tag/v0.1.0

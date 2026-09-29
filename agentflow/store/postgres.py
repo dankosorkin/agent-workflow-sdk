@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """PostgreSQL-backed durable Store for cross-thread application memory.
 
 Items live in a table keyed by ``(namespace, key)`` where ``namespace`` is a
@@ -6,7 +16,7 @@ Items live in a table keyed by ``(namespace, key)`` where ``namespace`` is a
 out of every read (``NOW()``) so expired memory never surfaces.
 
 Uses asyncpg. Requires the ``postgres`` extra:
-``pip install 'agentic-workflow-sdk[postgres]'``.
+``pip install 'agent-workflow-sdk[postgres]'``.
 """
 
 from __future__ import annotations
@@ -23,7 +33,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
         "PostgresStore requires asyncpg. Install the extra: "
-        "pip install 'agentic-workflow-sdk[postgres]'"
+        "pip install 'agent-workflow-sdk[postgres]'"
     ) from exc
 
 __all__ = ["PostgresStore"]

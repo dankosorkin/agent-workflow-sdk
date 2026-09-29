@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Shared time/TTL helpers for Store backends, so Memory and Postgres agree
 on timestamp format and expiry semantics."""
 

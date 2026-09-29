@@ -1,6 +1,6 @@
 # Contributing
 
-Thanks for your interest in `agentic-workflow-sdk`.
+Thanks for your interest in `agent-workflow-sdk`.
 
 ## Development setup
 
@@ -40,8 +40,10 @@ Each live test self-skips when its backend is absent.
 
 ## Architecture
 
-Read `DESIGN.md` first. The dependency direction is strict: state → engine →
-backends; the engine never imports a backend. Please preserve that boundary.
+Read `DESIGN.md` first — it records the invariants and contracts your change
+must preserve. In short: the dependency direction is strict, state → engine →
+backends, and the engine never imports a backend. Please preserve that
+boundary.
 
 ## Commit and PR conventions
 

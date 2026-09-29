@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """PostgreSQL-backed durable checkpointer for production, multi-process runs.
 
 Each checkpoint is a row in a ``checkpoints`` table keyed by ``(thread, step)``
@@ -11,7 +21,7 @@ Postgres is the recommended production-durability default: unlike Redis (which
 needs AOF/RDB tuning to survive a crash) a committed row is durable by design.
 
 Uses asyncpg. Requires the ``postgres`` extra:
-``pip install 'agentic-workflow-sdk[postgres]'``.
+``pip install 'agent-workflow-sdk[postgres]'``.
 """
 
 from __future__ import annotations
@@ -30,7 +40,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
         "PostgresCheckpointer requires asyncpg. Install the extra: "
-        "pip install 'agentic-workflow-sdk[postgres]'"
+        "pip install 'agent-workflow-sdk[postgres]'"
     ) from exc
 
 __all__ = ["PostgresCheckpointer"]

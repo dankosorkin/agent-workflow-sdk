@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Daniel Sorkin
 #
-# This file is part of AgentFlow.
+# This file is part of agent-workflow-sdk.
 #
-# AgentFlow is free software: you can redistribute it and/or modify
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License
 # as published by the Free Software Foundation, version 3.
 #

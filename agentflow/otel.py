@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """OpenTelemetry exporter as a :class:`~agentflow.observability.Hooks`.
 
 Turns a run into OTel spans: one span per run (per thread) and a child span
@@ -6,7 +16,7 @@ and backend events (from ``ctx.emit``) added as span events. This is purely a
 listener over the existing hooks — the engine is unaware of it.
 
 Requires the ``otel`` extra:
-``pip install 'agentic-workflow-sdk[otel]'``.
+``pip install 'agent-workflow-sdk[otel]'``.
 
     from agentflow.otel import OtelHooks
     app = g.compile(hooks=OtelHooks())              # uses the global tracer
@@ -27,7 +37,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
         "OtelHooks requires OpenTelemetry. Install the extra: "
-        "pip install 'agentic-workflow-sdk[otel]'"
+        "pip install 'agent-workflow-sdk[otel]'"
     ) from exc
 
 __all__ = ["OtelHooks", "EVENT_SCHEMA_VERSION"]

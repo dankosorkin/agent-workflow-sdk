@@ -1,10 +1,20 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Ollama LLM backend — async HTTP over the local ``/api/chat`` endpoint.
 
 An :class:`~agentflow.backends.base.LLMBackend`: stateless per call, messages
 in, token stream out. It never runs tools itself — a tool call the model
 emits is a request the graph fulfils and feeds back on the next call.
 
-Requires the ``ollama`` extra (``pip install agentic-workflow-sdk[ollama]``),
+Requires the ``ollama`` extra (``pip install agent-workflow-sdk[ollama]``),
 which pulls in ``httpx``. Importing this module without httpx raises a clear
 error rather than failing obscurely.
 
@@ -38,7 +48,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
         "OllamaBackend requires httpx. Install the extra: "
-        "pip install 'agentic-workflow-sdk[ollama]'"
+        "pip install 'agent-workflow-sdk[ollama]'"
     ) from exc
 
 __all__ = ["OllamaBackend"]

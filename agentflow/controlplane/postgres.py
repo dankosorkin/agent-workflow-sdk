@@ -1,8 +1,8 @@
 # Copyright (C) 2026 Daniel Sorkin
 #
-# This file is part of AgentFlow.
+# This file is part of agent-workflow-sdk.
 #
-# AgentFlow is free software: you can redistribute it and/or modify
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License
 # as published by the Free Software Foundation, version 3.
 #
@@ -18,7 +18,7 @@ blocking). A time-bounded lease plus periodic ``heartbeat`` means a crashed
 worker's run becomes claimable again once its lease expires.
 
 Uses asyncpg. Requires the ``postgres`` extra:
-``pip install 'agentic-workflow-sdk[postgres]'``.
+``pip install 'agent-workflow-sdk[postgres]'``.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
         "PostgresRunQueue requires asyncpg. Install the extra: "
-        "pip install 'agentic-workflow-sdk[postgres]'"
+        "pip install 'agent-workflow-sdk[postgres]'"
     ) from exc
 
 __all__ = ["PostgresRunQueue"]

@@ -3,14 +3,14 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "agentic-workflow-sdk"
+name = "agent-workflow-sdk"
 version = "0.1.0"
 description = "Async-first, LangGraph-style SDK for building agent workflows with pluggable agent and LLM backends."
 readme = "README.md"
 requires-python = ">=3.11"
-license = "MIT"
+license = "AGPL-3.0"
 license-files = ["LICENSE"]
-authors = [{ name = "AgentFlow contributors" }]
+authors = [{ name = "Daniel Sorkin" }]
 keywords = ["agents", "workflow", "graph", "llm", "orchestration", "async"]
 classifiers = [
     "Programming Language :: Python :: 3.11",
@@ -43,10 +43,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/agentflow/agentic-workflow-sdk"
-Repository = "https://github.com/agentflow/agentic-workflow-sdk"
-Changelog = "https://github.com/agentflow/agentic-workflow-sdk/blob/main/CHANGELOG.md"
-Issues = "https://github.com/agentflow/agentic-workflow-sdk/issues"
+Homepage = "https://github.com/dankosorkin/agent-workflow-sdk"
+Repository = "https://github.com/dankosorkin/agent-workflow-sdk"
+Changelog = "https://github.com/dankosorkin/agent-workflow-sdk/blob/main/CHANGELOG.md"
+Issues = "https://github.com/dankosorkin/agent-workflow-sdk/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agentflow"]

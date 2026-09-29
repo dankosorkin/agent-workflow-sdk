@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Transactional SQLite checkpointer for durable, multi-writer-safe runs.
 
 Unlike :class:`~agentflow.checkpoint.file.FileCheckpointer` (single-writer,

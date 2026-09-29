@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of agent-workflow-sdk.
+#
+# agent-workflow-sdk is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Redis-backed durable checkpointer for distributed / multi-process runs.
 
 Each checkpoint is stored as a JSON string at ``{prefix}:{thread}:cp:{step}``,
@@ -8,7 +18,7 @@ together; re-writing an existing step (a resumed super-step) overwrites the
 value and leaves the index idempotent.
 
 Uses redis-py's asyncio client. Requires the ``redis`` extra:
-``pip install 'agentic-workflow-sdk[redis]'``.
+``pip install 'agent-workflow-sdk[redis]'``.
 """
 
 from __future__ import annotations
@@ -27,7 +37,7 @@ try:
 except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
     raise ModuleNotFoundError(
         "RedisCheckpointer requires redis. Install the extra: "
-        "pip install 'agentic-workflow-sdk[redis]'"
+        "pip install 'agent-workflow-sdk[redis]'"
     ) from exc
 
 __all__ = ["RedisCheckpointer"]
