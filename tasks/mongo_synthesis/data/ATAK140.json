@@ -1,0 +1,18 @@
+{
+  "_id": {
+    "$oid": "6a6867bccd11bcc79bb0dad1"
+  },
+  "LOAD_DATE": {
+    "$numberLong": "20260728112410"
+  },
+  "BRAIN_TABLE_NAME": "ATAK140",
+  "TIMESTAMP_SHINUA_ROW": {
+    "$date": "2026-07-28T11:25:24.000Z"
+  },
+  "MISPAR_KTOVET": 13934019,
+  "MISPAR_BANK": 912,
+  "MISPAR_SNIF": 627,
+  "MPR_TA_DOAR_BASNIF": 44453,
+  "KOD_MARC_MAKOR": 2,
+  "SIFRUR_CDS_LE_ISKA": 0
+}

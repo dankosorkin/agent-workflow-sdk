@@ -1,0 +1,15 @@
+{
+  "name": "aggregation-eval",
+  "version": "1.0.0",
+  "description": "MongoDB aggregation evaluation runner",
+  "main": "measure.js",
+  "scripts": {
+    "measure": "node measure.js"
+  },
+  "dependencies": {
+    "mongodb": "6.8.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

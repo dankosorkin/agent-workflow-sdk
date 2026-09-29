@@ -1,0 +1,98 @@
+[
+  {
+    "_id": { "$oid": "6a60ea403313c75958f8a336" },
+    "SIFRUR_LAKOACH": { "$numberLong": "3271847" },
+    "MISPAR_KTOVET": { "$numberLong": "24730668" },
+    "SUG_KTOVET": 1,
+    "SUG_MIVNE_KTOVET": 90,
+    "RAMAT_ADIFUT": 1,
+    "KOD_KTOVET_MSB": 0,
+    "KOD_SIBAT_SBS_KTV": 0,
+    "MAKOR_BE_IMS": " ",
+    "TAARICH10_IDKUN": { "$date": "2026-04-17T00:00:00.000Z" }
+  },
+  {
+    "_id": { "$oid": "6a60ea403313c75958f8a337" },
+    "SIFRUR_LAKOACH": { "$numberLong": "3271847" },
+    "MISPAR_KTOVET": { "$numberLong": "7" },
+    "SUG_KTOVET": 1,
+    "SUG_MIVNE_KTOVET": 12,
+    "RAMAT_ADIFUT": 1,
+    "KOD_KTOVET_MSB": 0,
+    "KOD_SIBAT_SBS_KTV": 0,
+    "MAKOR_BE_IMS": " ",
+    "TAARICH10_IDKUN": { "$date": "2026-04-17T00:00:00.000Z" }
+  },
+  {
+    "_id": { "$oid": "6a60ea403313c75958f8a338" },
+    "SIFRUR_LAKOACH": { "$numberLong": "3271847" },
+    "MISPAR_KTOVET": { "$numberLong": "3237430" },
+    "SUG_KTOVET": 1,
+    "SUG_MIVNE_KTOVET": 16,
+    "RAMAT_ADIFUT": 1,
+    "KOD_KTOVET_MSB": 0,
+    "KOD_SIBAT_SBS_KTV": 0,
+    "MAKOR_BE_IMS": " ",
+    "TAARICH10_IDKUN": { "$date": "2026-04-17T00:00:00.000Z" }
+  },
+  {
+    "_id": { "$oid": "6a60ea403313c75958f8a339" },
+    "SIFRUR_LAKOACH": { "$numberLong": "3271847" },
+    "MISPAR_KTOVET": { "$numberLong": "3522403" },
+    "SUG_KTOVET": 1,
+    "SUG_MIVNE_KTOVET": 20,
+    "RAMAT_ADIFUT": 1,
+    "KOD_KTOVET_MSB": 0,
+    "KOD_SIBAT_SBS_KTV": 0,
+    "MAKOR_BE_IMS": " ",
+    "TAARICH10_IDKUN": { "$date": "2026-04-17T00:00:00.000Z" }
+  },
+  {
+    "_id": { "$oid": "6a60ea403313c75958f8a340" },
+    "SIFRUR_LAKOACH": { "$numberLong": "3271847" },
+    "MISPAR_KTOVET": { "$numberLong": "13934019" },
+    "SUG_KTOVET": 1,
+    "SUG_MIVNE_KTOVET": 40,
+    "RAMAT_ADIFUT": 1,
+    "KOD_KTOVET_MSB": 0,
+    "KOD_SIBAT_SBS_KTV": 0,
+    "MAKOR_BE_IMS": " ",
+    "TAARICH10_IDKUN": { "$date": "2026-04-17T00:00:00.000Z" }
+  },
+  {
+    "_id": { "$oid": "6a60ea403313c75958f8a341" },
+    "SIFRUR_LAKOACH": { "$numberLong": "3271847" },
+    "MISPAR_KTOVET": { "$numberLong": "14241076" },
+    "SUG_KTOVET": 1,
+    "SUG_MIVNE_KTOVET": 50,
+    "RAMAT_ADIFUT": 1,
+    "KOD_KTOVET_MSB": 0,
+    "KOD_SIBAT_SBS_KTV": 0,
+    "MAKOR_BE_IMS": " ",
+    "TAARICH10_IDKUN": { "$date": "2026-04-17T00:00:00.000Z" }
+  },
+  {
+    "_id": { "$oid": "6a60ea403313c75958f8a342" },
+    "SIFRUR_LAKOACH": { "$numberLong": "3271847" },
+    "MISPAR_KTOVET": { "$numberLong": "3679550" },
+    "SUG_KTOVET": 1,
+    "SUG_MIVNE_KTOVET": 60,
+    "RAMAT_ADIFUT": 1,
+    "KOD_KTOVET_MSB": 0,
+    "KOD_SIBAT_SBS_KTV": 0,
+    "MAKOR_BE_IMS": " ",
+    "TAARICH10_IDKUN": { "$date": "2026-04-17T00:00:00.000Z" }
+  },
+  {
+    "_id": { "$oid": "6a60ea403313c75958f8a343" },
+    "SIFRUR_LAKOACH": { "$numberLong": "3271847" },
+    "MISPAR_KTOVET": { "$numberLong": "6835460" },
+    "SUG_KTOVET": 1,
+    "SUG_MIVNE_KTOVET": 66,
+    "RAMAT_ADIFUT": 1,
+    "KOD_KTOVET_MSB": 0,
+    "KOD_SIBAT_SBS_KTV": 0,
+    "MAKOR_BE_IMS": " ",
+    "TAARICH10_IDKUN": { "$date": "2026-04-17T00:00:00.000Z" }
+  }
+]

@@ -1,0 +1,73 @@
+{
+  "_id": {
+    "$oid": "6a4a815107d868b43416528a"
+  },
+  "LOAD_DATE": {
+    "$numberLong": "20260705183854"
+  },
+  "BRAIN_TABLE_NAME": "ATAL100",
+  "TIMESTAMP_SHINUA_ROW": {
+    "$date": "2026-07-05T18:38:58.000Z"
+  },
+  "SIFRUR_LAKOACH": {
+    "$numberLong": "11338112"
+  },
+  "MISPAR_BANK": 912,
+  "MPR_MZH_MKZR_CDS": 999999999,
+  "MPR_ZIHUY_LAKOACH": "999999999999999",
+  "MISPAR_SAUNDEX": {
+    "$numberLong": "21543656000"
+  },
+  "SUG_MISMACH_MEZAHE": 4,
+  "KOD_ERETZ": 916,
+  "MPR_SIDURI_LAKOACH": 10,
+  "KOD_SIVUG_LAKOACH": 1,
+  "STATUS_PEILUT_LAK": 0,
+  "TAR10_HAFSAKAT_PLT": {
+    "$date": {
+      "$numberLong": "-62135596800000"
+    }
+  },
+  "TAR10_IDKUN_PLT": {
+    "$date": {
+      "$numberLong": "-62135596800000"
+    }
+  },
+  "ANAF_MESHEK_CHADAS": 7990,
+  "TAR10_IDK_ANAF_MSK": {
+    "$date": "2009-12-23T00:00:00.000Z"
+  },
+  "TAARICH10_PTICHA": {
+    "$date": "2009-12-23T00:00:00.000Z"
+  },
+  "TAARICH10_IDKUN": {
+    "$date": "2011-08-31T00:00:00.000Z"
+  },
+  "SHEM_LAKOACH_KLL": "עזרא מזרחי",
+  "SHEM_LAK_KLL_LOAZI": "FDIQHMQV OIQH",
+  "MPR_SAUNDEX_LOAZI": {
+    "$numberLong": "0"
+  },
+  "ERECH_LAKOACH": 0,
+  "KOD_IMUT_MIRSHAM": 0,
+  "TAR10_BZA_IMUT_RSM": {
+    "$date": {
+      "$numberLong": "-62135596800000"
+    }
+  },
+  "KOD_LAKOACH_PTNZL": 0,
+  "TAR10_IDKLAK_PTNZL": {
+    "$date": "2009-12-23T00:00:00.000Z"
+  },
+  "KOD_ERETZ_TOSHAVUT": 916,
+  "KOD_MARC_MAKOR": 0,
+  "SIFRUR_CDS_LE_ISKA": {
+    "$numberLong": "269568599"
+  },
+  "TAR10_TCL_PLT_ISK": {
+    "$date": {
+      "$numberLong": "-62135596800000"
+    }
+  },
+  "KOD_SIBAT_IDK_TSV": 0
+}

@@ -1,0 +1,21 @@
+{
+  "_id": {
+    "$oid": "6a6867b8b4149cbd295f90df"
+  },
+  "LOAD_DATE": {
+    "$numberLong": "20260728112410"
+  },
+  "BRAIN_TABLE_NAME": "ATAK116",
+  "TIMESTAMP_SHINUA_ROW": {
+    "$date": "2026-07-28T11:24:57.000Z"
+  },
+  "MISPAR_KTOVET": 3237430,
+  "SHEM_RHV_MNHL_LAZ": " ",
+  "MPR_BAYIT_MINHALI": 0,
+  "SHEM_YISHUV_CHUL": "BEER SHEVA",
+  "MIKUD_CHUL": " ",
+  "SHEM_MEDINA": " ",
+  "KOD_ERETZ": 0,
+  "KOD_MARC_MAKOR": 1,
+  "SIFRUR_CDS_LE_ISKA": 0
+}

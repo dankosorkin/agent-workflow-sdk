@@ -1,0 +1,25 @@
+{
+  "_id": {
+    "$oid": "6a4a7b8e1d15d5a597d44886"
+  },
+  "LOAD_DATE": {
+    "$numberLong": "20260705183920"
+  },
+  "BRAIN_TABLE_NAME": "ATAL122",
+  "TIMESTAMP_SHINUA_ROW": {
+    "$date": "2026-07-05T18:39:26.000Z"
+  },
+  "SIFRUR_LAKOACH": 7,
+  "SUG_HATZHARA": 2,
+  "TAR10_TOKEF_ME": {
+    "$date": "2016-01-19T00:00:00.000Z"
+  },
+  "TAR10_TOKEF_AD": {
+    "$date": "2999-12-31T00:00:00.000Z"
+  },
+  "MISPAR_SNIF_MAZRIM": 303,
+  "KOD_TEUR_HATZHARA": 29,
+  "KOD_MARC_MAKOR": 0,
+  "SIFRUR_CDS_LE_ISKA": 2919821438,
+  "KOD_OFEN_CHATIMA": 0
+}

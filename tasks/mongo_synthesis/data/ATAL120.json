@@ -1,0 +1,22 @@
+{
+  "_id": {
+    "$oid": "6a4a7b001ba39d4e643b0b99"
+  },
+  "LOAD_DATE": {
+    "$numberLong": "20260705183920"
+  },
+  "BRAIN_TABLE_NAME": "ATAL120",
+  "TIMESTAMP_SHINUA_ROW": {
+    "$date": "2026-07-05T18:39:26.000Z"
+  },
+  "SIFRUR_LAKOACH": 35,
+  "TCHUM_HESKEM": 30,
+  "SUG_HESKEM": 310,
+  "KOD_MAHADURA": 1,
+  "MISPAR_SNIF_MAZRIM": 960,
+  "TAARICH10_PTICHA": {
+    "$date": "2017-03-27T00:00:00.000Z"
+  },
+  "KOD_MARC_MAKOR": 0,
+  "SIFRUR_CDS_LE_ISKA": 1001259245
+}

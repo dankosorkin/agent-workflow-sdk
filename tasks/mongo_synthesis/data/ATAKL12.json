@@ -1,0 +1,31 @@
+{
+  "_id": {
+    "$oid": "6a68683d11b035d1d9912ada"
+  },
+  "LOAD_DATE": {
+    "$numberLong": "20260728112410"
+  },
+  "BRAIN_TABLE_NAME": "ATAKL12",
+  "TIMESTAMP_SHINUA_ROW": {
+    "$date": "2026-07-28T11:26:24.000Z"
+  },
+  "SIFRUR_LAKOACH": {
+    "$numberLong": "18"
+  },
+  "MISPAR_KTOVET": {
+    "$numberLong": "1511228"
+  },
+  "SUG_KTOVET": 1,
+  "MISPAR_KNISA": " ",
+  "MPR_DIRA_MINHALI": 5,
+  "SHEM_BE_TEVAT_DOAR": " ",
+  "TA_CHALUKAT_DOAR": 0,
+  "OT_BE_MISPAR_BAYIT": " ",
+  "MEAFYEN_NOSAF": " ",
+  "SHEM_MAKOM_AVODA": " ",
+  "KOD_MARC_MAKOR": 1,
+  "SIFRUR_CDS_LE_ISKA": {
+    "$numberLong": "0"
+  },
+  "contact_stg_key": "18|1511228|1"
+}

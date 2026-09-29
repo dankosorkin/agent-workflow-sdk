@@ -1,0 +1,126 @@
+{
+  "collections": [
+    {
+      "name": "ATAKL10",
+      "docCount": 1348790,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAKL12",
+      "docCount": 600447,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAK112",
+      "docCount": 600447,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAK116",
+      "docCount": 118094,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAK120",
+      "docCount": 68950,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAK140",
+      "docCount": 59169,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAK150",
+      "docCount": 88212,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAK160",
+      "docCount": 197365,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAK166",
+      "docCount": 88595,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    },
+    {
+      "name": "ATAK190",
+      "docCount": 127958,
+      "uniqueKey": { "fields": ["MISPAR_KTOVET"], "source": "inferred" }
+    }
+  ],
+  "relationships": [
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAK112",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAKL12",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAK112",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAKL12",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAK116",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAK120",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAK140",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAK150",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAK160",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAK166",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    },
+    {
+      "from": "ATAKL10",
+      "fromField": "MISPAR_KTOVET",
+      "to": "ATAK190",
+      "toField": "MISPAR_KTOVET",
+      "cardinality": "1:1"
+    }
+  ]
+}

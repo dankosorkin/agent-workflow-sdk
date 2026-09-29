@@ -1,0 +1,35 @@
+{
+  "_id": {
+    "$oid": "6a4a7c00d675a87841f06df4"
+  },
+  "LOAD_DATE": {
+    "$numberLong": "20260705183854"
+  },
+  "BRAIN_TABLE_NAME": "ATAL114",
+  "TIMESTAMP_SHINUA_ROW": {
+    "$date": "2026-07-05T18:38:58.000Z"
+  },
+  "SIFRUR_LAKOACH": {
+    "$numberLong": "7"
+  },
+  "KOD_TOSHAV_EZRACH": 1,
+  "KOD_ERETZ": 212,
+  "TAARICH10_PTICHA": {
+    "$date": "1983-08-16T00:00:00.000Z"
+  },
+  "TAARICH10_IDKUN": {
+    "$date": "1999-06-18T00:00:00.000Z"
+  },
+  "KOD_MARC_MAKOR": 0,
+  "KOD_SUG_TOSHAVUT": 0,
+  "MEZAHE30_TIN": " ",
+  "KOD_SBA_EI_KYM_TIN": 0,
+  "MLL_SBR_EI_KYM_TIN": " ",
+  "KOD_SIBAT_IDK_TSV": 0,
+  "TEUR_SIBAT_IDK_TSV": " ",
+  "KOD_TSV_EZRC_RSN": 1,
+  "SIFRUR_CDS_LE_ISKA": {
+    "$numberLong": "0"
+  },
+  "KOD_TKNT_TVNT_TIN": 0
+}

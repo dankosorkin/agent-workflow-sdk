@@ -1,0 +1,19 @@
+{
+  "_id": {
+    "$oid": "6a4a7b41bad2dd92d87346c3"
+  },
+  "LOAD_DATE": {
+    "$numberLong": "20260705183920"
+  },
+  "BRAIN_TABLE_NAME": "ATAK150",
+  "TIMESTAMP_SHINUA_ROW": {
+    "$date": "2026-07-05T18:39:26.000Z"
+  },
+  "MISPAR_KTOVET": 14241076,
+  "KOD_BANK_SWIFT": "15",
+  "KOD_MEDINA_SWIFT": "15",
+  "KOD_IR_SWIFT": "15",
+  "MPRSNT_O_YCD_O_NSF": "0",
+  "KOD_MARC_MAKOR": 0,
+  "SIFRUR_CDS_LE_ISKA": 19674478
+}
