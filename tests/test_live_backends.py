@@ -80,6 +80,25 @@ async def test_live_openai_compatible_via_ollama():
     assert text or (final.text or "")
 
 
+async def test_live_openai_real():
+    """Real OpenAI-compatible endpoint, when OPENAI_API_KEY is configured."""
+    key = os.environ.get("OPENAI_API_KEY")
+    if not key:
+        pytest.skip("OPENAI_API_KEY not set")
+    from agentflow.backends.openai import OpenAIBackend
+
+    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
+    backend = OpenAIBackend(model, base_url=base_url, api_key=key)
+    await backend.start()
+    try:
+        text, final = await _collect(backend.chat([Message(role="user", content=PROMPT)]))
+    finally:
+        await backend.close()
+    assert final is not None
+    assert (text + (final.text or "")).strip()
+
+
 async def test_live_codex():
     if not shutil.which("codex"):
         pytest.skip("codex not installed")

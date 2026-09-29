@@ -7,3 +7,4 @@ telemetry/
 *.egg-info/
 dist/
 build/
+.env
