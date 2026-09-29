@@ -72,3 +72,39 @@ async def test_allowlist_custom_fallback():
 async def test_allowlist_deny_fallback_explicit():
     policy = ToolAllowlist(set(), fallback=DenyAll())
     assert isinstance(await policy.decide(_req("x")), Deny)
+
+
+async def test_callback_policy_allow_and_deny():
+    from agentflow.backends.base import Callback
+
+    async def yes(req):
+        return "y"
+
+    async def no(req):
+        return "n"
+
+    assert isinstance(await Callback(yes).decide(_req("fs_write")), Allow)
+    assert isinstance(await Callback(no).decide(_req("fs_write")), Deny)
+
+
+async def test_callback_policy_passes_request_to_resolver():
+    from agentflow.backends.base import Callback
+
+    seen = {}
+
+    async def resolver(req):
+        seen["tool"] = req.tool
+        return Allow()  # a real decision passes through unchanged
+
+    decision = await Callback(resolver).decide(_req("execute_bash"))
+    assert isinstance(decision, Allow)
+    assert seen["tool"] == "execute_bash"
+
+
+async def test_callback_policy_normalizes_none_to_deny():
+    from agentflow.backends.base import Callback
+
+    async def nothing(req):
+        return None
+
+    assert isinstance(await Callback(nothing).decide(_req("x")), Deny)

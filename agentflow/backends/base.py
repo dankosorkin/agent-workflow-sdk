@@ -25,7 +25,8 @@ This module imports only :mod:`agentflow.events` and
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
 from agentflow.errors import InterruptError
@@ -50,7 +51,10 @@ __all__ = [
     "AllowAll",
     "DenyAll",
     "Interactive",
+    "Callback",
     "ToolAllowlist",
+    "PolicyIntent",
+    "policy_intent",
 ]
 
 
@@ -311,6 +315,36 @@ class Interactive:
         return _normalize_decision(answer)
 
 
+class Callback:
+    """Ask a human (or any resolver) inline, without interrupting the graph.
+
+    Unlike :class:`Interactive` — which suspends the whole run via
+    ``ctx.interrupt`` and requires a separate ``resume()`` — this awaits a
+    caller-supplied async function *within the same turn* and answers the
+    agent's permission request immediately. That matters for a persistent
+    session backend (Kiro's ACP): the agent is holding one turn open waiting
+    for the decision, so the answer must go back in that turn rather than
+    abandoning it and starting a new one.
+
+    ``resolver`` is ``async (PermissionRequest) -> decision`` where the
+    decision is an :class:`Allow`/:class:`Deny`, or a value normalized the same
+    way as a resume value (``"y"``/``"n"``, ``None``, an option id, ...).
+
+        async def ask(req):
+            answer = await asyncio.to_thread(input, f"allow {req.tool}? [y/N] ")
+            return answer
+
+        backend = KiroBackend("vibe", permission=Callback(ask))
+    """
+
+    def __init__(self, resolver: Callable[[PermissionRequest], Awaitable[Any]]) -> None:
+        self._resolver = resolver
+
+    async def decide(self, req: PermissionRequest) -> PermissionDecision:
+        answer = await self._resolver(req)
+        return _normalize_decision(answer)
+
+
 def _normalize_decision(answer: Any) -> PermissionDecision:
     """Coerce a human's resume value into a PermissionDecision."""
     if isinstance(answer, (Allow, Deny)):
@@ -325,3 +359,46 @@ def _normalize_decision(answer: Any) -> PermissionDecision:
     if answer is None or answer is False:
         return Deny()
     return Allow()
+
+
+@dataclass(frozen=True, slots=True)
+class PolicyIntent:
+    """A backend-agnostic reading of a permission policy, for CLI backends.
+
+    The one-shot CLI agents (Codex, Claude Code) do not surface per-tool
+    permission requests we can gate at runtime — they enforce permissions via
+    their own launch flags. This distils a :class:`PermissionPolicy` into an
+    upfront intent those backends can translate to flags:
+
+    - ``deny_all``: the policy denies everything (``DenyAll``, or an empty
+      ``ToolAllowlist`` whose fallback denies) — launch as restrictively as the
+      CLI allows.
+    - ``allow_all``: the policy approves everything (``AllowAll``).
+    - ``allowlist``: the explicit set of permitted tools (``ToolAllowlist``),
+      or ``None`` when the policy is not an allowlist.
+
+    An ``Interactive``/``Callback`` policy has no static answer (it needs a
+    live request), so it reads as neither allow_all nor deny_all — the CLI's
+    own default applies. This is a best-effort mapping, not our runtime gate;
+    the CLI's controls are authoritative.
+    """
+
+    deny_all: bool = False
+    allow_all: bool = False
+    allowlist: frozenset[str] | None = None
+
+
+def policy_intent(policy: PermissionPolicy) -> PolicyIntent:
+    """Best-effort static reading of ``policy`` for CLI-flag translation."""
+    if isinstance(policy, AllowAll):
+        return PolicyIntent(allow_all=True)
+    if isinstance(policy, DenyAll):
+        return PolicyIntent(deny_all=True)
+    if isinstance(policy, ToolAllowlist):
+        allowed = frozenset(policy.allowed)
+        # An empty allowlist with a denying fallback means "deny everything".
+        if not allowed and isinstance(policy.fallback, DenyAll):
+            return PolicyIntent(deny_all=True, allowlist=allowed)
+        return PolicyIntent(allowlist=allowed)
+    # Interactive / Callback / custom: no static answer.
+    return PolicyIntent()

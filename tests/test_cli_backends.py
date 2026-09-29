@@ -200,3 +200,61 @@ async def test_cli_exec_full_turn(monkeypatch):
     assert isinstance(end, TurnEnd) and end.text == "pong" and end.stop_reason == "end_turn"
     # session id captured for resume
     assert backend._session_id == "01a0ebda-5b74-7c51"
+
+
+# --- PermissionPolicy -> CLI flag bridge ------------------------------------
+
+
+def test_codex_sandbox_from_allow_all():
+    from agentflow.backends.base import AllowAll
+
+    cmd = CodexBackend(permission=AllowAll()).build_command("hi", None)
+    assert "-s" in cmd and cmd[cmd.index("-s") + 1] == "workspace-write"
+
+
+def test_codex_sandbox_from_deny_all():
+    from agentflow.backends.base import DenyAll
+
+    cmd = CodexBackend(permission=DenyAll()).build_command("hi", None)
+    assert cmd[cmd.index("-s") + 1] == "read-only"
+
+
+def test_codex_sandbox_from_allowlist_is_readonly():
+    from agentflow.backends.base import ToolAllowlist
+
+    cmd = CodexBackend(permission=ToolAllowlist({"read_file"})).build_command("hi", None)
+    assert cmd[cmd.index("-s") + 1] == "read-only"
+
+
+def test_codex_explicit_sandbox_wins_over_policy():
+    from agentflow.backends.base import AllowAll
+
+    # AllowAll would derive workspace-write, but an explicit sandbox overrides.
+    cmd = CodexBackend(sandbox="read-only", permission=AllowAll()).build_command("hi", None)
+    assert cmd[cmd.index("-s") + 1] == "read-only"
+
+
+def test_claude_allowlist_maps_to_allowed_tools():
+    from agentflow.backends.base import ToolAllowlist
+
+    cmd = ClaudeCodeBackend(permission=ToolAllowlist({"Read", "Grep"})).build_command("hi", None)
+    assert "--allowed-tools" in cmd
+    tools = cmd[cmd.index("--allowed-tools") + 1]
+    assert "Read" in tools and "Grep" in tools
+    assert "--permission-mode" not in cmd
+
+
+def test_claude_deny_all_maps_to_plan_mode():
+    from agentflow.backends.base import DenyAll
+
+    cmd = ClaudeCodeBackend(permission=DenyAll()).build_command("hi", None)
+    assert "--permission-mode" in cmd and cmd[cmd.index("--permission-mode") + 1] == "plan"
+
+
+def test_claude_explicit_tools_win_over_policy():
+    from agentflow.backends.base import DenyAll
+
+    # Explicit allowed_tools set -> policy derivation is skipped.
+    cmd = ClaudeCodeBackend(allowed_tools=["Bash"], permission=DenyAll()).build_command("hi", None)
+    assert cmd[cmd.index("--allowed-tools") + 1] == "Bash"
+    assert "--permission-mode" not in cmd

@@ -32,7 +32,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Literal
 
-from agentflow.backends.base import PermissionPolicy
+from agentflow.backends.base import PermissionPolicy, policy_intent
 from agentflow.backends.cli_exec import CLIExecBackend, TurnAccumulator
 from agentflow.events import BackendEvent, TextChunk, ToolCall, ToolResult
 
@@ -46,7 +46,7 @@ class CodexBackend(CLIExecBackend):
         self,
         *,
         model: str | None = None,
-        sandbox: str = "read-only",
+        sandbox: str | None = None,
         skip_git_repo_check: bool = True,
         cwd: Path | str = ".",
         permission: PermissionPolicy,
@@ -55,16 +55,34 @@ class CodexBackend(CLIExecBackend):
     ) -> None:
         super().__init__(cwd=cwd, permission=permission, timeout=timeout)
         self.model = model
+        # ``sandbox`` explicitly set by the caller always wins. When left None
+        # it is derived from the permission policy: a deny-all / allowlist
+        # policy launches Codex ``read-only`` (Codex has no per-tool gate, so
+        # this is the closest upfront enforcement), while AllowAll permits
+        # workspace writes. See _effective_sandbox.
         self.sandbox = sandbox
         self.skip_git_repo_check = skip_git_repo_check
         self.extra_args = list(extra_args or [])
+
+    def _effective_sandbox(self) -> str:
+        if self.sandbox is not None:
+            return self.sandbox  # explicit caller choice wins
+        intent = policy_intent(self.permission)
+        if intent.allow_all:
+            return "workspace-write"
+        if intent.deny_all or intent.allowlist is not None:
+            return "read-only"
+        # Interactive/Callback/custom: no static answer — default to the safe
+        # read-only sandbox rather than granting writes implicitly.
+        return "read-only"
 
     def build_command(self, prompt: str, session_id: str | None) -> list[str]:
         cmd = ["codex", "exec", "--json"]
         if self.skip_git_repo_check:
             cmd.append("--skip-git-repo-check")
-        if self.sandbox:
-            cmd += ["-s", self.sandbox]
+        sandbox = self._effective_sandbox()
+        if sandbox:
+            cmd += ["-s", sandbox]
         if self.model:
             cmd += ["-m", self.model]
         cmd += self.extra_args

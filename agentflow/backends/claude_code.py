@@ -35,7 +35,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agentflow.backends.base import PermissionPolicy
+from agentflow.backends.base import PermissionPolicy, policy_intent
 from agentflow.backends.cli_exec import CLIExecBackend, TurnAccumulator
 from agentflow.events import BackendEvent, TextChunk, ToolCall
 
@@ -102,12 +102,26 @@ class ClaudeCodeBackend(CLIExecBackend):
             cmd += ["--model", self.model]
         if self.agent:
             cmd += ["--agent", self.agent]
-        if self.allowed_tools:
-            cmd += ["--allowed-tools", " ".join(self.allowed_tools)]
+
+        # Explicit tool flags win; otherwise derive them from the permission
+        # policy. Claude Code has no per-tool runtime gate we can hook, so a
+        # ToolAllowlist maps to --allowed-tools and a deny-all policy maps to
+        # the read-only "plan" permission mode (no edits/commands).
+        allowed = list(self.allowed_tools)
+        permission_mode = self.permission_mode
+        if not allowed and permission_mode is None:
+            intent = policy_intent(self.permission)
+            if intent.allowlist is not None and intent.allowlist:
+                allowed = sorted(intent.allowlist)
+            elif intent.deny_all:
+                permission_mode = "plan"
+
+        if allowed:
+            cmd += ["--allowed-tools", " ".join(allowed)]
         if self.disallowed_tools:
             cmd += ["--disallowed-tools", " ".join(self.disallowed_tools)]
-        if self.permission_mode:
-            cmd += ["--permission-mode", self.permission_mode]
+        if permission_mode:
+            cmd += ["--permission-mode", permission_mode]
         if self.skip_permissions:
             cmd.append("--allow-dangerously-skip-permissions")
         if session_id:

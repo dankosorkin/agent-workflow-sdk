@@ -14,15 +14,23 @@
 
 """Human-in-the-loop permission with a real agent backend.
 
-Runs Codex (or Claude Code) under the Interactive permission policy inside a
-graph. When the agent asks to use a tool, the run suspends with an interrupt
-carrying the permission request; a human approves or denies via resume().
+Runs Kiro under the Callback permission policy inside a graph. When the agent
+asks to use a tool, the policy asks a human inline — within the same open turn —
+and answers the request immediately. No graph interrupt/resume is involved.
 
-    python examples/hitl_permission.py
+    KIRO_AGENT=vibe python examples/hitl_permission.py
 
-This asks the agent to do something that requires a tool (writing a file), so
-a permission prompt is likely. If the agent answers without requesting a tool,
-the run simply completes with no interrupt.
+Kiro is used because it is the only backend that routes tool requests through
+our PermissionPolicy (see the capability matrix in the README). Codex and
+Claude Code manage permissions via their own CLI sandbox/flags and will not
+surface a PermissionRequest here.
+
+Why Callback and not Interactive here: Interactive suspends the whole run via
+ctx.interrupt and needs a separate resume(). With a persistent-session backend
+like Kiro, the agent holds one turn open awaiting the decision, so abandoning
+that turn to resume a new one deadlocks. Callback answers in-place, so the turn
+proceeds. Interactive remains the right choice for one-shot backends and for
+durable, cross-process approval.
 """
 
 from __future__ import annotations
@@ -31,32 +39,57 @@ import asyncio
 import shutil
 from typing import Annotated
 
-from agentflow import END, START, Graph, MemoryCheckpointer, State, last
-from agentflow.backends.base import Interactive
-from agentflow.events import Allow, Deny, PermissionRequest, TextChunk, TurnEnd
+from agentflow import END, START, Graph, State, last
+from agentflow.backends.base import Callback
+from agentflow.events import PermissionRequest, TextChunk, TurnEnd
 
 
 class S(State):
     output: Annotated[str, last]
 
 
-def pick_agent():
-    if shutil.which("codex"):
-        from agentflow.backends.codex import CodexBackend
+async def ask_human(req: PermissionRequest) -> str:
+    """Prompt the operator to approve/deny a tool, inline (off the event loop)."""
+    resource = (
+        req.detail.get("_meta", {}).get("kiro", {}).get("consent", {}).get("resource")
+        if isinstance(req.detail, dict)
+        else None
+    )
+    prompt = (
+        f"\n[permission requested] tool={req.tool!r}"
+        + (f" resource={resource!r}" if resource else "")
+        + f" options={[o.kind for o in req.options]}\napprove? [y/N] "
+    )
+    # input() blocks; run it off-thread so the backend's reader task keeps
+    # draining the agent's output while we wait for the human.
+    answer = (await asyncio.to_thread(input, prompt)).strip().lower()
+    approved = answer in ("y", "yes", "да", "д")
+    print(f"  -> {'ALLOW' if approved else 'DENY'}")
+    return "y" if approved else "n"
 
-        # workspace-write so the agent actually wants permission to edit.
-        return "codex", CodexBackend(sandbox="workspace-write", permission=Interactive())
+
+def pick_agent():
+    # Kiro is the only backend that routes tool requests through our
+    # PermissionPolicy. Codex and Claude Code manage permissions via their own
+    # CLI sandbox/flags and will NOT surface a PermissionRequest here.
+    import os
+
+    kiro_agent = os.environ.get("KIRO_AGENT", "vibe")
+    if shutil.which("kiro-cli"):
+        from agentflow.backends.kiro import KiroBackend
+
+        return "kiro", KiroBackend(kiro_agent, permission=Callback(ask_human))
     if shutil.which("claude"):
         from agentflow.backends.claude_code import ClaudeCodeBackend
 
-        return "claude", ClaudeCodeBackend(permission=Interactive())
+        return "claude", ClaudeCodeBackend(permission=Callback(ask_human))
     return None, None
 
 
 async def main() -> None:
     name, agent = pick_agent()
     if agent is None:
-        print("Need codex or claude installed; skipping.")
+        print("Need kiro-cli (or claude) installed; skipping.")
         return
     print(f"agent: {name}")
     await agent.start()
@@ -69,7 +102,7 @@ async def main() -> None:
             if isinstance(ev, TextChunk):
                 text.append(ev.text)
             elif isinstance(ev, PermissionRequest):
-                ctx.emit(ev)
+                ctx.emit(ev)  # surface to telemetry; the policy answers it inline
             elif isinstance(ev, TurnEnd):
                 text = [ev.text] if ev.text else text
         return {"output": "".join(text)}
@@ -78,27 +111,12 @@ async def main() -> None:
     g.add_node("act", act)
     g.add_edge(START, "act")
     g.add_edge("act", END)
-    app = g.compile(checkpointer=MemoryCheckpointer())
+    app = g.compile()
 
     try:
-        await app.invoke({}, thread="demo")
-        state = await app.get_state("demo")
-
-        while state is not None and state.interrupted:
-            req: PermissionRequest = state.interrupt_payload
-            print(
-                f"\n[permission requested] tool={req.tool!r} options="
-                f"{[o.kind for o in req.options]}"
-            )
-            answer = input("approve? [y/N] ").strip().lower()
-            decision = Allow() if answer in ("y", "yes") else Deny()
-            print(f"  -> {'ALLOW' if isinstance(decision, Allow) else 'DENY'}")
-            await app.resume("demo", value=decision)
-            state = await app.get_state("demo")
-
-        final = await app.get_state("demo")
+        out = await app.invoke({}, thread="demo")
         print("\n--- final output ---")
-        print(final.state.get("output", ""))
+        print(out.get("output", ""))
     finally:
         await agent.close()
 
