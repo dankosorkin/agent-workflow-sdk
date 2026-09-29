@@ -1,292 +1,197 @@
-# Autonomous Agent Optimization Orchestrator
+# agentic-workflow-sdk
 
-A task-agnostic harness that runs a Kiro AI agent in an
-iterate-until-converged loop. The orchestrator drives the loop, records
-telemetry, and stops early on convergence. Each concrete job is a
-plugin under `tasks/`.
+An async-first, LangGraph-style SDK for building agent workflows from
+composable pieces. You describe a workflow as a graph of nodes over a typed,
+reducer-based state, and run it against a pluggable backend — a coding agent
+(Kiro, and later Codex or Claude Code) or a plain LLM (Ollama and any
+OpenAI-compatible endpoint).
 
-Three tasks ship today, and they compose into one chain:
+The import root is `agentflow`. The distribution name is
+`agentic-workflow-sdk`.
 
-- `mongo-analyze` — introspects a live MongoDB (read-only) to discover
-  indexes, cardinality, unique keys (guaranteed vs inferred), and
-  relationships, emitting a `structure.js` physical schema.
-- `mongo-synthesis` — builds an aggregation from scratch that maps several
-  source collections into a target structure, scored on structural
-  correctness (in-memory via mingo, no live MongoDB).
-- `mongo-aggregation` — optimizes an aggregation pipeline using real
-  `explain()` metrics (execution time, COLLSCAN, fan-out) against a live DB.
+## Why
 
-The `mongo-full` chain runs them in order: analyze → synthesis → aggregation,
-passing artifacts between steps.
+- Build any workflow from primitives: nodes, edges, conditional routing, and
+  a shared state. Not a fixed loop, not a linear chain.
+- Swap the backend without touching workflow code. Agents and LLMs share one
+  event vocabulary.
+- Async everywhere: the engine, backends, checkpointing, and streaming.
+- Durable by default: every super-step is checkpointed, runs resume after a
+  crash, and human-in-the-loop interrupts suspend and resume a run.
 
-## Architecture
+The full design rationale is in `DESIGN.md`.
 
-The core is split into a reusable orchestrator and pluggable tasks.
+## Install
 
-```text
-main.py                    generic entrypoint (single task or chain)
-src/                       task-agnostic core
-  acp.py                   Kiro ACP client (JSON-RPC over subprocess, v2/v3)
-  telemetry.py             JSONL telemetry logging
-  task.py                  Task interface + Decision contract
-  runner.py                AgentLoopRunner (baseline + loop + stop rules)
-  registry.py              task name to plugin mapping
-  cli.py                   argument parsing (subcommand per task, plus chain)
-  chain.py                 CHAIN + Step: linear task chains (not a graph)
-tasks/                     task plugins
-  mongo_analyze/           analyze a live DB → structure.js
-  mongo_synthesis/         synthesize a pipeline from sources to a target
-  mongo_aggregation/       optimize an existing pipeline
-```
-
-The orchestrator only understands the Decision contract. Everything
-task-specific lives behind the `Task` interface.
-
-## The Decision contract
-
-Every task's agent writes a JSON decision at the end of each turn. It is a
-strict JSON contract: `score` must be a finite JSON number, `improved` and
-`done` must be JSON booleans, and `stopReason` must be a string or `null`.
-Malformed decisions are rejected rather than coerced. The orchestrator reads
-these fields to drive stop conditions:
-
-| Field | Meaning |
-|-------|---------|
-| `score` | Quality score, higher is better |
-| `improved` | Whether this turn beat the previous best |
-| `done` | Whether the agent considers the job finished |
-| `stopReason` | Why it stopped (`optimal`, `converged`, `resolved`, `exhausted`) |
-
-Any other fields (timing, penalties, metrics) are carried through to
-telemetry untouched.
-
-## Prerequisites
-
-- Python 3.11+ (no external Python dependencies — stdlib only)
-- `kiro-cli` installed and authenticated
-- Node.js 18+ for task evaluators
-- A live MongoDB for `mongo-analyze` and `mongo-aggregation`
-  (`mongo-synthesis` runs in-memory and needs none)
-
-## Usage
-
-Single task:
+The core is dependency-free. Backends that need extra libraries are optional
+extras.
 
 ```bash
-python main.py <task> [task args] [loop args]
+pip install -e .            # core only
+pip install -e '.[ollama]'  # + httpx, for the Ollama LLM backend
+pip install -e '.[dev]'     # + pytest, pytest-asyncio
 ```
 
-Run the aggregation task with the bundled example:
+Python 3.11+ is required. The Kiro backend needs `kiro-cli` on PATH.
 
-```bash
-cd tasks/mongo_aggregation/eval && npm install && cd -
+## Quickstart
 
-python main.py mongo-aggregation \
-  --aggregation tasks/mongo_aggregation/example/aggregation.js \
-  --structure tasks/mongo_aggregation/example/structure.js
-```
-
-Run the full chain (analyze → synthesis → aggregation):
-
-```bash
-python main.py chain mongo-full
-```
-
-Each step selects its own agent; the chain passes artifacts between steps
-via `best/` (structure.js, aggregation.js) and halts if a step fails to
-produce its declared artifact.
-
-### Seeding artifacts (skipping steps)
-
-If you already have an artifact a step would produce, supply it with `--seed
-ARTIFACT=PATH`. The chain places it into `best/` before running and skips the
-step that produces it. For example, to optimize an existing baseline
-aggregation without re-synthesizing it:
-
-```bash
-python main.py chain mongo-full --seed aggregation.js=path/to/baseline.js
-```
-
-This runs analyze → (synthesis skipped) → aggregation. `--seed` is repeatable
-and validates that each artifact name is one the chain produces. If you only
-need to optimize a pipeline and already have `structure.js`, run the
-`mongo-aggregation` task directly instead of a chain.
-
-Shared loop arguments:
-
-```text
---iterations, -n N       Max optimization iterations per task (default: 10)
---agent           NAME   Kiro agent (single-task only; chain uses per-step agents)
---model           MODEL  LLM model (default: claude-opus-4.5)
---engine          {v2,v3} Kiro ACP agent engine (default: v3)
---telemetry-dir   DIR    Telemetry output directory (default: ./telemetry)
-```
-
-## Early stopping
-
-The loop stops before `--iterations` when any of these hold:
-
-| Condition | Stop reason |
-|-----------|-------------|
-| Agent sets `done: true` | agent's `stopReason` |
-| Best score reaches the perfect score | `optimal` |
-| No improvement for 4 consecutive iterations | `converged` |
-
-For `mongo-synthesis`, a score of 100 requires both structural paths and
-source-derived semantics: every ATAKL10 link must be materialized under its
-customer/type, and available detail values from the matching ATAK collection
-must be propagated. Empty typed arrays cannot pass the gate.
-
-Stopping is not itself success. A run exits successfully only after a valid
-decision sets `done: true`; reaching the iteration limit or an automatic stop
-without that decision exits non-zero and is recorded as `INCOMPLETE`.
-
-For `mongo-aggregation`, `tasks/mongo_aggregation/eval/measure.js` is the
-authoritative source of score and metrics. A result without finite timing and
-execution counters is incomplete and cannot mark the task done.
-
-For synthesis and aggregation, the harness runs the task verifier after every
-agent turn. The verifier records the SHA-256 of the candidate it measured;
-the harness rejects a result whose hash does not match the current candidate.
-Only the harness promotes an independently verified candidate into `best/`.
-It snapshots both the candidate and its verifier result; after a rejection it
-restores that matching pair before the next agent turn.
-
-## Telemetry
-
-Each task run writes `telemetry/<run_id>.jsonl`, one JSON event per line
-(`run_start`, `iteration`, `run_end`, warnings, errors). A chain run also
-writes `telemetry/chain_<timestamp>.jsonl` recording the chain's own
-decisions (`chain_start`, `step_start`, `step_end`, `chain_halted` with a
-reason, `chain_complete`). To list iteration scores for a run:
-
-```bash
-grep '"event":"iteration"' telemetry/<run_id>.jsonl
-```
-
-## Adding a new task
-
-A new autonomous agent is a new folder under `tasks/` plus one registry
-entry. No change to the orchestrator core is needed.
-
-Step 1. Create `tasks/my_task/task.py` with a `Task` subclass:
+A graph that loops until a counter reaches a target, then stops.
 
 ```python
-from src.task import Decision, Task
-from src import workspace
+import asyncio
+from typing import Annotated
+from agentflow import Graph, START, END, State, add, append
 
-class MyTask(Task):
-    name = "my-task"
-    label = "My Optimization"
+class CountState(State):
+    n: Annotated[int, add]        # updates are summed
+    log: Annotated[list, append]  # updates are concatenated
 
-    def __init__(self, config):
-        self.config = config
+async def tick(state, ctx):
+    return {"n": 1, "log": f"tick {state.get('n', 0) + 1}"}
 
-    def setup_workspace(self):
-        ...                       # copy inputs, clean stale artifacts
+def route(state):
+    return "again" if state["n"] < 5 else "done"
 
-    def baseline_prompt(self) -> str:
-        ...                       # return the phase 1 prompt text
+g = Graph(CountState)
+g.add_node("tick", tick)
+g.add_edge(START, "tick")
+g.add_conditional_edges("tick", route, {"again": "tick", "done": END})
+app = g.compile()
 
-    def iteration_prompt(self) -> str:
-        ...                       # return the iteration prompt text
-
-    def read_decision(self):
-        raw = workspace.read_json(MY_DECISION_FILE)
-        return Decision.from_dict(raw) if raw else None
+print(asyncio.run(app.invoke({"n": 0, "log": []})))
 ```
 
-Step 2. Add prompt files under `tasks/my_task/prompts/` and any eval
-tooling the task needs.
+See `examples/hello_graph.py` and `examples/optimize_loop.py` for runnable
+versions.
 
-Step 3. Register the task in `src/registry.py`:
+## Core concepts
+
+### State and reducers
+
+State is a `TypedDict` subclass of `State`. Each field is a channel; annotate
+it with a reducer that folds each node's update into the current value. A
+field without a reducer uses `last` (last-value-wins). Built-in reducers:
+`last`, `append`, `add`, `merge`, `union`. A node returns a partial update; it
+never mutates the state it was given.
+
+### Nodes and edges
+
+A node is an async callable `(state, ctx) -> update`. Edges are either static
+(`add_edge`) or conditional (`add_conditional_edges` with a `router(state) ->
+key`). `START` and `END` are sentinels. A conditional router may return a list
+of keys to fan out to several nodes at once.
+
+### Execution
+
+A run proceeds in super-steps. All nodes on the current frontier run
+concurrently against the same immutable state, their updates are folded
+through the reducers in a deterministic order, and the next frontier is
+computed from the edges. A `step_limit` guards against runaway loops.
+
+`CompiledGraph` gives you:
+
+- `await app.invoke(input, thread=...)` — run to completion, return state.
+- `app.stream(input, thread=...)` — async-iterate `StreamEvent`s as they occur.
+- `await app.resume(thread, value=...)` — continue a suspended run.
+- `await app.get_state(thread)` / `app.history(thread)` — inspect checkpoints.
+
+## Backends
+
+Two kinds of backend share one event stream, so a node calls either the same
+way.
+
+- Agent backends (`AgentBackend`) drive a session that runs its own tools and
+  asks permission. `KiroBackend` is the first; Codex and Claude Code follow.
+- LLM backends (`LLMBackend`) are stateless: messages in, token stream out.
+  They never run tools themselves — a tool call is a request the graph
+  fulfils. `OllamaBackend` is the example and the template for any
+  OpenAI-compatible endpoint.
 
 ```python
-def _my_add_arguments(parser):
-    parser.add_argument("--input", "-i", required=True, type=Path)
+from agentflow.backends.kiro import KiroBackend
+from agentflow.backends.ollama import OllamaBackend
 
-def _my_build(args):
-    from tasks.my_task.task import MyTask, MyConfig
-    return MyTask(MyConfig(input=args.input))
+agent = KiroBackend("my-agent", engine="v3")
+llm = OllamaBackend("llama3.2")
 
-PLUGINS["my-task"] = TaskPlugin(
-    name="my-task",
-    help="Describe the task",
-    add_arguments=_my_add_arguments,
-    build=_my_build,
-)
+await agent.start()
+async for event in agent.prompt("summarize the repo"):
+    ...  # TextChunk, ToolCall, ToolResult, ..., TurnEnd
+await agent.close()
 ```
 
-Step 4. Create the agent at `.kiro/agents/<name>.json`. Use JSON (the CLI
-loads JSON agents; a `permissions` block currently breaks loading, so omit
-it — the orchestrator auto-approves tool prompts). Kiro discovers agents only
-under `.kiro/agents/` (workspace, must be trusted) or `~/.kiro/agents/`
-(global), so the agent file lives there, not inside the task folder. Validate
-with `kiro-cli agent validate --path .kiro/agents/<name>.json`.
+Backends are constructed by you and passed into your nodes. The core never
+imports a backend, so importing `agentflow` pulls in no subprocess or HTTP
+dependency.
 
-Run it:
+### Permission policies
 
-```bash
-python main.py my-task --input data.txt
-```
+Agent backends answer permission prompts through a `PermissionPolicy`:
+`AllowAll` (default, auto-approve), `DenyAll`, or `Interactive` (escalate to a
+human via an engine interrupt).
 
-The agent must write a decision file each turn that maps onto the
-Decision contract (at minimum `score`, `improved`, `done`).
+## Checkpointing and human-in-the-loop
 
-## Adding a chain
-
-Chains are declared in `src/chain.py` as a list of `Step`s — a linear
-sequence, not a graph (no branching, loop-back, or parallelism). Steps hand
-work to each other through artifacts under `best/`:
+Pass a checkpointer to `compile` to make runs durable.
 
 ```python
-CHAINS["my-chain"] = [
-    Step(task="step-one", produces=["out.js"]),
-    Step(task="step-two", consumes=["out.js"], args={"input": BEST_DIR / "out.js"}),
-]
+from agentflow import FileCheckpointer
+app = g.compile(checkpointer=FileCheckpointer(".runs"))
 ```
 
-Run with `python main.py chain my-chain`. A step that does not reach a
-successful terminal state, or fails to produce its declared artifact, halts
-the chain. A step whose entire `produces` set is already present (supplied via
-`--seed`) is skipped.
+`MemoryCheckpointer` is for tests; `FileCheckpointer` writes one atomic JSON
+file per super-step under `.runs/<thread>/`.
 
-## Requirements the agent must satisfy
+A node calls `await ctx.interrupt(payload)` to suspend the run for a human.
+The runtime writes an interrupted checkpoint and stops. Later, `await
+app.resume(thread, value=answer)` continues the run, and the same `interrupt`
+call returns `answer`. This works across process restarts, since the frontier
+is persisted.
 
-For the loop to make progress and stop correctly, the task's agent must:
+## Prebuilt patterns
 
-- Write a decision file at the end of every turn
-- Report a numeric `score` (higher is better)
-- Set `improved` truthfully relative to the previous best
-- Set `done: true` with a `stopReason` when it converges or exhausts options
+`agentflow.prebuilt.iterate_until_converged(work, ...)` compiles the classic
+baseline-then-iterate optimization loop as a graph. You supply an async
+`work(state) -> Candidate`; the loop owns the best-so-far, the
+no-improvement streak, and the stop decision (`done`, `optimal`, `converged`,
+`exhausted`).
 
-## Project structure
+```python
+from agentflow.prebuilt import Candidate, iterate_until_converged
+
+async def work(state):
+    best = state.get("best_score", 0.0)
+    return Candidate(score=min(best + 25.0, 100.0))
+
+app = iterate_until_converged(work, perfect_score=100.0, patience=4)
+result = await app.invoke({})
+```
+
+## Project layout
 
 ```text
-.
-├── main.py                     Generic entrypoint (single task or chain)
-├── src/                        Task-agnostic core
-│   ├── acp.py
-│   ├── telemetry.py
-│   ├── task.py
-│   ├── runner.py
-│   ├── registry.py
-│   ├── cli.py
-│   └── chain.py
-├── tasks/
-│   ├── mongo_analyze/          Live-DB schema analysis → structure.js
-│   ├── mongo_synthesis/        Synthesize aggregation (in-memory)
-│   └── mongo_aggregation/      Optimize aggregation (live DB)
-│       ├── task.py
-│       ├── README.md
-│       ├── .env
-│       ├── prompts/
-│       ├── eval/
-│       └── example/
-├── .kiro/
-│   └── agents/                 schema-analyst.json, synthesis-expert.json,
-│                               aggregation-expert.json
-├── agent_workspace/            Agent working directory (ephemeral)
-├── best/                       Artifacts passed between chain steps
-└── telemetry/                  Per-run + per-chain JSONL logs
+agentflow/
+  state.py            channels, reducers, update merge
+  graph.py            Graph builder + validation
+  runtime.py          super-step scheduler, Context, interrupts
+  compiled.py         CompiledGraph runnable
+  events.py           messages, requests, streaming events
+  errors.py           exception hierarchy
+  backends/           base protocols + kiro + ollama adapters
+  checkpoint/         Checkpointer protocol + memory + file
+  prebuilt/           iterate_until_converged
+examples/             runnable examples
+tests/                pytest suite (async)
+DESIGN.md             architecture and contracts
 ```
+
+## Development
+
+```bash
+pip install -e '.[ollama,dev]'
+pytest -q
+```
+
+Tests are async and run under `pytest-asyncio` in `auto` mode, so no
+per-test decorator is needed.
