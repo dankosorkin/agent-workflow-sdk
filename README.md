@@ -238,8 +238,21 @@ DESIGN.md             architecture and contracts
 
 ```bash
 pip install -e '.[ollama,dev]'
-pytest -q
+pytest -q                 # offline suite only (hermetic, fast)
 ```
 
 Tests are async and run under `pytest-asyncio` in `auto` mode, so no
 per-test decorator is needed.
+
+The suite is split by a `live` marker. The default run skips live tests
+(`addopts = -m 'not live'`) so CI stays hermetic — everything mocks its
+transport. Live smoke tests spawn the real agent CLIs and hit a real Ollama
+server; run them explicitly:
+
+```bash
+pytest -m live            # runs only backends that are installed/reachable
+KIRO_AGENT=vibe pytest -m live   # include the Kiro backend
+```
+
+Each live test skips itself when its backend is absent, so `pytest -m live`
+never fails on a missing CLI.

@@ -36,3 +36,9 @@ packages = ["agentflow"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+# Live tests spawn real agent CLIs / hit a real Ollama server. They are opt-in:
+# the default run skips them so CI stays hermetic. Run them with `pytest -m live`.
+addopts = "-m 'not live'"
+markers = [
+    "live: end-to-end test against a real backend (agent CLI or Ollama server); opt-in, skipped by default",
+]
