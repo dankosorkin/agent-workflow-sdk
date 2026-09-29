@@ -280,7 +280,21 @@ class KiroBackend(BaseAgentBackend):
             raise BackendTransportError("kiro-cli process is not running")
         data = json.dumps(message, ensure_ascii=False, separators=(",", ":")) + "\n"
         proc.stdin.write(data.encode("utf-8"))
-        # drain is fire-and-forget here; the reader loop owns backpressure
+        # Apply write backpressure: schedule a drain so a slow child stdin
+        # cannot let our write buffer grow unbounded. Best-effort — a closing
+        # pipe during shutdown must not raise here.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return
+        loop.create_task(self._drain_stdin())
+
+    async def _drain_stdin(self) -> None:
+        proc = self._proc
+        if proc is None or proc.stdin is None:
+            return
+        with contextlib.suppress(ConnectionResetError, BrokenPipeError, RuntimeError):
+            await proc.stdin.drain()
 
     async def _read_loop(self) -> None:
         """Continuously read newline-delimited JSON and dispatch it."""

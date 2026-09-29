@@ -52,6 +52,9 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - `OtelHooks` (in the `otel` extra): an OpenTelemetry `Hooks` exporter emitting
   a span per run and per node, recording errors and backend events, with a
   versioned attribute schema (`EVENT_SCHEMA_VERSION`).
+- Backends are async context managers (`async with backend: ...`) so
+  `start()`/`close()` can't be skipped and `close()` runs on error. Kiro's
+  stdin writes now apply backpressure via `drain()`.
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and

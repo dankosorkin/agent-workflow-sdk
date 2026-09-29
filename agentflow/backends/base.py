@@ -110,7 +110,33 @@ class LLMBackend(Backend, Protocol):
 # ---------------------------------------------------------------------------
 
 
-class BaseAgentBackend:
+class _AsyncResource:
+    """Async context-manager support so ``start``/``close`` can't be skipped.
+
+        async with KiroBackend("vibe", permission=AllowAll()) as agent:
+            async for ev in agent.prompt("..."):
+                ...
+        # close() is guaranteed, even on error.
+
+    Concrete backends implement ``start`` and ``close``; this mixin wires them
+    to ``__aenter__``/``__aexit__``.
+    """
+
+    async def start(self) -> None:  # pragma: no cover - overridden
+        ...
+
+    async def close(self) -> None:  # pragma: no cover - overridden
+        ...
+
+    async def __aenter__(self):
+        await self.start()
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb) -> None:
+        await self.close()
+
+
+class BaseAgentBackend(_AsyncResource):
     """Mixin implementing :meth:`prompt` on top of :meth:`invoke`.
 
     Concrete agent backends inherit this and implement ``start``, ``close``,
@@ -146,7 +172,7 @@ class BaseAgentBackend:
         return self.invoke(TextRequest(text), session=session)  # type: ignore[attr-defined]
 
 
-class BaseLLMBackend:
+class BaseLLMBackend(_AsyncResource):
     """Mixin implementing :meth:`chat` on top of :meth:`invoke`.
 
     Concrete LLM backends inherit this and implement ``start``, ``close``,
