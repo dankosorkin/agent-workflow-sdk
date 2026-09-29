@@ -15,6 +15,7 @@ returns a value instead of raising.
 from __future__ import annotations
 
 import asyncio
+import contextvars
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Mapping
@@ -25,7 +26,18 @@ from agentflow.events import BackendEvent
 from agentflow.graph import END, START, _ConditionalEdge
 from agentflow.state import Channel, apply_updates
 
-__all__ = ["Context", "StreamEvent", "run"]
+__all__ = ["Context", "StreamEvent", "run", "current_context"]
+
+
+#: The Context of the node currently executing in this task. Set by the
+#: runtime around each node call so helpers that run inside the node's frame
+#: (e.g. an Interactive permission policy driven by a backend the node is
+#: consuming) can reach ``ctx.interrupt`` without it being threaded through
+#: every call. This works because a node and any backend generator it iterates
+#: run in the same task, and contextvars are per-task.
+current_context: contextvars.ContextVar["Context | None"] = contextvars.ContextVar(
+    "agentflow_current_context", default=None
+)
 
 
 # ---------------------------------------------------------------------------
@@ -134,6 +146,7 @@ async def _run_node(
     ctx: Context,
 ) -> Mapping[str, Any] | None:
     fn = graph.nodes[node]
+    token = current_context.set(ctx)
     try:
         result = fn(state, ctx)
         if asyncio.iscoroutine(result):
@@ -143,6 +156,8 @@ async def _run_node(
         raise
     except Exception as exc:  # noqa: BLE001 - wrap any node failure
         raise NodeError(node, str(exc)) from exc
+    finally:
+        current_context.reset(token)
 
 
 async def run(

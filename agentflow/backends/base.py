@@ -176,17 +176,47 @@ class DenyAll:
 
 
 class Interactive:
-    """Escalate to a human via an engine interrupt.
+    """Escalate a permission request to a human via an engine interrupt.
 
-    Raises :class:`~agentflow.errors.InterruptError` carrying the request as
-    its payload. The runtime catches it, persists an interrupted checkpoint,
-    and suspends the run; on ``resume(value=...)`` the value is fed back as
-    the :class:`PermissionDecision`. Outside a graph run there is nothing to
-    catch the interrupt, so this policy is only meaningful inside the engine.
+    When resolved inside a running graph, this calls ``ctx.interrupt(req)`` on
+    the node's :class:`~agentflow.runtime.Context`, which suspends the run and
+    persists an interrupted checkpoint. The human inspects the request and
+    calls ``app.resume(thread, value=...)``; the resumed value becomes this
+    policy's :class:`PermissionDecision`. A plain :class:`Allow`/:class:`Deny`
+    or a bare truthy/``None`` value is accepted and normalized.
+
+    The node's context is found via :data:`agentflow.runtime.current_context`,
+    which the runtime sets around each node call. Because a node and any
+    backend generator it iterates share one task, the policy — invoked while
+    the node consumes the backend's event stream — sees the right context.
+    Outside a graph run (no current context) it falls back to raising
+    :class:`~agentflow.errors.InterruptError` so misuse fails loudly.
     """
 
-    def __init__(self, node: str = "<permission>") -> None:
-        self._node = node
-
     async def decide(self, req: PermissionRequest) -> PermissionDecision:
-        raise InterruptError(self._node, req)
+        # Imported lazily to keep the backend layer importable without the
+        # engine, and to avoid any import-order sensitivity.
+        from agentflow.runtime import current_context
+
+        ctx = current_context.get()
+        if ctx is None:
+            raise InterruptError("<permission>", req)
+
+        answer = await ctx.interrupt(req)
+        return _normalize_decision(answer)
+
+
+def _normalize_decision(answer: Any) -> PermissionDecision:
+    """Coerce a human's resume value into a PermissionDecision."""
+    if isinstance(answer, (Allow, Deny)):
+        return answer
+    if isinstance(answer, str):
+        low = answer.strip().lower()
+        if low in ("allow", "yes", "y", "approve", "ok"):
+            return Allow()
+        if low in ("deny", "no", "n", "reject"):
+            return Deny(reason=answer)
+        return Allow(option_id=answer)  # treat as a specific option id
+    if answer is None or answer is False:
+        return Deny()
+    return Allow()

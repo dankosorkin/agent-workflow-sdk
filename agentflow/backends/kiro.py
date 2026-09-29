@@ -68,6 +68,9 @@ class KiroBackend(BaseAgentBackend):
         self._turn_text = ""
         self._reader_task: asyncio.Task[None] | None = None
         self._closing = False
+        # Permission decisions awaited by the reader, resolved by the generator
+        # frame (where the policy — and any engine interrupt — must run).
+        self._perm_answers: dict[str, asyncio.Future[PermissionDecision]] = {}
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -179,10 +182,43 @@ class KiroBackend(BaseAgentBackend):
                 item = await queue.get()
                 if item is _SENTINEL:
                     break
+                if isinstance(item, PermissionRequest):
+                    # Resolve here, in the node's frame, so an Interactive
+                    # policy's ctx.interrupt (and its InterruptError) propagate
+                    # out through this generator to the runtime.
+                    await self._resolve_permission(item)
                 yield item
         finally:
             self._turn_queue = None
+            # If we exit the loop early (e.g. an interrupt raised out of the
+            # generator), unblock the reader so it doesn't hang on an answer.
+            self._cancel_pending_permissions()
+            await self._drain_finisher(finisher)
+
+    async def _resolve_permission(self, req: PermissionRequest) -> None:
+        future = self._perm_answers.get(req.id)
+        if future is None or future.done():
+            return
+        decision = await self.permission.decide(req)
+        if not future.done():
+            future.set_result(decision)
+
+    def _cancel_pending_permissions(self) -> None:
+        for future in self._perm_answers.values():
+            if not future.done():
+                future.cancel()
+
+    @staticmethod
+    async def _drain_finisher(finisher: "asyncio.Task[None]") -> None:
+        if finisher.done():
+            # Surface any exception the finisher captured.
+            finisher.result()
+            return
+        finisher.cancel()
+        try:
             await finisher
+        except asyncio.CancelledError:
+            pass
 
     # ------------------------------------------------------------------
     # Session setup
@@ -358,7 +394,24 @@ class KiroBackend(BaseAgentBackend):
             detail=params,
         )
 
-        decision = await self.permission.decide(req)
+        # The policy must run in the node's frame (so an Interactive policy can
+        # drive an engine interrupt), not here in the reader task. Publish the
+        # request to the turn stream and wait for the generator to resolve it.
+        loop = asyncio.get_running_loop()
+        answer: asyncio.Future[PermissionDecision] = loop.create_future()
+        self._perm_answers[req.id] = answer
+        self._emit(req)
+
+        try:
+            decision = await answer
+        except asyncio.CancelledError:
+            # The generator tore down before answering (e.g. the turn was
+            # suspended by an engine interrupt). Leave the RPC unanswered; the
+            # agent process is abandoned with the turn. Do not kill the reader.
+            self._perm_answers.pop(req.id, None)
+            return
+        finally:
+            self._perm_answers.pop(req.id, None)
 
         if isinstance(decision, Allow):
             option_id = decision.option_id or self._default_allow_option(raw_options)
