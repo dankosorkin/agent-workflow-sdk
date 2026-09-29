@@ -337,6 +337,15 @@ adds no hidden ordering.
 
 - A node raising propagates as a `NodeError` that aborts the super-step; the
   last good checkpoint is intact, so the run is resumable after a fix.
+- Super-steps are all-or-nothing. Node updates are collected and applied only
+  after every node in the frontier has finished without raising. If any node
+  raises, the entire step's updates are discarded before they touch the state,
+  no checkpoint is written for that step, and the run stays at the previous
+  committed checkpoint. Siblings that succeeded in the same step do not land.
+- A whole-run timeout (`invoke(..., timeout=...)`) cancels the in-flight
+  super-step and raises `RunTimeout`. Because each completed step is
+  checkpointed before the next begins, the last checkpoint is intact and a
+  checkpointed run resumes from there.
 - A backend `BackendError` event is data a node can branch on; a fatal
   transport failure raises and is treated like a node error.
 - Policy for ret/retries is a node concern (a `retry` wrapper is a prebuilt),

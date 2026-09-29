@@ -15,7 +15,7 @@ import asyncio
 from typing import Any, AsyncIterator, Mapping
 
 from agentflow.checkpoint.base import Checkpoint
-from agentflow.errors import CheckpointError, GraphError
+from agentflow.errors import CheckpointError, GraphError, RunTimeout
 from agentflow.runtime import StreamEvent, _Graph, run
 from agentflow.state import Channel
 
@@ -49,15 +49,24 @@ class CompiledGraph:
     # ------------------------------------------------------------------
 
     async def invoke(
-        self, input: Mapping[str, Any] | None = None, *, thread: str = "default"
+        self,
+        input: Mapping[str, Any] | None = None,
+        *,
+        thread: str = "default",
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         """Run from ``input`` to completion and return the final state.
 
         If the run suspends on an interrupt, the interrupted checkpoint's
         state is returned; inspect ``get_state(thread)`` to see it is not done
         and call :meth:`resume`.
+
+        ``timeout`` bounds the whole run. On expiry the in-flight super-step is
+        cancelled and :class:`~agentflow.errors.RunTimeout` is raised; the last
+        completed step's checkpoint is intact, so a checkpointed run resumes
+        from there.
         """
-        cp = await run(
+        coro = run(
             self._graph,
             dict(input or {}),
             thread=thread,
@@ -65,6 +74,7 @@ class CompiledGraph:
             start_step=0,
             checkpointer=self.checkpointer,
         )
+        cp = await self._run_with_timeout(coro, thread, timeout)
         return dict(cp.state)
 
     async def stream(
@@ -84,12 +94,12 @@ class CompiledGraph:
     # ------------------------------------------------------------------
 
     async def resume(
-        self, thread: str, value: Any = None
+        self, thread: str, value: Any = None, *, timeout: float | None = None
     ) -> dict[str, Any]:
         """Continue a suspended run, feeding ``value`` to the interrupted node."""
         cp = await self._load_for_resume(thread)
         resume_values = {cp.interrupt_node: value} if cp.interrupt_node else {}
-        result = await run(
+        coro = run(
             self._graph,
             dict(cp.state),
             thread=thread,
@@ -98,6 +108,7 @@ class CompiledGraph:
             checkpointer=self.checkpointer,
             resume_values=resume_values,
         )
+        result = await self._run_with_timeout(coro, thread, timeout)
         return dict(result.state)
 
     async def stream_resume(
@@ -134,6 +145,21 @@ class CompiledGraph:
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------
+
+    async def _run_with_timeout(self, coro, thread: str, timeout: float | None):
+        if timeout is None:
+            return await coro
+        try:
+            return await asyncio.wait_for(coro, timeout=timeout)
+        except asyncio.TimeoutError:
+            # The in-flight super-step was cancelled; the last completed step
+            # is already checkpointed. Report the step reached, if known.
+            step = 0
+            if self.checkpointer is not None:
+                last = await self.checkpointer.get(thread)
+                if last is not None:
+                    step = last.step
+            raise RunTimeout(thread, timeout, step) from None
 
     async def _load_for_resume(self, thread: str) -> Checkpoint:
         if self.checkpointer is None:

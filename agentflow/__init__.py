@@ -47,6 +47,7 @@ from agentflow.errors import (
     GraphError,
     CompilationError,
     NodeError,
+    RunTimeout,
     BackendError,
     BackendTransportError,
     CheckpointError,
@@ -71,6 +72,6 @@ __all__ = [
     # checkpointing
     "Checkpoint", "Checkpointer", "MemoryCheckpointer", "FileCheckpointer",
     # errors
-    "AgentFlowError", "GraphError", "CompilationError", "NodeError",
+    "AgentFlowError", "GraphError", "CompilationError", "NodeError", "RunTimeout",
     "BackendError", "BackendTransportError", "CheckpointError", "InterruptError",
 ]

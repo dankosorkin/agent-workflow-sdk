@@ -11,6 +11,7 @@ __all__ = [
     "GraphError",
     "CompilationError",
     "NodeError",
+    "RunTimeout",
     "BackendError",
     "BackendTransportError",
     "CheckpointError",
@@ -74,6 +75,24 @@ class BackendTransportError(BackendError):
 
 class CheckpointError(AgentFlowError):
     """A checkpoint could not be written, read, or resumed."""
+
+
+class RunTimeout(GraphError):
+    """A whole-run timeout fired before the graph reached END.
+
+    The last completed super-step's checkpoint is intact (each step is
+    checkpointed before the next begins), so the run is resumable from there
+    when a checkpointer is configured.
+    """
+
+    def __init__(self, thread: str, seconds: float, step: int):
+        self.thread = thread
+        self.seconds = seconds
+        self.step = step
+        super().__init__(
+            f"run {thread!r} exceeded {seconds}s (reached step {step}); "
+            f"last checkpoint preserved"
+        )
 
 
 class InterruptError(AgentFlowError):
