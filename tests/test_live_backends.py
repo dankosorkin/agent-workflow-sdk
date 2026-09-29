@@ -151,7 +151,7 @@ async def test_live_anthropic():
         pytest.skip("ANTHROPIC_API_KEY not set")
     from agentflow.backends.anthropic import AnthropicBackend
 
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5")
     workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID")
     backend = AnthropicBackend(model, api_key=key, max_tokens=64, workspace_id=workspace)
     await backend.start()
