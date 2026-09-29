@@ -104,6 +104,10 @@ rather than sitting unused in the state.
 - `await app.resume(thread, value=...)` — continue a suspended run.
 - `await app.get_state(thread)` / `app.history(thread)` — inspect checkpoints.
 
+For non-async callers there are blocking wrappers — `app.invoke_sync(...)`,
+`app.resume_sync(...)`, `app.stream_sync(...)` — which run the coroutine via
+`asyncio.run` and refuse to run inside an existing event loop.
+
 ### Subgraphs
 
 A compiled graph composes as a node in another graph:

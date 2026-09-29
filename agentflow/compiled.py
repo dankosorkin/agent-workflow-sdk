@@ -137,6 +137,44 @@ class CompiledGraph:
             yield ev
 
     # ------------------------------------------------------------------
+    # Synchronous facade (convenience for non-async callers)
+    # ------------------------------------------------------------------
+
+    def invoke_sync(
+        self,
+        input: Mapping[str, Any] | None = None,
+        *,
+        thread: str = "default",
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
+        """Blocking wrapper over :meth:`invoke` via ``asyncio.run``.
+
+        For synchronous callers only. Raises :class:`RuntimeError` if called
+        from within a running event loop — use ``await invoke(...)`` there.
+        """
+        return _run_sync(self.invoke(input, thread=thread, timeout=timeout))
+
+    def resume_sync(
+        self, thread: str, value: Any = None, *, timeout: float | None = None
+    ) -> dict[str, Any]:
+        """Blocking wrapper over :meth:`resume`."""
+        return _run_sync(self.resume(thread, value, timeout=timeout))
+
+    def stream_sync(
+        self, input: Mapping[str, Any] | None = None, *, thread: str = "default"
+    ) -> list[StreamEvent]:
+        """Blocking wrapper that drains :meth:`stream` into a list.
+
+        Returns all events at once (not incremental) — a convenience for sync
+        scripts; use the async ``stream`` for live consumption.
+        """
+
+        async def _collect() -> list[StreamEvent]:
+            return [ev async for ev in self.stream(input, thread=thread)]
+
+        return _run_sync(_collect())
+
+    # ------------------------------------------------------------------
     # Inspection / time-travel
     # ------------------------------------------------------------------
 
@@ -240,3 +278,22 @@ class CompiledGraph:
         finally:
             # Surface a driver exception rather than swallowing it.
             await task
+
+
+def _run_sync(coro):
+    """Run a coroutine to completion from synchronous code.
+
+    Refuses to run inside an existing event loop (that would deadlock);
+    the caller should ``await`` the async method there instead.
+    """
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass  # no running loop — safe to drive one
+    else:
+        coro.close()
+        raise RuntimeError(
+            "the *_sync helpers cannot be called from within a running event "
+            "loop; await the async method (invoke/stream/resume) instead"
+        )
+    return asyncio.run(coro)

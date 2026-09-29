@@ -55,6 +55,9 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Backends are async context managers (`async with backend: ...`) so
   `start()`/`close()` can't be skipped and `close()` runs on error. Kiro's
   stdin writes now apply backpressure via `drain()`.
+- Synchronous facade on `CompiledGraph`: `invoke_sync`, `resume_sync`, and
+  `stream_sync` wrap `asyncio.run` for non-async callers, and refuse to run
+  inside an existing event loop rather than deadlock.
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and
