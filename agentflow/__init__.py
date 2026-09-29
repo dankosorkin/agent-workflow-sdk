@@ -20,6 +20,7 @@ from agentflow.errors import (
     BackendError,
     BackendRateLimitError,
     BackendTransportError,
+    CheckpointConflict,
     CheckpointError,
     CompilationError,
     GraphError,
@@ -112,6 +113,7 @@ __all__ = [
     "FileCheckpointer",
     "SqliteCheckpointer",
     "RedisCheckpointer",
+    "PostgresCheckpointer",
     # errors
     "AgentFlowError",
     "GraphError",
@@ -122,15 +124,20 @@ __all__ = [
     "BackendTransportError",
     "BackendRateLimitError",
     "CheckpointError",
+    "CheckpointConflict",
     "InterruptError",
 ]
 
 
 def __getattr__(name: str):
-    # RedisCheckpointer needs the optional `redis` extra; import it lazily so
-    # `import agentflow` works (and stays redis-free) without the extra.
+    # These need optional extras (`redis` / `postgres`); import lazily so
+    # `import agentflow` works (and stays extra-free) without them installed.
     if name == "RedisCheckpointer":
         from agentflow.checkpoint import RedisCheckpointer
 
         return RedisCheckpointer
+    if name == "PostgresCheckpointer":
+        from agentflow.checkpoint import PostgresCheckpointer
+
+        return PostgresCheckpointer
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

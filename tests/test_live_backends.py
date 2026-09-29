@@ -251,3 +251,67 @@ async def test_live_tool_loop_ollama():
     # transcript will contain a tool result.
     assert out["messages"][-1].role == "assistant"
     assert out["turns"] >= 1
+
+
+async def test_live_postgres_checkpointer():
+    """PostgresCheckpointer against a real Postgres (AGENTFLOW_TEST_POSTGRES_DSN)."""
+    dsn = os.environ.get("AGENTFLOW_TEST_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip(
+            "AGENTFLOW_TEST_POSTGRES_DSN not set "
+            "(e.g. postgresql://postgres:pw@localhost:5432/postgres)"
+        )
+
+    from agentflow import END, START, Graph
+    from agentflow.checkpoint.base import Checkpoint
+    from agentflow.checkpoint.postgres import PostgresCheckpointer
+    from agentflow.errors import CheckpointConflict
+
+    table = f"cp_test_{os.getpid()}"
+    cp = PostgresCheckpointer(dsn, table=table)
+    thread = f"live-{os.getpid()}"
+    try:
+        # Direct CAS: revision tracking + conflict on stale if_revision.
+        await cp.put(Checkpoint(thread=thread, step=1, state={"n": 1}))
+        got = await cp.get(thread, 1)
+        assert got is not None and got.revision == 1 and got.state["n"] == 1
+        await cp.put(Checkpoint(thread=thread, step=1, state={"n": 2}), if_revision=1)
+        assert (await cp.get(thread, 1)).revision == 2
+        with pytest.raises(CheckpointConflict):
+            await cp.put(Checkpoint(thread=thread, step=1, state={"n": 9}), if_revision=1)
+        assert (await cp.get(thread, 1)).state["n"] == 2
+
+        # Retention.
+        await cp.put(Checkpoint(thread=thread, step=2, state={"n": 2}))
+        await cp.put(Checkpoint(thread=thread, step=3, state={"n": 3}))
+        assert await cp.prune(thread, before_step=2) == 1
+        assert [c.step async for c in cp.history(thread)] == [2, 3]
+
+        # End-to-end HITL interrupt + resume on Postgres.
+        g = Graph(_RedisLiveState)
+
+        async def ask(state, ctx):
+            human = await ctx.interrupt({"q": "ok?"})
+            return {"answer": human, "stage": "asked"}
+
+        async def finish(state, ctx):
+            return {"stage": "finished"}
+
+        g.add_node("ask", ask)
+        g.add_node("finish", finish)
+        g.add_edge(START, "ask")
+        g.add_edge("ask", "finish")
+        g.add_edge("finish", END)
+
+        app = g.compile(checkpointer=cp)
+        hthread = f"hitl-{os.getpid()}"
+        await app.invoke({"stage": []}, thread=hthread)
+        state = await app.get_state(hthread)
+        assert state is not None and state.interrupted
+        out = await app.resume(hthread, value="yes")
+        assert out["answer"] == "yes"
+        assert out["stage"] == ["asked", "finished"]
+    finally:
+        pool = await cp._get_pool()
+        await pool.execute(f"DROP TABLE IF EXISTS {table}")
+        await cp.close()

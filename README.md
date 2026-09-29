@@ -255,15 +255,37 @@ app = g.compile(checkpointer=FileCheckpointer(".runs"))
 `MemoryCheckpointer` is for tests; `FileCheckpointer` writes one atomic JSON
 file per super-step under `.runs/<thread>/` (single-writer / single-process);
 `SqliteCheckpointer` stores checkpoints transactionally with atomic per-step
-revisions; and `RedisCheckpointer` (install the `redis` extra) persists to a
-Redis server for distributed / multi-process runners. All implement the same
-`Checkpointer` protocol, so they are interchangeable at
+revisions; `RedisCheckpointer` (install the `redis` extra) persists to a Redis
+server for distributed / multi-process runners; and `PostgresCheckpointer`
+(install the `postgres` extra) persists to a Postgres table. All implement the
+same `Checkpointer` protocol, so they are interchangeable at
 `compile(checkpointer=...)`.
 
 ```python
-from agentflow.checkpoint import RedisCheckpointer
-app = g.compile(checkpointer=RedisCheckpointer("redis://localhost:6379/0"))
+from agentflow.checkpoint import PostgresCheckpointer
+app = g.compile(checkpointer=PostgresCheckpointer("postgresql://localhost/app"))
 ```
+
+For production durability prefer `PostgresCheckpointer`: a committed row
+survives a crash by design. Redis is only crash-durable when you configure
+AOF/RDB persistence.
+
+### Optimistic concurrency and retention
+
+Each checkpoint carries a `revision` (the write count for its `(thread, step)`,
+set when you read it back). To guard a read-modify-write against a concurrent
+resume, pass the revision you read as `if_revision`; a stale value raises
+`CheckpointConflict` instead of silently overwriting.
+
+```python
+cp = await checkpointer.get(thread, step)
+# ... resume work off cp ...
+await checkpointer.put(new_cp, if_revision=cp.revision)  # raises on conflict
+```
+
+Two retention methods trim old state: `delete_thread(thread)` drops a whole
+thread, and `prune(thread, before_step=..., older_than=...)` deletes older
+checkpoints and returns how many it removed.
 
 A node calls `await ctx.interrupt(payload)` to suspend the run for a human.
 The runtime writes an interrupted checkpoint and stops. Later, `await
@@ -341,7 +363,7 @@ agentflow/
   observability.py    Hooks + RunMetrics
   telemetry.py        MultiHooks + JsonlTelemetry (durable JSONL)
   backends/           base protocols + kiro/codex/claude_code/ollama/openai/anthropic
-  checkpoint/         Checkpointer protocol + memory + file
+  checkpoint/         Checkpointer protocol + memory/file/sqlite/redis/postgres
   prebuilt/           iterate_until_converged, tool_loop, with_retry/with_timeout
 examples/             runnable examples
 tests/                pytest suite (async; offline by default, `-m live` for real backends)

@@ -58,11 +58,31 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Synchronous facade on `CompiledGraph`: `invoke_sync`, `resume_sync`, and
   `stream_sync` wrap `asyncio.run` for non-async callers, and refuse to run
   inside an existing event loop rather than deadlock.
+- `PostgresCheckpointer` (in the `postgres` extra, via `asyncpg`): durable
+  checkpoints in a Postgres table keyed by `(thread, step)` with a `revision`
+  column and `jsonb` payload. Transactional upsert bumps the revision
+  atomically; conditional writes check the stored revision under `FOR UPDATE`.
+  Postgres is the recommended production-durability default (a committed row
+  survives a crash without extra tuning). Lazily exported so the core stays
+  dependency-free.
+- Optimistic concurrency for checkpointers: `Checkpoint` gains a `revision`
+  field (write count per `(thread, step)`, set by the store on read), and
+  `Checkpointer.put(cp, if_revision=...)` performs a compare-and-set — a
+  mismatch raises the new `CheckpointConflict`. `None` (default) stays an
+  unconditional upsert, so existing `put(cp)` calls are unchanged. This lets
+  two resumes racing the same super-step fail loudly instead of silently
+  clobbering each other. Implemented across the Memory, Sqlite, File, Redis and
+  Postgres backends.
+- Retention on the `Checkpointer` protocol: `delete_thread(thread)` removes a
+  whole thread, and `prune(thread, before_step=..., older_than=...)` deletes
+  old checkpoints and returns the count removed. Implemented across all
+  backends.
 - `RedisCheckpointer` (in the `redis` extra): durable checkpoints on a Redis
   server for distributed / multi-process runners — JSON value per step plus a
   per-thread sorted-set step index, atomic pipeline writes. Shared checkpoint
   serialization extracted to `checkpoint/_serde.py`. Lazily exported so the
-  core stays redis-free.
+  core stays redis-free. Note: Redis is not crash-durable without AOF/RDB
+  persistence configured; prefer `PostgresCheckpointer` when durability matters.
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and
