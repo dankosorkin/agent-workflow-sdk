@@ -76,14 +76,54 @@ class Graph:
     # Building
     # ------------------------------------------------------------------
 
-    def add_node(self, name: str, fn: Node) -> "Graph":
+    def add_node(self, name: str, fn: "Node | Any") -> "Graph":
+        """Register a node.
+
+        ``fn`` is an async ``(state, ctx) -> update`` callable, or a
+        :class:`~agentflow.compiled.CompiledGraph` to embed as a subgraph. A
+        subgraph runs on an isolated checkpoint sub-thread, receives the parent
+        state restricted to the channels it declares, and its final state is
+        merged back as this node's update (only keys that are parent channels).
+        """
         if not isinstance(name, str) or not name:
             raise CompilationError("node name must be a non-empty string")
         if name in self.nodes:
             raise CompilationError(f"duplicate node {name!r}")
         if name in ("START", "END"):
             raise CompilationError(f"{name!r} is a reserved node name")
-        self.nodes[name] = fn
+
+        from agentflow.compiled import CompiledGraph
+
+        if isinstance(fn, CompiledGraph):
+            self.nodes[name] = _subgraph_node(name, fn, parent_channels=self.channels)
+        else:
+            self.nodes[name] = fn
+        return self
+
+    def add_subgraph(
+        self,
+        name: str,
+        subgraph: Any,
+        *,
+        input_map: Mapping[str, str] | None = None,
+        output_map: Mapping[str, str] | None = None,
+    ) -> "Graph":
+        """Embed a :class:`~agentflow.compiled.CompiledGraph` with explicit
+        channel mapping between parent and child.
+
+        ``input_map`` maps parent channel -> subgraph channel for the values
+        fed in; ``output_map`` maps subgraph channel -> parent channel for the
+        values merged back. When omitted, channels shared by name pass through.
+        Explicit maps let you avoid double-counting accumulator channels
+        (``add``/``append``) by routing the subgraph's result into a distinct
+        parent channel.
+        """
+        if name in self.nodes:
+            raise CompilationError(f"duplicate node {name!r}")
+        self.nodes[name] = _subgraph_node(
+            name, subgraph, parent_channels=self.channels,
+            input_map=input_map, output_map=output_map,
+        )
         return self
 
     def add_edge(self, src: Target, dst: Target) -> "Graph":
@@ -199,3 +239,59 @@ class Graph:
             raise CompilationError(
                 f"nodes unreachable from START: {sorted(unreachable)}"
             )
+
+
+# ---------------------------------------------------------------------------
+# Subgraph-as-node
+# ---------------------------------------------------------------------------
+
+def _subgraph_node(
+    name: str,
+    subgraph: Any,
+    *,
+    parent_channels: Mapping[str, Channel],
+    input_map: Mapping[str, str] | None = None,
+    output_map: Mapping[str, str] | None = None,
+):
+    """Wrap a CompiledGraph so it behaves as a single async node.
+
+    - Input: parent state routed into subgraph channels. With ``input_map``
+      (parent -> sub), only those are passed; otherwise channels shared by
+      name pass through.
+    - Execution: on an isolated checkpoint sub-thread derived from the parent
+      thread and step, so subgraph checkpoints never collide with the parent's.
+    - Output: subgraph final state routed back to parent channels. With
+      ``output_map`` (sub -> parent), only those are merged; otherwise channels
+      shared by name are merged via the parent's reducers.
+
+    Default (no maps) semantics: channels shared by name flow both ways. For
+    accumulator channels (``add``/``append``) this double-counts the value the
+    subgraph inherited from the parent — use ``output_map`` to route the result
+    into a distinct parent channel when that matters.
+    """
+    sub_channels = set(subgraph._graph.channels)
+    parent_names = set(parent_channels)
+
+    async def run_subgraph(state: Mapping[str, Any], ctx: Any) -> Mapping[str, Any]:
+        if input_map is not None:
+            sub_input = {
+                sub_key: state[p_key]
+                for p_key, sub_key in input_map.items()
+                if p_key in state
+            }
+        else:
+            sub_input = {k: v for k, v in state.items() if k in sub_channels}
+
+        sub_thread = f"{ctx.thread}::{name}@{ctx.step}"
+        final = await subgraph.invoke(sub_input, thread=sub_thread)
+
+        if output_map is not None:
+            return {
+                p_key: final[sub_key]
+                for sub_key, p_key in output_map.items()
+                if sub_key in final and p_key in parent_names
+            }
+        return {k: v for k, v in final.items() if k in parent_names}
+
+    run_subgraph.__name__ = f"subgraph[{name}]"
+    return run_subgraph
