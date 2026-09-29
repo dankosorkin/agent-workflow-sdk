@@ -14,7 +14,22 @@ from typing import Any, Protocol, runtime_checkable
 
 from agentflow.errors import CheckpointConflict
 
-__all__ = ["Checkpoint", "Checkpointer", "CheckpointConflict"]
+__all__ = ["Checkpoint", "Checkpointer", "CheckpointConflict", "ThreadInfo"]
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadInfo:
+    """A one-line summary of a thread for control-plane listing.
+
+    Derived from the thread's latest checkpoint so a caller can enumerate runs
+    (running / interrupted / finished) without reading full state.
+    """
+
+    thread: str
+    latest_step: int
+    interrupted: bool
+    done: bool
+    ts: str = ""
 
 
 @dataclass(frozen=True, slots=True)
@@ -74,6 +89,12 @@ class Checkpointer(Protocol):
 
     def history(self, thread: str) -> AsyncIterator[Checkpoint]:
         """Yield every checkpoint for ``thread`` in ascending step order."""
+        ...
+
+    async def list_threads(self, *, limit: int = 100, offset: int = 0) -> list[ThreadInfo]:
+        """Return a summary of each stored thread (latest step + status),
+        ordered by thread id. Enables control-plane enumeration of runs
+        without reading full state. ``limit``/``offset`` paginate."""
         ...
 
     async def delete_thread(self, thread: str) -> None:

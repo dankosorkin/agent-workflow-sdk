@@ -153,3 +153,21 @@ async def test_prune_older_than():
     removed = await cp.prune("t", older_than="2025-01-01T00:00:00")
     assert removed == 1
     assert [c.step async for c in cp.history("t")] == [2]
+
+
+async def test_list_threads():
+    from agentflow import ThreadInfo
+
+    cp = _checkpointer()
+    await cp.put(Checkpoint(thread="a", step=1, state={"n": 1}, next=("x",)))
+    await cp.put(Checkpoint(thread="a", step=2, state={"n": 2}, next=()))
+    await cp.put(Checkpoint(thread="b", step=1, state={"n": 1}, interrupted=True, next=("z",)))
+    infos = await cp.list_threads()
+    assert all(isinstance(i, ThreadInfo) for i in infos)
+    by = {i.thread: i for i in infos}
+    assert set(by) == {"a", "b"}
+    assert by["a"].latest_step == 2 and by["a"].done is True
+    assert by["b"].interrupted is True
+    # delete removes from listing
+    await cp.delete_thread("a")
+    assert [i.thread for i in await cp.list_threads()] == ["b"]

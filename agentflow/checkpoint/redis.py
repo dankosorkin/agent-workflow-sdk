@@ -18,7 +18,7 @@ import json
 from collections.abc import AsyncIterator
 
 from agentflow.checkpoint._serde import from_payload, to_payload
-from agentflow.checkpoint.base import Checkpoint
+from agentflow.checkpoint.base import Checkpoint, ThreadInfo
 from agentflow.errors import CheckpointConflict, CheckpointError
 from agentflow.redaction import Redactor, redact_none
 
@@ -60,6 +60,9 @@ class RedisCheckpointer:
     def _index_key(self, thread: str) -> str:
         return f"{self.prefix}:{thread}:steps"
 
+    def _threads_key(self) -> str:
+        return f"{self.prefix}:threads"
+
     async def close(self) -> None:
         """Close the underlying client (if we own it)."""
         await self._client.aclose()
@@ -78,6 +81,7 @@ class RedisCheckpointer:
             pipe = self._client.pipeline(transaction=True)
             pipe.set(key, blob)
             pipe.zadd(self._index_key(cp.thread), {str(cp.step): cp.step})
+            pipe.sadd(self._threads_key(), cp.thread)
             await pipe.execute()
             return f"{cp.thread}:{cp.step}"
 
@@ -93,6 +97,7 @@ class RedisCheckpointer:
             pipe.multi()
             pipe.set(key, blob)
             pipe.zadd(self._index_key(cp.thread), {str(cp.step): cp.step})
+            pipe.sadd(self._threads_key(), cp.thread)
             await pipe.execute()
         return f"{cp.thread}:{cp.step}"
 
@@ -143,6 +148,7 @@ class RedisCheckpointer:
         for s in steps:
             pipe.delete(self._cp_key(thread, int(str(s))))
         pipe.delete(self._index_key(thread))
+        pipe.srem(self._threads_key(), thread)
         await pipe.execute()
 
     async def prune(
@@ -166,3 +172,21 @@ class RedisCheckpointer:
             await pipe.execute()
             removed += 1
         return removed
+
+    async def list_threads(self, *, limit: int = 100, offset: int = 0) -> list[ThreadInfo]:
+        threads = sorted(str(t) for t in await self._client.smembers(self._threads_key()))
+        infos: list[ThreadInfo] = []
+        for thread in threads[offset : offset + limit]:
+            cp = await self.get(thread)
+            if cp is None:
+                continue
+            infos.append(
+                ThreadInfo(
+                    thread=thread,
+                    latest_step=cp.step,
+                    interrupted=cp.interrupted,
+                    done=cp.done,
+                    ts=cp.ts,
+                )
+            )
+        return infos

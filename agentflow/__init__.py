@@ -13,6 +13,7 @@ from agentflow.checkpoint import (
     FileCheckpointer,
     MemoryCheckpointer,
     SqliteCheckpointer,
+    ThreadInfo,
 )
 from agentflow.compiled import CompiledGraph
 from agentflow.errors import (
@@ -110,6 +111,7 @@ __all__ = [
     # checkpointing
     "Checkpoint",
     "Checkpointer",
+    "ThreadInfo",
     "MemoryCheckpointer",
     "FileCheckpointer",
     "SqliteCheckpointer",

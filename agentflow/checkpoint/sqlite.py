@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from agentflow.checkpoint._serde import from_payload, to_payload
-from agentflow.checkpoint.base import Checkpoint
+from agentflow.checkpoint.base import Checkpoint, ThreadInfo
 from agentflow.errors import CheckpointConflict, CheckpointError
 from agentflow.redaction import Redactor, redact_none
 
@@ -208,3 +208,40 @@ class SqliteCheckpointer:
             params.append(older_than)
         sql = f"DELETE FROM checkpoints WHERE {' AND '.join(clauses)}"
         return self._exec_write(sql, tuple(params))
+
+    async def list_threads(self, *, limit: int = 100, offset: int = 0) -> list[ThreadInfo]:
+        await self._ensure_schema()
+        rows = await asyncio.to_thread(self._list_thread_rows, limit, offset)
+        infos: list[ThreadInfo] = []
+        for thread, step, blob in rows:
+            cp = from_payload(json.loads(blob))
+            infos.append(
+                ThreadInfo(
+                    thread=thread,
+                    latest_step=step,
+                    interrupted=cp.interrupted,
+                    done=cp.done,
+                    ts=cp.ts,
+                )
+            )
+        return infos
+
+    def _list_thread_rows(self, limit: int, offset: int) -> list[tuple[str, int, str]]:
+        conn = self._connect()
+        try:
+            # Latest row per thread: join each thread's max(step) back to payload.
+            cur = conn.execute(
+                """
+                SELECT c.thread, c.step, c.payload
+                FROM checkpoints c
+                JOIN (
+                    SELECT thread, MAX(step) AS step FROM checkpoints GROUP BY thread
+                ) m ON c.thread = m.thread AND c.step = m.step
+                ORDER BY c.thread ASC
+                LIMIT ? OFFSET ?
+                """,
+                (limit, offset),
+            )
+            return [(r[0], r[1], r[2]) for r in cur.fetchall()]
+        finally:
+            conn.close()

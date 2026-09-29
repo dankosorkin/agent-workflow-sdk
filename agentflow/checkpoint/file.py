@@ -17,7 +17,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 
 from agentflow.checkpoint._serde import from_payload, to_payload
-from agentflow.checkpoint.base import Checkpoint
+from agentflow.checkpoint.base import Checkpoint, ThreadInfo
 from agentflow.errors import CheckpointConflict, CheckpointError
 from agentflow.redaction import Redactor, redact_none
 
@@ -145,6 +145,26 @@ class FileCheckpointer:
             path.unlink(missing_ok=True)
             removed += 1
         return removed
+
+    async def list_threads(self, *, limit: int = 100, offset: int = 0) -> list[ThreadInfo]:
+        if not self.root.is_dir():
+            return []
+        infos: list[ThreadInfo] = []
+        for directory in sorted(p for p in self.root.iterdir() if p.is_dir()):
+            files = sorted(directory.glob("*.json"))
+            if not files:
+                continue
+            cp = _load(files[-1])
+            infos.append(
+                ThreadInfo(
+                    thread=directory.name,
+                    latest_step=cp.step,
+                    interrupted=cp.interrupted,
+                    done=cp.done,
+                    ts=cp.ts,
+                )
+            )
+        return infos[offset : offset + limit]
 
 
 def _read_revision(path: Path) -> int:

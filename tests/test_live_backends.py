@@ -288,6 +288,11 @@ async def test_live_postgres_checkpointer():
         assert await cp.prune(thread, before_step=2) == 1
         assert [c.step async for c in cp.history(thread)] == [2, 3]
 
+        # list_threads summarizes the latest step per thread.
+        infos = await cp.list_threads()
+        summary = {i.thread: i for i in infos}
+        assert thread in summary and summary[thread].latest_step == 3
+
         # End-to-end HITL interrupt + resume on Postgres.
         g = Graph(_RedisLiveState)
 

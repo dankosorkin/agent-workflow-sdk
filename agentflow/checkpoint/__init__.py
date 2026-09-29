@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING
 
-from agentflow.checkpoint.base import Checkpoint, Checkpointer
+from agentflow.checkpoint.base import Checkpoint, Checkpointer, ThreadInfo
 from agentflow.checkpoint.file import FileCheckpointer
 from agentflow.checkpoint.memory import MemoryCheckpointer
 from agentflow.checkpoint.sqlite import SqliteCheckpointer
@@ -14,6 +14,7 @@ if TYPE_CHECKING:  # for type checkers only; the runtime import is lazy below
 __all__ = [
     "Checkpoint",
     "Checkpointer",
+    "ThreadInfo",
     "MemoryCheckpointer",
     "FileCheckpointer",
     "SqliteCheckpointer",

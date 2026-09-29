@@ -8,7 +8,7 @@ has its own live test. These three run everywhere with no external service.
 from __future__ import annotations
 
 import pytest
-from agentflow import FileCheckpointer, MemoryCheckpointer, SqliteCheckpointer
+from agentflow import FileCheckpointer, MemoryCheckpointer, SqliteCheckpointer, ThreadInfo
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import CheckpointConflict
 
@@ -105,3 +105,48 @@ async def test_prune_older_than(kind, tmp_path):
     assert removed == 1
     steps = [c.step async for c in cp.history("t")]
     assert steps == [2]
+
+
+@pytest.mark.parametrize("kind", BACKENDS)
+async def test_list_threads_empty(kind, tmp_path):
+    cp = _make(kind, tmp_path)
+    assert await cp.list_threads() == []
+
+
+@pytest.mark.parametrize("kind", BACKENDS)
+async def test_list_threads_summarizes_latest(kind, tmp_path):
+    cp = _make(kind, tmp_path)
+    # thread "a": two steps, latest not done (has frontier)
+    await cp.put(Checkpoint(thread="a", step=1, state={"n": 1}, next=("x",)))
+    await cp.put(Checkpoint(thread="a", step=2, state={"n": 2}, next=("y",), ts="2030"))
+    # thread "b": finished (no frontier, not interrupted)
+    await cp.put(Checkpoint(thread="b", step=1, state={"n": 1}, next=()))
+    # thread "c": interrupted
+    await cp.put(Checkpoint(thread="c", step=1, state={"n": 1}, next=("z",), interrupted=True))
+    infos = await cp.list_threads()
+    assert all(isinstance(i, ThreadInfo) for i in infos)
+    by = {i.thread: i for i in infos}
+    assert set(by) == {"a", "b", "c"}
+    assert by["a"].latest_step == 2 and by["a"].done is False and by["a"].ts == "2030"
+    assert by["b"].done is True and by["b"].interrupted is False
+    assert by["c"].interrupted is True and by["c"].done is False
+
+
+@pytest.mark.parametrize("kind", BACKENDS)
+async def test_list_threads_pagination_and_order(kind, tmp_path):
+    cp = _make(kind, tmp_path)
+    for name in ("t3", "t1", "t2"):
+        await cp.put(Checkpoint(thread=name, step=1, state={"n": 1}))
+    infos = await cp.list_threads()
+    assert [i.thread for i in infos] == ["t1", "t2", "t3"]  # sorted by thread
+    page = await cp.list_threads(limit=1, offset=1)
+    assert [i.thread for i in page] == ["t2"]
+
+
+@pytest.mark.parametrize("kind", BACKENDS)
+async def test_delete_thread_drops_from_listing(kind, tmp_path):
+    cp = _make(kind, tmp_path)
+    await cp.put(Checkpoint(thread="a", step=1, state={"n": 1}))
+    await cp.put(Checkpoint(thread="b", step=1, state={"n": 1}))
+    await cp.delete_thread("a")
+    assert [i.thread for i in await cp.list_threads()] == ["b"]

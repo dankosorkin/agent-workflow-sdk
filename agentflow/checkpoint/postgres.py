@@ -21,7 +21,7 @@ import json
 from collections.abc import AsyncIterator
 
 from agentflow.checkpoint._serde import from_payload, to_payload
-from agentflow.checkpoint.base import Checkpoint
+from agentflow.checkpoint.base import Checkpoint, ThreadInfo
 from agentflow.errors import CheckpointConflict, CheckpointError
 from agentflow.redaction import Redactor, redact_none
 
@@ -188,3 +188,31 @@ class PostgresCheckpointer:
         result = await pool.execute(sql, *params)
         # asyncpg returns a tag like "DELETE 3".
         return int(result.split()[-1]) if result else 0
+
+    async def list_threads(self, *, limit: int = 100, offset: int = 0) -> list[ThreadInfo]:
+        pool = await self._get_pool()
+        # DISTINCT ON picks the latest row per thread (highest step).
+        rows = await pool.fetch(
+            f"SELECT DISTINCT ON (thread) thread, step, payload "
+            f"FROM {self.table} "
+            "ORDER BY thread, step DESC "
+            "LIMIT $1 OFFSET $2",
+            limit,
+            offset,
+        )
+        infos: list[ThreadInfo] = []
+        for row in rows:
+            payload = row["payload"]
+            if isinstance(payload, str):
+                payload = json.loads(payload)
+            cp = from_payload(payload)
+            infos.append(
+                ThreadInfo(
+                    thread=row["thread"],
+                    latest_step=row["step"],
+                    interrupted=cp.interrupted,
+                    done=cp.done,
+                    ts=cp.ts,
+                )
+            )
+        return infos

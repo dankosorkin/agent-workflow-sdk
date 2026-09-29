@@ -5,7 +5,7 @@ from __future__ import annotations
 import dataclasses
 from collections.abc import AsyncIterator
 
-from agentflow.checkpoint.base import Checkpoint
+from agentflow.checkpoint.base import Checkpoint, ThreadInfo
 from agentflow.errors import CheckpointConflict
 
 __all__ = ["MemoryCheckpointer"]
@@ -57,3 +57,21 @@ class MemoryCheckpointer:
         for s in to_remove:
             del steps[s]
         return len(to_remove)
+
+    async def list_threads(self, *, limit: int = 100, offset: int = 0) -> list[ThreadInfo]:
+        infos: list[ThreadInfo] = []
+        for thread in sorted(self._threads):
+            steps = self._threads[thread]
+            if not steps:
+                continue
+            cp = steps[max(steps)]
+            infos.append(
+                ThreadInfo(
+                    thread=thread,
+                    latest_step=cp.step,
+                    interrupted=cp.interrupted,
+                    done=cp.done,
+                    ts=cp.ts,
+                )
+            )
+        return infos[offset : offset + limit]
