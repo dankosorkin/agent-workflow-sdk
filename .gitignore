@@ -8,3 +8,6 @@ telemetry/
 dist/
 build/
 .env
+.coverage
+coverage.xml
+.pytest_cache/

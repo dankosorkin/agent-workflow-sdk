@@ -26,10 +26,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -e '.[ollama,dev]'
 
-      - name: Run offline test suite
+      - name: Run offline test suite with coverage
         # The default addopts (-m 'not live') skips backend smoke tests, so CI
         # stays hermetic — no agent CLIs or network required.
-        run: pytest -q
+        run: pytest -q --cov --cov-report=term-missing --cov-report=xml
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-${{ matrix.python-version }}
+          path: coverage.xml
+          if-no-files-found: ignore
 
   build:
     runs-on: ubuntu-latest
