@@ -132,6 +132,21 @@ await g.compile(hooks=m).invoke({...})
 print(m.summary())   # {"steps": 3, "completed": True, "nodes": {...}}
 ```
 
+For durable telemetry, `JsonlTelemetry` is a `Hooks` that writes one JSON line
+per event (`run_start`, `node_start/end/error`, `event`, `step`, `run_end`) —
+backend events surfaced via `ctx.emit` are logged too. Compose several
+listeners with `MultiHooks`; a failing listener never breaks the run or the
+others:
+
+```python
+from agentflow import MultiHooks, RunMetrics, JsonlTelemetry
+metrics = RunMetrics()
+telemetry = JsonlTelemetry(".runs")           # dir -> one file per thread
+app = g.compile(hooks=MultiHooks(metrics, telemetry))
+```
+
+See `examples/telemetry_demo.py` for a runnable version.
+
 ## Backends
 
 Two kinds of backend share one event stream, so a node calls either the same
@@ -271,6 +286,7 @@ agentflow/
   events.py           messages, requests, streaming events
   errors.py           exception hierarchy
   observability.py    Hooks + RunMetrics
+  telemetry.py        MultiHooks + JsonlTelemetry (durable JSONL)
   backends/           base protocols + kiro/codex/claude_code/ollama/openai/anthropic
   checkpoint/         Checkpointer protocol + memory + file
   prebuilt/           iterate_until_converged, tool_loop, with_retry/with_timeout

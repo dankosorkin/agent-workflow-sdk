@@ -4,12 +4,16 @@
 
 ## Сделано
 
-- Live-тест `OpenAIBackend` против настоящего OpenAI — закрыто (прогнан с
-  реальным ключом, модель `gpt-4.1-nano`).
-- Live-тест `AnthropicBackend` против Messages API — закрыто (org-level ключ +
-  `ANTHROPIC_WORKSPACE_ID`, модель `claude-haiku-4-5-20251001`).
+- Live-тест `OpenAIBackend` против настоящего OpenAI — закрыто.
+- Live-тест `AnthropicBackend` против Messages API — закрыто.
+- Телеметрия: `Hooks` + `RunMetrics` (метрики в памяти), `JsonlTelemetry`
+  (durable JSONL, включая backend-события через `ctx.emit`/`on_event`),
+  `MultiHooks` (композиция листенеров) — закрыто.
 
 ## Открыто
 
-- Демо `CompiledGraph.stream()` с проброшенными наружу backend-событиями
-  (токены, tool-calls) — прогнать вживую и оформить как пример.
+- Evaluation-слой: `Evaluator` протокол, чекеры (exact/JSON-схема/предикат/
+  LLM-judge поверх `LLMBackend`), batch-прогон `evaluate(graph, dataset,
+  evaluators)` с отчётом. Обсудить дизайн.
+- Опционально: OpenTelemetry-экспортер (спаны) как ещё одна реализация
+  `Hooks`, поверх той же событийной модели.

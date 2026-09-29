@@ -78,12 +78,24 @@ class Context:
     step: int
     _emit_queue: "asyncio.Queue[StreamEvent] | None" = field(default=None, repr=False)
     _resume: _Resume | None = field(default=None, repr=False)
+    _hooks: "Hooks | None" = field(default=None, repr=False)
 
     def emit(self, event: BackendEvent) -> None:
-        """Surface a backend event to the run's stream."""
+        """Surface a backend event to the run's stream and telemetry hooks."""
         if self._emit_queue is not None:
             self._emit_queue.put_nowait(
                 StreamEvent(kind="backend", step=self.step, node=self.node, data=event)
+            )
+        if self._hooks is not None:
+            # emit() is sync but hooks are async; schedule best-effort so a
+            # telemetry sink can record backend events without blocking the
+            # node. Fire-and-forget, exceptions swallowed by _safe.
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                return
+            loop.create_task(
+                _safe(self._hooks.on_event(self.thread, self.step, self.node, event))
             )
 
     async def interrupt(self, payload: Any = None) -> Any:
@@ -221,6 +233,7 @@ async def run(
                 step=step,
                 _emit_queue=emit_queue,
                 _resume=_Resume(resume_values[name]) if name in resume_values else None,
+                _hooks=hooks,
             )
             for name in frontier
         }
