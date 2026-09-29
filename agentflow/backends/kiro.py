@@ -91,6 +91,9 @@ class KiroBackend(BaseAgentBackend):
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=None,  # inherit parent's stderr
+                # ACP responses (e.g. session/new listing every available mode)
+                # can exceed asyncio's 64KiB default readline buffer; raise it.
+                limit=8 * 1024 * 1024,
             )
         except OSError as exc:
             raise BackendTransportError(f"could not start kiro-cli: {exc}") from exc

@@ -102,7 +102,9 @@ Two kinds of backend share one event stream, so a node calls either the same
 way.
 
 - Agent backends (`AgentBackend`) drive a session that runs its own tools and
-  asks permission. `KiroBackend` is the first; Codex and Claude Code follow.
+  asks permission. Available: `KiroBackend` (persistent ACP session over
+  `kiro-cli`), `CodexBackend` (`codex exec --json`), `ClaudeCodeBackend`
+  (`claude -p --output-format stream-json`).
 - LLM backends (`LLMBackend`) are stateless: messages in, token stream out.
   They never run tools themselves — a tool call is a request the graph
   fulfils. `OllamaBackend` is the example and the template for any
@@ -110,10 +112,14 @@ way.
 
 ```python
 from agentflow.backends.kiro import KiroBackend
+from agentflow.backends.codex import CodexBackend
+from agentflow.backends.claude_code import ClaudeCodeBackend
 from agentflow.backends.ollama import OllamaBackend
 
-agent = KiroBackend("my-agent", engine="v3")
-llm = OllamaBackend("llama3.2")
+agent = KiroBackend("vibe", engine="v3")          # persistent session
+codex = CodexBackend(sandbox="read-only")          # one-shot per turn
+claude = ClaudeCodeBackend(model="sonnet")         # one-shot per turn
+llm = OllamaBackend("llama3.2")                     # local HTTP
 
 await agent.start()
 async for event in agent.prompt("summarize the repo"):
@@ -121,9 +127,16 @@ async for event in agent.prompt("summarize the repo"):
 await agent.close()
 ```
 
-Backends are constructed by you and passed into your nodes. The core never
-imports a backend, so importing `agentflow` pulls in no subprocess or HTTP
-dependency.
+The three agent backends have different lifecycles under one interface. Kiro
+holds a long-lived JSON-RPC session; Codex and Claude Code run a fresh
+subprocess per turn and carry a resumable session id between turns. Either way
+you call `start()`, `prompt(text)`, `close()` and consume the same event
+stream. Backends are constructed by you and passed into your nodes. The core
+never imports a backend, so importing `agentflow` pulls in no subprocess or
+HTTP dependency.
+
+Run `python examples/agents_demo.py` to smoke every backend installed on your
+machine (set `KIRO_AGENT` to a valid agent id, e.g. `vibe`, to include Kiro).
 
 ### Permission policies
 
