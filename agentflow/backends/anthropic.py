@@ -58,6 +58,7 @@ class AnthropicBackend(BaseLLMBackend):
         base_url: str = "https://api.anthropic.com",
         max_tokens: int = 1024,
         anthropic_version: str = _DEFAULT_VERSION,
+        workspace_id: str | None = None,
         options: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 120.0,
@@ -67,6 +68,9 @@ class AnthropicBackend(BaseLLMBackend):
         self.base_url = base_url.rstrip("/")
         self.max_tokens = max_tokens
         self.anthropic_version = anthropic_version
+        # An org-level (unscoped) key needs the workspace id header; a
+        # workspace-scoped key does not.
+        self.workspace_id = workspace_id
         self.options = dict(options or {})
         self.extra_headers = dict(headers or {})
         self.timeout = timeout
@@ -81,6 +85,8 @@ class AnthropicBackend(BaseLLMBackend):
             }
             if self.api_key:
                 headers.setdefault("x-api-key", self.api_key)
+            if self.workspace_id:
+                headers.setdefault("anthropic-workspace-id", self.workspace_id)
             self._client = httpx.AsyncClient(
                 base_url=self.base_url, timeout=self.timeout, headers=headers
             )

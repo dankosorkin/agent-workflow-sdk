@@ -152,7 +152,8 @@ async def test_live_anthropic():
     from agentflow.backends.anthropic import AnthropicBackend
 
     model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
-    backend = AnthropicBackend(model, api_key=key, max_tokens=64)
+    workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID")
+    backend = AnthropicBackend(model, api_key=key, max_tokens=64, workspace_id=workspace)
     await backend.start()
     try:
         text, final = await _collect(backend.chat([Message(role="user", content=PROMPT)]))
