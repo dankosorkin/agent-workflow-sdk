@@ -4,7 +4,10 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.1.0] - 2026-09-29
+
+First public release: an async-first, LangGraph-style SDK for agent workflows
+with pluggable agent and LLM backends.
 
 ### Added
 
@@ -131,12 +134,7 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   via `pytest --cov`. CI reports coverage.
 - `CHANGELOG.md`.
 
-## [0.1.0]
-
-First working version: an async-first, LangGraph-style SDK for agent
-workflows with pluggable agent and LLM backends.
-
-### Added
+Core engine (the foundation the above builds on):
 
 - Graph engine: `Graph` builder (`add_node`, `add_edge`,
   `add_conditional_edges`), `START`/`END` sentinels, compile-time validation
@@ -167,5 +165,4 @@ workflows with pluggable agent and LLM backends.
   GitHub Actions CI (offline suite + wheel build), and a `live` pytest marker
   separating opt-in real-backend smoke tests from the hermetic default run.
 
-[Unreleased]: https://github.com/dankosorkin/agent-workflow-sdk/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/dankosorkin/agent-workflow-sdk/releases/tag/v0.1.0
