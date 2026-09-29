@@ -181,6 +181,35 @@ app = iterate_until_converged(work, perfect_score=100.0, patience=4)
 result = await app.invoke({})
 ```
 
+`agentflow.prebuilt.tool_loop(llm, tools)` compiles the function-calling agent
+loop as a two-node graph: an `agent` node calls the `LLMBackend`, a `tools`
+node runs any tool the model requested and appends the result to the
+conversation, and a conditional edge repeats until the model answers without a
+tool call. The LLM never executes a tool itself — the graph does.
+
+```python
+from agentflow.prebuilt import Tool, tool_loop
+from agentflow.events import Message
+from agentflow.backends.ollama import OllamaBackend
+
+async def multiply(a: float, b: float) -> str:
+    return str(a * b)
+
+tools = [Tool("multiply", multiply, description="Multiply two numbers",
+              schema={"type": "object",
+                      "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                      "required": ["a", "b"]})]
+
+llm = OllamaBackend("gpt-oss")
+await llm.start()
+app = tool_loop(llm, tools, max_turns=6)
+out = await app.invoke({"messages": [Message("user", "What is 23 * 19?")]})
+print(out["messages"][-1].content)   # -> the model's final answer
+await llm.close()
+```
+
+See `examples/tool_loop_ollama.py` for a runnable version.
+
 ## Project layout
 
 ```text
