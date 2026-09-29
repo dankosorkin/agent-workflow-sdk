@@ -111,6 +111,7 @@ __all__ = [
     "MemoryCheckpointer",
     "FileCheckpointer",
     "SqliteCheckpointer",
+    "RedisCheckpointer",
     # errors
     "AgentFlowError",
     "GraphError",
@@ -123,3 +124,13 @@ __all__ = [
     "CheckpointError",
     "InterruptError",
 ]
+
+
+def __getattr__(name: str):
+    # RedisCheckpointer needs the optional `redis` extra; import it lazily so
+    # `import agentflow` works (and stays redis-free) without the extra.
+    if name == "RedisCheckpointer":
+        from agentflow.checkpoint import RedisCheckpointer
+
+        return RedisCheckpointer
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

@@ -19,7 +19,6 @@ The import root is `agentflow`. The distribution name is
 - Durable by default: every super-step is checkpointed, runs resume after a
   crash, and human-in-the-loop interrupts suspend and resume a run.
 
-The full design rationale is in `DESIGN.md`.
 
 ## Install
 
@@ -256,9 +255,15 @@ app = g.compile(checkpointer=FileCheckpointer(".runs"))
 `MemoryCheckpointer` is for tests; `FileCheckpointer` writes one atomic JSON
 file per super-step under `.runs/<thread>/` (single-writer / single-process);
 `SqliteCheckpointer` stores checkpoints transactionally with atomic per-step
-revisions and is the choice for concurrent or multi-process runners. All three
-implement the same `Checkpointer` protocol, so they are interchangeable at
+revisions; and `RedisCheckpointer` (install the `redis` extra) persists to a
+Redis server for distributed / multi-process runners. All implement the same
+`Checkpointer` protocol, so they are interchangeable at
 `compile(checkpointer=...)`.
+
+```python
+from agentflow.checkpoint import RedisCheckpointer
+app = g.compile(checkpointer=RedisCheckpointer("redis://localhost:6379/0"))
+```
 
 A node calls `await ctx.interrupt(payload)` to suspend the run for a human.
 The runtime writes an interrupted checkpoint and stops. Later, `await

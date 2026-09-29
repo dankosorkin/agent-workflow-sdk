@@ -58,6 +58,11 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Synchronous facade on `CompiledGraph`: `invoke_sync`, `resume_sync`, and
   `stream_sync` wrap `asyncio.run` for non-async callers, and refuse to run
   inside an existing event loop rather than deadlock.
+- `RedisCheckpointer` (in the `redis` extra): durable checkpoints on a Redis
+  server for distributed / multi-process runners — JSON value per step plus a
+  per-thread sorted-set step index, atomic pipeline writes. Shared checkpoint
+  serialization extracted to `checkpoint/_serde.py`. Lazily exported so the
+  core stays redis-free.
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and

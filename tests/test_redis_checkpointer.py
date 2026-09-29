@@ -1,0 +1,106 @@
+"""RedisCheckpointer tests via fakeredis (offline) — mirrors the sqlite suite."""
+
+from __future__ import annotations
+
+from typing import Annotated
+
+import pytest
+
+fakeredis = pytest.importorskip("fakeredis")
+
+from agentflow import END, START, Graph, State, append, last  # noqa: E402
+from agentflow.checkpoint.base import Checkpoint  # noqa: E402
+from agentflow.checkpoint.redis import RedisCheckpointer  # noqa: E402
+
+
+def _checkpointer():
+    # fakeredis async server, decode_responses to match our client config.
+    client = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    return RedisCheckpointer(client=client)
+
+
+async def test_put_get_roundtrip():
+    cp = _checkpointer()
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 5}, next=("a",)))
+    got = await cp.get("t")
+    assert got is not None
+    assert got.step == 1 and got.state["n"] == 5 and got.next == ("a",)
+
+
+async def test_get_specific_step():
+    cp = _checkpointer()
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 1}, next=("a",)))
+    await cp.put(Checkpoint(thread="t", step=2, state={"n": 2}, next=()))
+    assert (await cp.get("t", 1)).state["n"] == 1
+    assert (await cp.get("t")).step == 2  # latest
+
+
+async def test_history_ordered():
+    cp = _checkpointer()
+    for i in (3, 1, 2):  # insert out of order; history must sort ascending
+        await cp.put(Checkpoint(thread="t", step=i, state={"n": i}, next=()))
+    steps = [c.step async for c in cp.history("t")]
+    assert steps == [1, 2, 3]
+
+
+async def test_overwrite_same_step():
+    cp = _checkpointer()
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 1}, next=("a",)))
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 9}, next=()))
+    got = await cp.get("t", 1)
+    assert got.state["n"] == 9  # last write wins
+    # index still has exactly one entry for the step
+    steps = [c.step async for c in cp.history("t")]
+    assert steps == [1]
+
+
+async def test_missing_thread_returns_none():
+    cp = _checkpointer()
+    assert await cp.get("nope") is None
+
+
+async def test_drives_graph_and_resumes():
+    class S(State):
+        answer: Annotated[str, last]
+        stage: Annotated[list, append]
+
+    g = Graph(S)
+
+    async def ask(state, ctx):
+        human = await ctx.interrupt({"q": "ok?"})
+        return {"answer": human, "stage": "asked"}
+
+    async def finish(state, ctx):
+        return {"stage": "finished"}
+
+    g.add_node("ask", ask)
+    g.add_node("finish", finish)
+    g.add_edge(START, "ask")
+    g.add_edge("ask", "finish")
+    g.add_edge("finish", END)
+
+    cp = _checkpointer()
+    app = g.compile(checkpointer=cp)
+
+    await app.invoke({"stage": []}, thread="hitl")
+    state = await app.get_state("hitl")
+    assert state.interrupted and state.interrupt_payload == {"q": "ok?"}
+
+    out = await app.resume("hitl", value="yes")
+    assert out["answer"] == "yes"
+    assert out["stage"] == ["asked", "finished"]
+
+
+async def test_redaction_masks_state():
+    from agentflow import RedactKeys
+
+    cp = RedisCheckpointer(
+        client=fakeredis.aioredis.FakeRedis(decode_responses=True),
+        redact=RedactKeys(),
+    )
+    await cp.put(
+        Checkpoint(thread="t", step=1, state={"api_key": "sk-SECRET", "note": "keep"}, next=())
+    )
+    got = await cp.get("t", 1)
+    assert got.state["api_key"] == "***REDACTED***"
+    assert got.state["note"] == "keep"

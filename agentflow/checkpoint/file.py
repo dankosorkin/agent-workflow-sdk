@@ -14,8 +14,8 @@ import os
 import tempfile
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
+from agentflow.checkpoint._serde import from_payload, to_payload
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import CheckpointError
 from agentflow.redaction import Redactor, redact_none
@@ -76,7 +76,7 @@ class FileCheckpointer:
             _chmod(directory, 0o700)
             _chmod(self.root, 0o700)
         path = directory / f"{cp.step:06d}.json"
-        payload = _to_payload(cp)
+        payload = to_payload(cp)
         payload["state"] = self._redact(payload["state"])
         payload["interrupt_payload"] = self._redact(payload["interrupt_payload"])
         try:
@@ -103,44 +103,14 @@ class FileCheckpointer:
             target = directory / f"{step:06d}.json"
             if not target.exists():
                 return None
-        return _from_payload(json.loads(target.read_text(encoding="utf-8")))
+        return from_payload(json.loads(target.read_text(encoding="utf-8")))
 
     async def history(self, thread: str) -> AsyncIterator[Checkpoint]:
         directory = self._thread_dir(thread)
         if not directory.is_dir():
             return
         for path in sorted(directory.glob("*.json")):
-            yield _from_payload(json.loads(path.read_text(encoding="utf-8")))
-
-
-def _to_payload(cp: Checkpoint) -> dict[str, Any]:
-    return {
-        "thread": cp.thread,
-        "step": cp.step,
-        "state": dict(cp.state),
-        "next": list(cp.next),
-        "parent": cp.parent,
-        "ts": cp.ts,
-        "interrupted": cp.interrupted,
-        "interrupt_node": cp.interrupt_node,
-        "interrupt_payload": cp.interrupt_payload,
-        "extra": dict(cp.extra),
-    }
-
-
-def _from_payload(d: dict[str, Any]) -> Checkpoint:
-    return Checkpoint(
-        thread=d["thread"],
-        step=d["step"],
-        state=d["state"],
-        next=tuple(d.get("next", ())),
-        parent=d.get("parent"),
-        ts=d.get("ts", ""),
-        interrupted=d.get("interrupted", False),
-        interrupt_node=d.get("interrupt_node"),
-        interrupt_payload=d.get("interrupt_payload"),
-        extra=d.get("extra", {}),
-    )
+            yield from_payload(json.loads(path.read_text(encoding="utf-8")))
 
 
 def _atomic_write(path: Path, data: str) -> None:

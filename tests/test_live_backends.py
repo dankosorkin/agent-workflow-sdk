@@ -17,14 +17,21 @@ import json
 import os
 import shutil
 import urllib.request
+from typing import Annotated
 
 import pytest
+from agentflow import State, append, last
 from agentflow.backends.base import AllowAll
 from agentflow.events import Message, TextChunk, TurnEnd
 
 pytestmark = pytest.mark.live
 
 PROMPT = "Reply with exactly the word: pong. Do not use any tools."
+
+
+class _RedisLiveState(State):
+    answer: Annotated[str, last]
+    stage: Annotated[list, append]
 
 
 async def _collect(stream):
@@ -161,6 +168,44 @@ async def test_live_anthropic():
         await backend.close()
     assert final is not None
     assert (text + (final.text or "")).strip()
+
+
+async def test_live_redis_checkpointer():
+    """RedisCheckpointer against a real Redis (AGENTFLOW_TEST_REDIS_URL)."""
+    url = os.environ.get("AGENTFLOW_TEST_REDIS_URL")
+    if not url:
+        pytest.skip("AGENTFLOW_TEST_REDIS_URL not set (e.g. redis://localhost:6379/0)")
+
+    from agentflow import END, START, Graph
+    from agentflow.checkpoint.redis import RedisCheckpointer
+
+    g = Graph(_RedisLiveState)
+
+    async def ask(state, ctx):
+        human = await ctx.interrupt({"q": "ok?"})
+        return {"answer": human, "stage": "asked"}
+
+    async def finish(state, ctx):
+        return {"stage": "finished"}
+
+    g.add_node("ask", ask)
+    g.add_node("finish", finish)
+    g.add_edge(START, "ask")
+    g.add_edge("ask", "finish")
+    g.add_edge("finish", END)
+
+    cp = RedisCheckpointer(url, prefix=f"aftest:{os.getpid()}")
+    app = g.compile(checkpointer=cp)
+    thread = f"live-{os.getpid()}"
+    try:
+        await app.invoke({"stage": []}, thread=thread)
+        state = await app.get_state(thread)
+        assert state is not None and state.interrupted
+        out = await app.resume(thread, value="yes")
+        assert out["answer"] == "yes"
+        assert out["stage"] == ["asked", "finished"]
+    finally:
+        await cp.close()
 
 
 async def test_live_tool_loop_ollama():

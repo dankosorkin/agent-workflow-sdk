@@ -20,8 +20,8 @@ import json
 import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any
 
+from agentflow.checkpoint._serde import from_payload, to_payload
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import CheckpointError
 from agentflow.redaction import Redactor, redact_none
@@ -84,7 +84,7 @@ class SqliteCheckpointer:
 
     async def put(self, cp: Checkpoint) -> str:
         await self._ensure_schema()
-        payload = _to_payload(cp)
+        payload = to_payload(cp)
         payload["state"] = self._redact(payload["state"])
         payload["interrupt_payload"] = self._redact(payload["interrupt_payload"])
         try:
@@ -123,7 +123,7 @@ class SqliteCheckpointer:
     async def get(self, thread: str, step: int | None = None) -> Checkpoint | None:
         await self._ensure_schema()
         row = await asyncio.to_thread(self._get_row, thread, step)
-        return _from_payload(json.loads(row)) if row is not None else None
+        return from_payload(json.loads(row)) if row is not None else None
 
     def _get_row(self, thread: str, step: int | None) -> str | None:
         conn = self._connect()
@@ -147,7 +147,7 @@ class SqliteCheckpointer:
         await self._ensure_schema()
         rows = await asyncio.to_thread(self._history_rows, thread)
         for blob in rows:
-            yield _from_payload(json.loads(blob))
+            yield from_payload(json.loads(blob))
 
     def _history_rows(self, thread: str) -> list[str]:
         conn = self._connect()
@@ -159,33 +159,3 @@ class SqliteCheckpointer:
             return [r[0] for r in cur.fetchall()]
         finally:
             conn.close()
-
-
-def _to_payload(cp: Checkpoint) -> dict[str, Any]:
-    return {
-        "thread": cp.thread,
-        "step": cp.step,
-        "state": dict(cp.state),
-        "next": list(cp.next),
-        "parent": cp.parent,
-        "ts": cp.ts,
-        "interrupted": cp.interrupted,
-        "interrupt_node": cp.interrupt_node,
-        "interrupt_payload": cp.interrupt_payload,
-        "extra": dict(cp.extra),
-    }
-
-
-def _from_payload(d: dict[str, Any]) -> Checkpoint:
-    return Checkpoint(
-        thread=d["thread"],
-        step=d["step"],
-        state=d["state"],
-        next=tuple(d.get("next", ())),
-        parent=d.get("parent"),
-        ts=d.get("ts", ""),
-        interrupted=d.get("interrupted", False),
-        interrupt_node=d.get("interrupt_node"),
-        interrupt_payload=d.get("interrupt_payload"),
-        extra=d.get("extra", {}),
-    )
