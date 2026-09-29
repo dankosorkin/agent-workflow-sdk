@@ -58,6 +58,14 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Synchronous facade on `CompiledGraph`: `invoke_sync`, `resume_sync`, and
   `stream_sync` wrap `asyncio.run` for non-async callers, and refuse to run
   inside an existing event loop rather than deadlock.
+- `Store` protocol for durable cross-thread memory (distinct from a
+  checkpointer, which persists one thread's execution state). Items are
+  addressed by a `namespace` tuple and a string `key`, hold any JSON value, and
+  support an optional per-item TTL. Methods: `get`, `put`, `delete`, `search`
+  (by namespace prefix) and `list_namespaces`. Ships `MemoryStore` (ephemeral)
+  and `PostgresStore` (in the `postgres` extra; `text[]` namespace column for
+  native prefix search, `jsonb` value, `timestamptz` expiry filtered from every
+  read). Lazily exported so the core stays dependency-free.
 - `PostgresCheckpointer` (in the `postgres` extra, via `asyncpg`): durable
   checkpoints in a Postgres table keyed by `(thread, step)` with a `revision`
   column and `jsonb` payload. Transactional upsert bumps the revision

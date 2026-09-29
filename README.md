@@ -293,6 +293,35 @@ app.resume(thread, value=answer)` continues the run, and the same `interrupt`
 call returns `answer`. This works across process restarts, since the frontier
 is persisted.
 
+## Cross-thread memory (Store)
+
+A checkpointer persists one thread's execution state so it can resume. A
+`Store` is the other axis: durable key-value data shared across threads such as
+user profiles, learned facts, or long-term agent memory. Items live under a
+`namespace` (a tuple of path segments) and a string `key`; the value is any
+JSON-serializable object.
+
+```python
+from agentflow import MemoryStore
+
+store = MemoryStore()
+await store.put(("users", "u1", "memories"), "favorite_color", "blue")
+item = await store.get(("users", "u1", "memories"), "favorite_color")
+recent = await store.search(("users", "u1"))  # everything under that prefix
+```
+
+`MemoryStore` is ephemeral (tests, single process); `PostgresStore` (install
+the `postgres` extra) is durable and shared across processes. Both implement
+the same `Store` protocol. `put(..., ttl=seconds)` expires an item; expired
+items never surface from `get` or `search`.
+
+```python
+from agentflow.store import PostgresStore
+
+store = PostgresStore("postgresql://localhost/app")
+await store.put(("cache",), "doc-42", payload, ttl=3600)
+```
+
 ## Prebuilt patterns
 
 `agentflow.prebuilt.iterate_until_converged(work, ...)` compiles the classic
@@ -364,6 +393,7 @@ agentflow/
   telemetry.py        MultiHooks + JsonlTelemetry (durable JSONL)
   backends/           base protocols + kiro/codex/claude_code/ollama/openai/anthropic
   checkpoint/         Checkpointer protocol + memory/file/sqlite/redis/postgres
+  store/              Store protocol (cross-thread memory) + memory/postgres
   prebuilt/           iterate_until_converged, tool_loop, with_retry/with_timeout
 examples/             runnable examples
 tests/                pytest suite (async; offline by default, `-m live` for real backends)

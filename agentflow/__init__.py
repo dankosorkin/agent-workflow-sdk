@@ -58,6 +58,7 @@ from agentflow.state import (
     merge,
     union,
 )
+from agentflow.store import Item, MemoryStore, Store
 from agentflow.telemetry import JsonlTelemetry, MultiHooks
 
 __version__ = "0.1.0"
@@ -114,6 +115,11 @@ __all__ = [
     "SqliteCheckpointer",
     "RedisCheckpointer",
     "PostgresCheckpointer",
+    # store (cross-thread memory)
+    "Item",
+    "Store",
+    "MemoryStore",
+    "PostgresStore",
     # errors
     "AgentFlowError",
     "GraphError",
@@ -140,4 +146,8 @@ def __getattr__(name: str):
         from agentflow.checkpoint import PostgresCheckpointer
 
         return PostgresCheckpointer
+    if name == "PostgresStore":
+        from agentflow.store import PostgresStore
+
+        return PostgresStore
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

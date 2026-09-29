@@ -13,6 +13,7 @@ some text, not exact model output.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import shutil
@@ -315,3 +316,57 @@ async def test_live_postgres_checkpointer():
         pool = await cp._get_pool()
         await pool.execute(f"DROP TABLE IF EXISTS {table}")
         await cp.close()
+
+
+async def test_live_postgres_store():
+    """PostgresStore against a real Postgres (AGENTFLOW_TEST_POSTGRES_DSN)."""
+    dsn = os.environ.get("AGENTFLOW_TEST_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip(
+            "AGENTFLOW_TEST_POSTGRES_DSN not set "
+            "(e.g. postgresql://postgres:pw@localhost:5432/postgres)"
+        )
+
+    from agentflow.store.postgres import PostgresStore
+
+    table = f"store_test_{os.getpid()}"
+    s = PostgresStore(dsn, table=table)
+    try:
+        # Round-trip + upsert preserves created_at.
+        first = await s.put(("users", "u1", "mem"), "name", {"v": "Ada"})
+        got = await s.get(("users", "u1", "mem"), "name")
+        assert got is not None and got.value == {"v": "Ada"}
+        second = await s.put(("users", "u1", "mem"), "name", {"v": "Grace"})
+        assert second.created_at == first.created_at
+        assert (await s.get(("users", "u1", "mem"), "name")).value == {"v": "Grace"}
+
+        # Prefix search + namespace listing, ordered.
+        await s.put(("users", "u1", "mem"), "lang", "python")
+        await s.put(("users", "u2", "mem"), "name", "Alan")
+        await s.put(("orgs", "o1"), "name", "Acme")
+        found = await s.search(("users",))
+        assert [(i.namespace, i.key) for i in found] == [
+            (("users", "u1", "mem"), "lang"),
+            (("users", "u1", "mem"), "name"),
+            (("users", "u2", "mem"), "name"),
+        ]
+        assert ("orgs", "o1") in await s.list_namespaces()
+        assert await s.list_namespaces(prefix=("users",)) == [
+            ("users", "u1", "mem"),
+            ("users", "u2", "mem"),
+        ]
+
+        # Delete.
+        assert await s.delete(("orgs", "o1"), "name") is True
+        assert await s.delete(("orgs", "o1"), "name") is False
+
+        # TTL: an expired item disappears from get and search.
+        await s.put(("ttl",), "k", "v", ttl=1.0)
+        assert (await s.get(("ttl",), "k")).value == "v"
+        await asyncio.sleep(1.2)
+        assert await s.get(("ttl",), "k") is None
+        assert await s.search(("ttl",)) == []
+    finally:
+        pool = await s._get_pool()
+        await pool.execute(f"DROP TABLE IF EXISTS {table}")
+        await s.close()
