@@ -66,6 +66,7 @@ class ToolLoopState(State):
     messages: Annotated[list, append]   # the running chat transcript
     turns: Annotated[int, add]          # model calls made
     _pending: Annotated[list, last]     # tool calls awaiting execution
+    status: Annotated[str, last]        # terminal status (see tool_loop docs)
 
 
 async def _run_tool(tool: Tool, args: dict[str, Any]) -> tuple[str, bool]:
@@ -89,8 +90,16 @@ def tool_loop(
 ):
     """Compile a tool-calling loop around ``llm`` and ``tools``.
 
-    The final state carries the full ``messages`` transcript; the last message
-    is the model's tool-free answer. ``max_turns`` bounds model calls.
+    The final state carries the full ``messages`` transcript and a terminal
+    ``status`` the caller MUST check — the last message is only guaranteed to
+    be a tool-free answer when ``status == "completed"``:
+
+    - ``"completed"`` — the model answered without requesting a tool.
+    - ``"tool_calls_unresolved"`` — ``max_turns`` was hit while the last
+      assistant message still had pending tool calls. The plan is incomplete;
+      do not treat the last message as a final answer.
+
+    ``max_turns`` bounds model calls.
 
     When ``stream_text`` is true, the agent node forwards the model's
     ``TextChunk``s to the run stream via ``ctx.emit`` so a caller streaming the
@@ -116,7 +125,22 @@ def tool_loop(
             {"id": tc.id, "name": tc.name, "args": tc.args}
             for tc in assistant.tool_calls
         ]
-        return {"messages": [assistant], "turns": 1, "_pending": pending}
+        turns_after = state.get("turns", 0) + 1
+
+        # Decide the terminal status if the loop is about to stop.
+        if not pending:
+            status = "completed"                    # model answered, no tools
+        elif turns_after >= max_turns:
+            status = "tool_calls_unresolved"         # hit cap with tools pending
+        else:
+            status = "running"                       # will loop into tools
+
+        return {
+            "messages": [assistant],
+            "turns": 1,
+            "_pending": pending,
+            "status": status,
+        }
 
     async def run_tools(state: dict, ctx) -> dict:
         pending = state.get("_pending") or []

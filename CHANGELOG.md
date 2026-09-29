@@ -39,6 +39,10 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   `"fanout"`) deep-copies a node's input on concurrent super-steps so an
   in-place mutation of a shared nested container cannot race a sibling. Linear
   graphs pay no copy cost.
+- `tool_loop` now sets a terminal `status` on the final state: `"completed"`
+  (model answered tool-free) or `"tool_calls_unresolved"` (hit `max_turns` with
+  pending tool calls). Callers must check it rather than assume the last
+  message is a final answer.
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and

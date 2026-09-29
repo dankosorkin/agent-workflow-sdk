@@ -135,6 +135,16 @@ async def test_max_turns_stops_loop():
     app = tool_loop(llm, [Tool("noop", noop)], max_turns=3)
     out = await app.invoke({"messages": [Message(role="user", content="go")]})
     assert out["turns"] == 3  # stopped at the cap
+    # Terminal status must flag the incomplete plan, not look like a clean answer.
+    assert out["status"] == "tool_calls_unresolved"
+
+
+async def test_status_completed_on_clean_answer():
+    llm = ScriptedLLM([Message(role="assistant", content="all done")])
+    app = tool_loop(llm, [])
+    out = await app.invoke({"messages": [Message(role="user", content="go")]})
+    assert out["status"] == "completed"
+    assert out["messages"][-1].content == "all done"
 
 
 async def test_streams_text_when_enabled():
