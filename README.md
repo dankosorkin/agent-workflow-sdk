@@ -107,19 +107,22 @@ way.
   (`claude -p --output-format stream-json`).
 - LLM backends (`LLMBackend`) are stateless: messages in, token stream out.
   They never run tools themselves — a tool call is a request the graph
-  fulfils. `OllamaBackend` is the example and the template for any
-  OpenAI-compatible endpoint.
+  fulfils. Available: `OllamaBackend` (local `/api/chat`) and `OpenAIBackend`
+  (any `/v1/chat/completions` endpoint — OpenAI, Groq, Together, vLLM, LM
+  Studio, and Ollama's own `/v1` shim).
 
 ```python
 from agentflow.backends.kiro import KiroBackend
 from agentflow.backends.codex import CodexBackend
 from agentflow.backends.claude_code import ClaudeCodeBackend
 from agentflow.backends.ollama import OllamaBackend
+from agentflow.backends.openai import OpenAIBackend
 
 agent = KiroBackend("vibe", engine="v3")          # persistent session
 codex = CodexBackend(sandbox="read-only")          # one-shot per turn
 claude = ClaudeCodeBackend(model="sonnet")         # one-shot per turn
 llm = OllamaBackend("llama3.2")                     # local HTTP
+openai = OpenAIBackend("gpt-4o-mini", api_key="...")  # any OpenAI-compatible API
 
 await agent.start()
 async for event in agent.prompt("summarize the repo"):
@@ -208,7 +211,10 @@ print(out["messages"][-1].content)   # -> the model's final answer
 await llm.close()
 ```
 
-See `examples/tool_loop_ollama.py` for a runnable version.
+See `examples/tool_loop_ollama.py` for a runnable version, and
+`examples/mixed_backends.py` for a single workflow that combines an agent
+backend (Codex/Claude/Kiro) with an LLM tool loop, composing a compiled
+sub-graph inside a node.
 
 ## Project layout
 
