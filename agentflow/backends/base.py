@@ -35,6 +35,7 @@ __all__ = [
     "AllowAll",
     "DenyAll",
     "Interactive",
+    "ToolAllowlist",
 ]
 
 
@@ -112,14 +113,33 @@ class BaseAgentBackend:
     """Mixin implementing :meth:`prompt` on top of :meth:`invoke`.
 
     Concrete agent backends inherit this and implement ``start``, ``close``,
-    and ``invoke``. ``permission`` defaults to :class:`AllowAll`, reproducing
-    the previous auto-approve behavior.
+    and ``invoke``.
+
+    A ``permission`` policy is REQUIRED — there is no default. Auto-approving
+    an agent's tool requests is a security decision the caller must make
+    explicitly. Pass :class:`AllowAll` for a trusted local sandbox,
+    :class:`DenyAll` to block tools, or :class:`Interactive` for
+    human-in-the-loop approval.
+
+    NOTE on coverage: only agent backends that actually receive permission
+    requests route them through this policy. Kiro (persistent ACP session)
+    does. The one-shot CLI agents (Codex, Claude Code) manage their own
+    permission model via CLI flags/sandbox and do NOT route prompts through
+    this policy — the field still gates whether the SDK would auto-approve if
+    a request surfaced, but the CLI's own controls apply first. See the
+    capability matrix in the README.
     """
 
     permission: "PermissionPolicy"
 
-    def __init__(self, permission: "PermissionPolicy | None" = None) -> None:
-        self.permission = permission or AllowAll()
+    def __init__(self, permission: "PermissionPolicy") -> None:
+        if permission is None:
+            raise TypeError(
+                "an agent backend requires an explicit permission policy "
+                "(no default). Pass AllowAll() for a trusted local sandbox, "
+                "DenyAll(), or Interactive() for human-in-the-loop."
+            )
+        self.permission = permission
 
     def prompt(
         self, text: str, *, session: str | None = None
@@ -162,7 +182,7 @@ class PermissionPolicy(Protocol):
 
 
 class AllowAll:
-    """Approve every request. The default — reproduces auto-approve."""
+    """Approve every request. Auto-approve — only for a trusted local sandbox."""
 
     async def decide(self, req: PermissionRequest) -> PermissionDecision:
         return Allow()
@@ -173,6 +193,28 @@ class DenyAll:
 
     async def decide(self, req: PermissionRequest) -> PermissionDecision:
         return Deny(reason="denied by policy")
+
+
+class ToolAllowlist:
+    """Approve only requests whose tool is on the allowlist; deny the rest.
+
+    A pragmatic least-privilege default: name the tools an agent may use and
+    everything else is refused. Matching is exact on the request's ``tool``.
+
+        policy = ToolAllowlist({"read_file", "list_directory"})
+
+    ``fallback`` decides unlisted tools (default :class:`DenyAll`); pass
+    :class:`Interactive` to ask a human for anything not pre-approved.
+    """
+
+    def __init__(self, allowed, *, fallback: PermissionPolicy | None = None) -> None:
+        self.allowed = set(allowed)
+        self.fallback = fallback or DenyAll()
+
+    async def decide(self, req: PermissionRequest) -> PermissionDecision:
+        if req.tool in self.allowed:
+            return Allow()
+        return await self.fallback.decide(req)
 
 
 class Interactive:

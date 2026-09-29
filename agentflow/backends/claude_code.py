@@ -41,7 +41,7 @@ class ClaudeCodeBackend(CLIExecBackend):
         permission_mode: str | None = None,
         skip_permissions: bool = False,
         cwd: Path | str = ".",
-        permission: PermissionPolicy | None = None,
+        permission: PermissionPolicy,
         timeout: float | None = 600.0,
         extra_args: list[str] | None = None,
         use_api_key_env: bool = False,

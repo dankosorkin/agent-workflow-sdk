@@ -35,7 +35,7 @@ class CodexBackend(CLIExecBackend):
         sandbox: str = "read-only",
         skip_git_repo_check: bool = True,
         cwd: Path | str = ".",
-        permission: PermissionPolicy | None = None,
+        permission: PermissionPolicy,
         timeout: float | None = 600.0,
         extra_args: list[str] | None = None,
     ) -> None:

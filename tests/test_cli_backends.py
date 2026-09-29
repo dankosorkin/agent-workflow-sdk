@@ -12,6 +12,7 @@ import json
 
 import pytest
 
+from agentflow.backends.base import AllowAll
 from agentflow.backends.cli_exec import CLIExecBackend, TurnAccumulator
 from agentflow.backends.claude_code import ClaudeCodeBackend
 from agentflow.backends.codex import CodexBackend
@@ -47,7 +48,7 @@ def _feed(backend, lines):
 
 
 def test_codex_parses_agent_message():
-    backend = CodexBackend()
+    backend = CodexBackend(permission=AllowAll())
     events, acc = _feed(backend, CODEX_LINES)
     assert acc.session_id == "01a0ebda-5b74-7c51"
     assert acc.stop_reason == "end_turn"
@@ -56,7 +57,7 @@ def test_codex_parses_agent_message():
 
 
 def test_codex_parses_command_execution():
-    backend = CodexBackend()
+    backend = CodexBackend(permission=AllowAll())
     acc = TurnAccumulator()
     events = backend.parse_line(
         {"type": "item.completed",
@@ -71,7 +72,7 @@ def test_codex_parses_command_execution():
 
 
 def test_claude_parses_streamed_text():
-    backend = ClaudeCodeBackend()
+    backend = ClaudeCodeBackend(permission=AllowAll())
     events, acc = _feed(backend, CLAUDE_LINES)
     assert acc.session_id == "e8d6202d"
     assert acc.stop_reason == "end_turn"
@@ -83,7 +84,7 @@ def test_claude_parses_streamed_text():
 
 def test_claude_result_fallback_when_no_stream():
     """If partial messages didn't stream, the result text is the fallback."""
-    backend = ClaudeCodeBackend()
+    backend = ClaudeCodeBackend(permission=AllowAll())
     acc = TurnAccumulator()
     events = []
     events += backend.parse_line({"type": "system", "subtype": "init", "session_id": "s"}, acc)
@@ -95,7 +96,7 @@ def test_claude_result_fallback_when_no_stream():
 
 
 def test_claude_parses_tool_use():
-    backend = ClaudeCodeBackend()
+    backend = ClaudeCodeBackend(permission=AllowAll())
     acc = TurnAccumulator()
     # stream some text first so tool_use isn't treated as text fallback
     backend.parse_line({"type": "stream_event", "event": {"type": "content_block_delta",
@@ -144,7 +145,7 @@ class _FakeProc:
 
 
 async def test_cli_exec_full_turn(monkeypatch):
-    backend = CodexBackend()
+    backend = CodexBackend(permission=AllowAll())
 
     async def fake_exec(*args, **kwargs):
         return _FakeProc(CODEX_LINES)

@@ -134,8 +134,9 @@ async def test_live_kiro():
     if not shutil.which("kiro-cli") or not agent:
         pytest.skip("kiro-cli not installed or KIRO_AGENT not set (e.g. KIRO_AGENT=vibe)")
     from agentflow.backends.kiro import KiroBackend
+    from agentflow.backends.base import AllowAll
 
-    backend = KiroBackend(agent)
+    backend = KiroBackend(agent, permission=AllowAll())
     await backend.start()
     try:
         text, final = await _collect(backend.prompt(PROMPT))

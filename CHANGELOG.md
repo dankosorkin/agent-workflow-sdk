@@ -6,7 +6,21 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- Agent backends now require an explicit `permission` policy — `AllowAll` is no
+  longer the default. Construct with `permission=AllowAll()` (trusted local
+  sandbox), `DenyAll()`, `Interactive()`, or `ToolAllowlist(...)`. Migration:
+  add `permission=...` to every `KiroBackend`/`CodexBackend`/`ClaudeCodeBackend`
+  call.
+
 ### Added
+
+- `ToolAllowlist` permission policy for least-privilege tool scoping, with a
+  configurable fallback (`DenyAll` by default).
+- Capability matrix in the README documenting which backends route tool
+  requests through `PermissionPolicy` (Kiro does; the one-shot CLI agents use
+  their own sandbox/flags).
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and

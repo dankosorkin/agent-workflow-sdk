@@ -66,7 +66,7 @@ class CLIExecBackend(BaseAgentBackend):
         self,
         *,
         cwd: Path | str = ".",
-        permission: PermissionPolicy | None = None,
+        permission: PermissionPolicy,
         timeout: float | None = 600.0,
     ) -> None:
         super().__init__(permission=permission)

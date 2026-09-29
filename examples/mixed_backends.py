@@ -51,7 +51,7 @@ def pick_agent():
     agent = os.environ.get("KIRO_AGENT")
     if shutil.which("kiro-cli") and agent:
         from agentflow.backends.kiro import KiroBackend
-        return f"kiro:{agent}", KiroBackend(agent)
+        return f"kiro:{agent}", KiroBackend(agent, permission=AllowAll())
     return None, None
 
 

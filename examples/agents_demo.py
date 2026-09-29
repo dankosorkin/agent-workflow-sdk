@@ -96,7 +96,7 @@ async def main() -> None:
     kiro_agent = os.environ.get("KIRO_AGENT")
     if shutil.which("kiro-cli") and kiro_agent:
         from agentflow.backends.kiro import KiroBackend
-        await drive("kiro", KiroBackend(kiro_agent))
+        await drive("kiro", KiroBackend(kiro_agent, permission=AllowAll()))
     else:
         reason = "not installed" if not shutil.which("kiro-cli") else "set KIRO_AGENT to run"
         print(f"\n=== kiro === skipped ({reason})")

@@ -49,7 +49,7 @@ class KiroBackend(BaseAgentBackend):
         model: str | None = None,
         engine: str = "v3",
         cwd: Path | str = _DEFAULT_CWD,
-        permission: PermissionPolicy | None = None,
+        permission: PermissionPolicy,
     ) -> None:
         super().__init__(permission=permission)
         self.agent = agent

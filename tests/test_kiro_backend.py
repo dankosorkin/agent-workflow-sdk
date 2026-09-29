@@ -99,7 +99,7 @@ def fake_proc(monkeypatch):
 
 
 async def test_prompt_streams_events_and_ends(fake_proc):
-    backend = KiroBackend("fake-agent", engine="v2")  # v2 avoids set_mode path
+    backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())  # v2 avoids set_mode path
     setup = asyncio.create_task(_drive_setup(fake_proc))
     await backend.start()
     await setup

@@ -209,9 +209,28 @@ machine (set `KIRO_AGENT` to a valid agent id, e.g. `vibe`, to include Kiro).
 
 ### Permission policies
 
-Agent backends answer permission prompts through a `PermissionPolicy`:
-`AllowAll` (default, auto-approve), `DenyAll`, or `Interactive` (escalate to a
-human via an engine interrupt).
+A `PermissionPolicy` is **required** when constructing an agent backend — there
+is no default, because auto-approving an agent's tool use is a security choice
+the caller must make explicitly. Options: `AllowAll` (trusted local sandbox
+only), `DenyAll`, `Interactive` (escalate to a human via an engine interrupt),
+or `ToolAllowlist({"read_file", ...}, fallback=DenyAll())` for least-privilege
+scoping.
+
+```python
+from agentflow.backends import AllowAll, ToolAllowlist, DenyAll
+KiroBackend("vibe", permission=ToolAllowlist({"read_file"}, fallback=DenyAll()))
+```
+
+Capability matrix — where the policy actually applies:
+
+| Backend | Routes tool requests through `PermissionPolicy`? |
+| --- | --- |
+| `KiroBackend` | Yes — ACP `session/request_permission` is resolved by the policy (and `Interactive` drives a real HITL interrupt). |
+| `CodexBackend` | No — one-shot CLI; permission is governed by its `--sandbox` mode. The policy field is still required but does not intercept prompts. |
+| `ClaudeCodeBackend` | No — one-shot CLI; permission is governed by CLI flags (`--permission-mode`, `--allowed-tools`). |
+
+For the one-shot CLI agents, configure their own controls (sandbox, allowed
+tools) — the SDK policy alone does not sandbox them.
 
 ## Checkpointing and human-in-the-loop
 
