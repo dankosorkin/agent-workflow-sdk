@@ -26,7 +26,8 @@ def _sse(*chunks) -> bytes:
 
 
 def _make(handler) -> OpenAIBackend:
-    b = OpenAIBackend("gpt-4o-mini", api_key="test")
+    from agentflow.backends._http import RetryPolicy
+    b = OpenAIBackend("gpt-4o-mini", api_key="test", retry=RetryPolicy(max_retries=0))
     b._client = httpx.AsyncClient(
         base_url=b.base_url, transport=httpx.MockTransport(handler),
         headers={"Authorization": "Bearer test"},

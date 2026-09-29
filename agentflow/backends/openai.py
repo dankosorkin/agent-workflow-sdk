@@ -23,6 +23,7 @@ import json
 from typing import Any, AsyncIterator
 
 from agentflow.backends.base import BaseLLMBackend
+from agentflow.backends._http import RetryPolicy, open_stream
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
     BackendEvent,
@@ -59,6 +60,7 @@ class OpenAIBackend(BaseLLMBackend):
         options: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 120.0,
+        retry: RetryPolicy | None = None,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -66,6 +68,7 @@ class OpenAIBackend(BaseLLMBackend):
         self.options = dict(options or {})
         self.extra_headers = dict(headers or {})
         self.timeout = timeout
+        self.retry = retry if retry is not None else RetryPolicy()
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -98,13 +101,11 @@ class OpenAIBackend(BaseLLMBackend):
         tool_frags: dict[int, dict[str, Any]] = {}
         finish_reason: str | None = None
 
-        try:
-            async with self._client.stream("POST", "/chat/completions", json=body) as resp:
-                if resp.status_code != 200:
-                    detail = (await resp.aread()).decode("utf-8", "replace")
-                    raise BackendTransportError(
-                        f"chat/completions returned {resp.status_code}: {detail}"
-                    )
+        async with open_stream(
+            self._client, "POST", "/chat/completions",
+            json=body, policy=self.retry, label="chat/completions",
+        ) as resp:
+            try:
                 async for line in resp.aiter_lines():
                     line = line.strip()
                     if not line or not line.startswith("data:"):
@@ -122,8 +123,8 @@ class OpenAIBackend(BaseLLMBackend):
                     fr = _finish_reason(chunk)
                     if fr:
                         finish_reason = fr
-        except httpx.HTTPError as exc:
-            raise BackendTransportError(f"chat/completions request failed: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise BackendTransportError(f"chat/completions stream failed: {exc}") from exc
 
         tool_calls = _assemble_tool_calls(tool_frags)
         final_text = "".join(text_parts)

@@ -22,7 +22,9 @@ def _sse(*events) -> bytes:
 
 
 def _make(handler) -> AnthropicBackend:
-    b = AnthropicBackend("claude-sonnet-4", api_key="test", max_tokens=256)
+    from agentflow.backends._http import RetryPolicy
+    b = AnthropicBackend("claude-sonnet-4", api_key="test", max_tokens=256,
+                         retry=RetryPolicy(max_retries=0))
     b._client = httpx.AsyncClient(
         base_url=b.base_url, transport=httpx.MockTransport(handler),
         headers={"x-api-key": "test", "anthropic-version": "2023-06-01"},

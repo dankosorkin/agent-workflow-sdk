@@ -22,6 +22,7 @@ from agentflow.backends.base import (
     LLMBackend,
     PermissionPolicy,
 )
+from agentflow.backends._http import RetryPolicy
 
 __all__ = [
     "Backend",
@@ -33,4 +34,5 @@ __all__ = [
     "AllowAll",
     "DenyAll",
     "Interactive",
+    "RetryPolicy",
 ]

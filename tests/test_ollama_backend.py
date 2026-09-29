@@ -21,7 +21,8 @@ def _ndjson(*objs) -> bytes:
 
 
 def _make_backend(handler) -> OllamaBackend:
-    backend = OllamaBackend("llama3.2")
+    from agentflow.backends._http import RetryPolicy
+    backend = OllamaBackend("llama3.2", retry=RetryPolicy(max_retries=0))
     backend._client = httpx.AsyncClient(
         base_url=backend.host, transport=httpx.MockTransport(handler)
     )

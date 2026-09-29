@@ -18,6 +18,7 @@ import json
 from typing import Any, AsyncIterator
 
 from agentflow.backends.base import BaseLLMBackend
+from agentflow.backends._http import RetryPolicy, open_stream
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
     BackendEvent,
@@ -52,11 +53,13 @@ class OllamaBackend(BaseLLMBackend):
         host: str = "http://localhost:11434",
         options: dict[str, Any] | None = None,
         timeout: float = 120.0,
+        retry: RetryPolicy | None = None,
     ) -> None:
         self.model = model
         self.host = host.rstrip("/")
         self.options = dict(options or {})
         self.timeout = timeout
+        self.retry = retry if retry is not None else RetryPolicy()
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -83,13 +86,11 @@ class OllamaBackend(BaseLLMBackend):
         tool_calls: list[ToolCallSpec] = []
         stop_reason: str | None = None
 
-        try:
-            async with self._client.stream("POST", "/api/chat", json=body) as resp:
-                if resp.status_code != 200:
-                    detail = (await resp.aread()).decode("utf-8", "replace")
-                    raise BackendTransportError(
-                        f"ollama /api/chat returned {resp.status_code}: {detail}"
-                    )
+        async with open_stream(
+            self._client, "POST", "/api/chat",
+            json=body, policy=self.retry, label="ollama /api/chat",
+        ) as resp:
+            try:
                 async for line in resp.aiter_lines():
                     line = line.strip()
                     if not line:
@@ -105,8 +106,8 @@ class OllamaBackend(BaseLLMBackend):
 
                     if chunk.get("done"):
                         stop_reason = chunk.get("done_reason") or "stop"
-        except httpx.HTTPError as exc:
-            raise BackendTransportError(f"ollama request failed: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise BackendTransportError(f"ollama stream failed: {exc}") from exc
 
         final_text = "".join(text_parts)
         message = Message(

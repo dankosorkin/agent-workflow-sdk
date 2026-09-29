@@ -21,6 +21,7 @@ import json
 from typing import Any, AsyncIterator
 
 from agentflow.backends.base import BaseLLMBackend
+from agentflow.backends._http import RetryPolicy, open_stream
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
     BackendEvent,
@@ -62,6 +63,7 @@ class AnthropicBackend(BaseLLMBackend):
         options: dict[str, Any] | None = None,
         headers: dict[str, str] | None = None,
         timeout: float = 120.0,
+        retry: RetryPolicy | None = None,
     ) -> None:
         self.model = model
         self.api_key = api_key
@@ -74,6 +76,7 @@ class AnthropicBackend(BaseLLMBackend):
         self.options = dict(options or {})
         self.extra_headers = dict(headers or {})
         self.timeout = timeout
+        self.retry = retry if retry is not None else RetryPolicy()
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -114,13 +117,11 @@ class AnthropicBackend(BaseLLMBackend):
         tool_calls: list[ToolCallSpec] = []
         stop_reason: str | None = None
 
-        try:
-            async with self._client.stream("POST", "/v1/messages", json=body) as resp:
-                if resp.status_code != 200:
-                    detail = (await resp.aread()).decode("utf-8", "replace")
-                    raise BackendTransportError(
-                        f"/v1/messages returned {resp.status_code}: {detail}"
-                    )
+        async with open_stream(
+            self._client, "POST", "/v1/messages",
+            json=body, policy=self.retry, label="/v1/messages",
+        ) as resp:
+            try:
                 async for line in resp.aiter_lines():
                     line = line.strip()
                     if not line or not line.startswith("data:"):
@@ -136,8 +137,8 @@ class AnthropicBackend(BaseLLMBackend):
                     sr = _stop_reason(event)
                     if sr:
                         stop_reason = sr
-        except httpx.HTTPError as exc:
-            raise BackendTransportError(f"/v1/messages request failed: {exc}") from exc
+            except httpx.HTTPError as exc:
+                raise BackendTransportError(f"/v1/messages stream failed: {exc}") from exc
 
         final_text = "".join(text_parts)
         message = Message(role="assistant", content=final_text, tool_calls=tuple(tool_calls))
