@@ -16,14 +16,16 @@ reader and a writer don't block each other.
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import sqlite3
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 from agentflow.checkpoint._serde import from_payload, to_payload
 from agentflow.checkpoint.base import Checkpoint
-from agentflow.errors import CheckpointError
+from agentflow.errors import CheckpointConflict, CheckpointError
 from agentflow.redaction import Redactor, redact_none
 
 __all__ = ["SqliteCheckpointer"]
@@ -82,7 +84,7 @@ class SqliteCheckpointer:
 
     # ------------------------------------------------------------------
 
-    async def put(self, cp: Checkpoint) -> str:
+    async def put(self, cp: Checkpoint, *, if_revision: int | None = None) -> str:
         await self._ensure_schema()
         payload = to_payload(cp)
         payload["state"] = self._redact(payload["state"])
@@ -93,15 +95,26 @@ class SqliteCheckpointer:
             raise CheckpointError(
                 f"checkpoint state for thread {cp.thread!r} is not JSON-serializable: {exc}"
             ) from exc
-        await asyncio.to_thread(self._put_row, cp.thread, cp.step, blob, cp.ts)
+        await asyncio.to_thread(self._put_row, cp.thread, cp.step, blob, cp.ts, if_revision)
         return f"{cp.thread}:{cp.step}"
 
-    def _put_row(self, thread: str, step: int, blob: str, ts: str) -> None:
+    def _put_row(self, thread: str, step: int, blob: str, ts: str, if_revision: int | None) -> None:
         conn = self._connect()
         try:
-            # One transaction: upsert with an atomic revision bump. A re-run of
-            # the same step (resume) overwrites and increments revision.
+            # One transaction: check-and-set the revision, then upsert with an
+            # atomic revision bump. A re-run of the same step (resume)
+            # overwrites and increments revision.
             conn.execute("BEGIN IMMEDIATE")
+            if if_revision is not None:
+                cur = conn.execute(
+                    "SELECT revision FROM checkpoints WHERE thread=? AND step=?",
+                    (thread, step),
+                )
+                row = cur.fetchone()
+                current = row[0] if row else 0
+                if current != if_revision:
+                    conn.execute("ROLLBACK")
+                    raise CheckpointConflict(thread, step, if_revision, current)
             conn.execute(
                 """
                 INSERT INTO checkpoints (thread, step, revision, payload, ts)
@@ -123,39 +136,75 @@ class SqliteCheckpointer:
     async def get(self, thread: str, step: int | None = None) -> Checkpoint | None:
         await self._ensure_schema()
         row = await asyncio.to_thread(self._get_row, thread, step)
-        return from_payload(json.loads(row)) if row is not None else None
+        if row is None:
+            return None
+        blob, revision = row
+        return dataclasses.replace(from_payload(json.loads(blob)), revision=revision)
 
-    def _get_row(self, thread: str, step: int | None) -> str | None:
+    def _get_row(self, thread: str, step: int | None) -> tuple[str, int] | None:
         conn = self._connect()
         try:
             if step is None:
                 cur = conn.execute(
-                    "SELECT payload FROM checkpoints WHERE thread=? ORDER BY step DESC LIMIT 1",
+                    "SELECT payload, revision FROM checkpoints WHERE thread=? "
+                    "ORDER BY step DESC LIMIT 1",
                     (thread,),
                 )
             else:
                 cur = conn.execute(
-                    "SELECT payload FROM checkpoints WHERE thread=? AND step=?",
+                    "SELECT payload, revision FROM checkpoints WHERE thread=? AND step=?",
                     (thread, step),
                 )
             row = cur.fetchone()
-            return row[0] if row else None
+            return (row[0], row[1]) if row else None
         finally:
             conn.close()
 
     async def history(self, thread: str) -> AsyncIterator[Checkpoint]:
         await self._ensure_schema()
         rows = await asyncio.to_thread(self._history_rows, thread)
-        for blob in rows:
-            yield from_payload(json.loads(blob))
+        for blob, revision in rows:
+            yield dataclasses.replace(from_payload(json.loads(blob)), revision=revision)
 
-    def _history_rows(self, thread: str) -> list[str]:
+    def _history_rows(self, thread: str) -> list[tuple[str, int]]:
         conn = self._connect()
         try:
             cur = conn.execute(
-                "SELECT payload FROM checkpoints WHERE thread=? ORDER BY step ASC",
+                "SELECT payload, revision FROM checkpoints WHERE thread=? ORDER BY step ASC",
                 (thread,),
             )
-            return [r[0] for r in cur.fetchall()]
+            return [(r[0], r[1]) for r in cur.fetchall()]
         finally:
             conn.close()
+
+    async def delete_thread(self, thread: str) -> None:
+        await self._ensure_schema()
+        await asyncio.to_thread(
+            self._exec_write, "DELETE FROM checkpoints WHERE thread=?", (thread,)
+        )
+
+    async def prune(
+        self, thread: str, *, before_step: int | None = None, older_than: str | None = None
+    ) -> int:
+        await self._ensure_schema()
+        return await asyncio.to_thread(self._prune_rows, thread, before_step, older_than)
+
+    def _exec_write(self, sql: str, params: tuple) -> int:
+        conn = self._connect()
+        try:
+            cur = conn.execute(sql, params)
+            return cur.rowcount
+        finally:
+            conn.close()
+
+    def _prune_rows(self, thread: str, before_step: int | None, older_than: str | None) -> int:
+        clauses = ["thread=?"]
+        params: list[Any] = [thread]
+        if before_step is not None:
+            clauses.append("step < ?")
+            params.append(before_step)
+        if older_than is not None:
+            clauses.append("ts < ?")
+            params.append(older_than)
+        sql = f"DELETE FROM checkpoints WHERE {' AND '.join(clauses)}"
+        return self._exec_write(sql, tuple(params))

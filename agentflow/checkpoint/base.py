@@ -12,7 +12,9 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from typing import Any, Protocol, runtime_checkable
 
-__all__ = ["Checkpoint", "Checkpointer"]
+from agentflow.errors import CheckpointConflict
+
+__all__ = ["Checkpoint", "Checkpointer", "CheckpointConflict"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,6 +38,11 @@ class Checkpoint:
     interrupt_node: str | None = None
     interrupt_payload: Any = None
     extra: dict[str, Any] = field(default_factory=dict)
+    #: Monotonic write count for this (thread, step). Set by the store on read;
+    #: pass the value you read back as ``put(..., if_revision=)`` to guard a
+    #: read-modify-write against a concurrent resume (optimistic concurrency).
+    #: 0 means "never written" / not tracked by this backend.
+    revision: int = 0
 
     @property
     def done(self) -> bool:
@@ -46,15 +53,38 @@ class Checkpoint:
 class Checkpointer(Protocol):
     """Persists and retrieves checkpoints by thread and step."""
 
-    async def put(self, cp: Checkpoint) -> str:
-        """Persist ``cp`` and return an id (thread + step is sufficient)."""
+    async def put(self, cp: Checkpoint, *, if_revision: int | None = None) -> str:
+        """Persist ``cp`` and return an id (thread + step is sufficient).
+
+        When ``if_revision`` is given, the write is conditional: it succeeds
+        only if the currently stored revision for ``(cp.thread, cp.step)``
+        equals ``if_revision`` (or nothing is stored and ``if_revision`` is 0),
+        otherwise it raises :class:`~agentflow.errors.CheckpointConflict`. This
+        gives optimistic concurrency for two resumes racing the same step.
+        ``None`` (default) is an unconditional upsert.
+        """
         ...
 
     async def get(self, thread: str, step: int | None = None) -> Checkpoint | None:
         """Return the checkpoint at ``step``, or the latest when ``step`` is
-        None. Returns None if the thread has no checkpoints."""
+        None. Returns None if the thread has no checkpoints. The returned
+        checkpoint's ``revision`` reflects how many times that step was
+        written (0 if the backend doesn't track it)."""
         ...
 
     def history(self, thread: str) -> AsyncIterator[Checkpoint]:
         """Yield every checkpoint for ``thread`` in ascending step order."""
+        ...
+
+    async def delete_thread(self, thread: str) -> None:
+        """Remove all checkpoints for ``thread`` (retention/cleanup)."""
+        ...
+
+    async def prune(
+        self, thread: str, *, before_step: int | None = None, older_than: str | None = None
+    ) -> int:
+        """Delete checkpoints for ``thread`` older than a bound; return the
+        count removed. ``before_step`` deletes steps strictly less than it;
+        ``older_than`` is an ISO timestamp compared against each checkpoint's
+        ``ts``. At least one bound should be given."""
         ...

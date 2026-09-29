@@ -16,6 +16,7 @@ __all__ = [
     "BackendTransportError",
     "BackendRateLimitError",
     "CheckpointError",
+    "CheckpointConflict",
     "InterruptError",
 ]
 
@@ -103,6 +104,22 @@ class BackendRateLimitError(BackendTransportError):
 
 class CheckpointError(AgentFlowError):
     """A checkpoint could not be written, read, or resumed."""
+
+
+class CheckpointConflict(CheckpointError):
+    """A conditional checkpoint write failed because the stored revision did
+    not match the expected one — another writer updated the same (thread, step)
+    concurrently. Re-read and retry (optimistic concurrency)."""
+
+    def __init__(self, thread: str, step: int, expected: int, actual: int):
+        self.thread = thread
+        self.step = step
+        self.expected = expected
+        self.actual = actual
+        super().__init__(
+            f"checkpoint conflict on {thread!r} step {step}: "
+            f"expected revision {expected}, found {actual}"
+        )
 
 
 class RunTimeout(GraphError):

@@ -106,7 +106,7 @@ async def test_checkpoint_redaction_masks_state(tmp_path):
         Checkpoint(thread="t", step=1, state={"api_key": "sk-SECRET", "note": "keep"}, next=())
     )
     f = next((tmp_path / "runs" / "t").glob("*.json"))
-    data = json.loads(f.read_text())
+    data = json.loads(f.read_text())["payload"]
     assert data["state"]["api_key"] == "***REDACTED***"
     assert data["state"]["note"] == "keep"
 

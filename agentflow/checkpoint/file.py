@@ -9,6 +9,7 @@ to find out.
 from __future__ import annotations
 
 import contextlib
+import dataclasses
 import json
 import os
 import tempfile
@@ -17,7 +18,7 @@ from pathlib import Path
 
 from agentflow.checkpoint._serde import from_payload, to_payload
 from agentflow.checkpoint.base import Checkpoint
-from agentflow.errors import CheckpointError
+from agentflow.errors import CheckpointConflict, CheckpointError
 from agentflow.redaction import Redactor, redact_none
 
 __all__ = ["FileCheckpointer"]
@@ -69,18 +70,22 @@ class FileCheckpointer:
             raise CheckpointError(f"unsafe thread id {thread!r}")
         return self.root / thread
 
-    async def put(self, cp: Checkpoint) -> str:
+    async def put(self, cp: Checkpoint, *, if_revision: int | None = None) -> str:
         directory = self._thread_dir(cp.thread)
         directory.mkdir(parents=True, exist_ok=True)
         if self._secure:
             _chmod(directory, 0o700)
             _chmod(self.root, 0o700)
         path = directory / f"{cp.step:06d}.json"
+        current = _read_revision(path)
+        if if_revision is not None and current != if_revision:
+            raise CheckpointConflict(cp.thread, cp.step, if_revision, current)
         payload = to_payload(cp)
         payload["state"] = self._redact(payload["state"])
         payload["interrupt_payload"] = self._redact(payload["interrupt_payload"])
+        envelope = {"revision": current + 1, "payload": payload}
         try:
-            data = json.dumps(payload, ensure_ascii=False, indent=2)
+            data = json.dumps(envelope, ensure_ascii=False, indent=2)
         except TypeError as exc:
             raise CheckpointError(
                 f"checkpoint state for thread {cp.thread!r} is not JSON-serializable: {exc}"
@@ -103,14 +108,61 @@ class FileCheckpointer:
             target = directory / f"{step:06d}.json"
             if not target.exists():
                 return None
-        return from_payload(json.loads(target.read_text(encoding="utf-8")))
+        return _load(target)
 
     async def history(self, thread: str) -> AsyncIterator[Checkpoint]:
         directory = self._thread_dir(thread)
         if not directory.is_dir():
             return
         for path in sorted(directory.glob("*.json")):
-            yield from_payload(json.loads(path.read_text(encoding="utf-8")))
+            yield _load(path)
+
+    async def delete_thread(self, thread: str) -> None:
+        directory = self._thread_dir(thread)
+        if not directory.is_dir():
+            return
+        for path in directory.glob("*.json"):
+            path.unlink(missing_ok=True)
+        with contextlib.suppress(OSError):
+            directory.rmdir()
+
+    async def prune(
+        self, thread: str, *, before_step: int | None = None, older_than: str | None = None
+    ) -> int:
+        directory = self._thread_dir(thread)
+        if not directory.is_dir():
+            return 0
+        removed = 0
+        for path in sorted(directory.glob("*.json")):
+            step = int(path.stem)
+            if before_step is not None and step >= before_step:
+                continue
+            if older_than is not None:
+                env = json.loads(path.read_text(encoding="utf-8"))
+                ts = env.get("payload", env).get("ts", "")
+                if ts >= older_than:
+                    continue
+            path.unlink(missing_ok=True)
+            removed += 1
+        return removed
+
+
+def _read_revision(path: Path) -> int:
+    if not path.exists():
+        return 0
+    try:
+        env = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return 0
+    return int(env.get("revision", 0)) if isinstance(env, dict) else 0
+
+
+def _load(path: Path) -> Checkpoint:
+    env = json.loads(path.read_text(encoding="utf-8"))
+    # New format: {"revision": N, "payload": {...}}. Legacy: bare payload dict.
+    if isinstance(env, dict) and "payload" in env and "revision" in env:
+        return dataclasses.replace(from_payload(env["payload"]), revision=int(env["revision"]))
+    return from_payload(env)
 
 
 def _atomic_write(path: Path, data: str) -> None:

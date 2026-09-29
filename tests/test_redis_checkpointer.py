@@ -104,3 +104,52 @@ async def test_redaction_masks_state():
     got = await cp.get("t", 1)
     assert got.state["api_key"] == "***REDACTED***"
     assert got.state["note"] == "keep"
+
+
+async def test_revision_tracking():
+    cp = _checkpointer()
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 1}))
+    assert (await cp.get("t", 1)).revision == 1
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 2}))
+    got = await cp.get("t", 1)
+    assert got.revision == 2 and got.state["n"] == 2
+
+
+async def test_if_revision_match_and_conflict():
+    from agentflow.errors import CheckpointConflict
+
+    cp = _checkpointer()
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 1}))
+    rev = (await cp.get("t", 1)).revision
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 2}), if_revision=rev)
+    assert (await cp.get("t", 1)).state["n"] == 2
+    with pytest.raises(CheckpointConflict):
+        await cp.put(Checkpoint(thread="t", step=1, state={"n": 3}), if_revision=rev)
+    assert (await cp.get("t", 1)).state["n"] == 2  # loser did not apply
+
+
+async def test_delete_thread():
+    cp = _checkpointer()
+    for i in range(1, 4):
+        await cp.put(Checkpoint(thread="t", step=i, state={"n": i}))
+    await cp.delete_thread("t")
+    assert await cp.get("t") is None
+    assert [c async for c in cp.history("t")] == []
+
+
+async def test_prune_before_step():
+    cp = _checkpointer()
+    for i in range(1, 6):
+        await cp.put(Checkpoint(thread="t", step=i, state={"n": i}))
+    removed = await cp.prune("t", before_step=3)
+    assert removed == 2
+    assert [c.step async for c in cp.history("t")] == [3, 4, 5]
+
+
+async def test_prune_older_than():
+    cp = _checkpointer()
+    await cp.put(Checkpoint(thread="t", step=1, state={"n": 1}, ts="2020-01-01T00:00:00"))
+    await cp.put(Checkpoint(thread="t", step=2, state={"n": 2}, ts="2030-01-01T00:00:00"))
+    removed = await cp.prune("t", older_than="2025-01-01T00:00:00")
+    assert removed == 1
+    assert [c.step async for c in cp.history("t")] == [2]
