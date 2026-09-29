@@ -49,6 +49,9 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Release artifacts: `LICENSE` (MIT, SPDX metadata, shipped in the wheel), real
   project URLs, `CONTRIBUTING.md` (with a release process), and `SECURITY.md`
   (reporting + security-relevant design notes).
+- `OtelHooks` (in the `otel` extra): an OpenTelemetry `Hooks` exporter emitting
+  a span per run and per node, recording errors and backend events, with a
+  versioned attribute schema (`EVENT_SCHEMA_VERSION`).
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and

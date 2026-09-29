@@ -147,6 +147,14 @@ app = g.compile(hooks=MultiHooks(metrics, telemetry))
 
 See `examples/telemetry_demo.py` for a runnable version.
 
+For distributed tracing, `agentflow.otel.OtelHooks` (install the `otel` extra)
+is a `Hooks` that emits an OpenTelemetry span per run and per node:
+
+```python
+from agentflow.otel import OtelHooks
+app = g.compile(hooks=OtelHooks())   # uses the global tracer/provider
+```
+
 ## Backends
 
 Two kinds of backend share one event stream, so a node calls either the same
