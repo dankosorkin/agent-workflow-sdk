@@ -242,7 +242,11 @@ app = g.compile(checkpointer=FileCheckpointer(".runs"))
 ```
 
 `MemoryCheckpointer` is for tests; `FileCheckpointer` writes one atomic JSON
-file per super-step under `.runs/<thread>/`.
+file per super-step under `.runs/<thread>/` (single-writer / single-process);
+`SqliteCheckpointer` stores checkpoints transactionally with atomic per-step
+revisions and is the choice for concurrent or multi-process runners. All three
+implement the same `Checkpointer` protocol, so they are interchangeable at
+`compile(checkpointer=...)`.
 
 A node calls `await ctx.interrupt(payload)` to suspend the run for a human.
 The runtime writes an interrupted checkpoint and stops. Later, `await

@@ -44,6 +44,7 @@ from agentflow.checkpoint import (
     Checkpointer,
     MemoryCheckpointer,
     FileCheckpointer,
+    SqliteCheckpointer,
 )
 from agentflow.errors import (
     AgentFlowError,
@@ -77,6 +78,7 @@ __all__ = [
     "Allow", "Deny",
     # checkpointing
     "Checkpoint", "Checkpointer", "MemoryCheckpointer", "FileCheckpointer",
+    "SqliteCheckpointer",
     # errors
     "AgentFlowError", "GraphError", "CompilationError", "NodeError", "RunTimeout",
     "BackendError", "BackendTransportError", "CheckpointError", "InterruptError",

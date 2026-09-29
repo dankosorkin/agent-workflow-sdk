@@ -32,6 +32,14 @@ def _chmod(path: Path, mode: int) -> None:
 class FileCheckpointer:
     """Persist checkpoints under ``root/<thread>/<step>.json``.
 
+    Single-writer contract: this checkpointer is safe for one process writing a
+    given thread at a time. Individual file writes are atomic (temp + replace),
+    so a *reader* never sees a partial file, but there is no cross-process lock
+    or revision check — two processes writing the same thread can interleave
+    steps and corrupt history. For multi-process or concurrent-runner durability
+    use :class:`~agentflow.checkpoint.sqlite.SqliteCheckpointer`, which enforces
+    atomic per-(thread, step) revisions in a transaction.
+
     Files and directories are created owner-only (0o600/0o700) by default so a
     persisted run's state is not world-readable. Pass ``secure_permissions=
     False`` to disable (e.g. on filesystems that don't support it).

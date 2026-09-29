@@ -26,6 +26,10 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   redact=...)` apply it before writing. Both create files/dirs owner-only
   (0o600/0o700) by default (`secure_permissions=`). Checkpoint redaction is
   opt-in and documented as non-resumable (masked values are lost).
+- `SqliteCheckpointer`: transactional durable checkpointer with atomic
+  per-`(thread, step)` revisions (WAL mode, upsert-with-revision-bump), safe
+  for concurrent/multi-process runners. `FileCheckpointer` is now documented as
+  single-writer/single-process.
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and
