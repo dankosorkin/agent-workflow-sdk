@@ -90,6 +90,14 @@ class CLIExecBackend(BaseAgentBackend):
     #: Optional prompt text to feed on stdin instead of argv (set in build_command).
     _stdin_text: str | None = None
 
+    def subprocess_env(self) -> dict[str, str] | None:
+        """Environment for the child process. ``None`` inherits the parent's.
+
+        Override to add or remove variables — e.g. a CLI that must not see an
+        API key exported for a different backend.
+        """
+        return None
+
     # ------------------------------------------------------------------
     # Lifecycle — no persistent process, so start/close are trivial
     # ------------------------------------------------------------------
@@ -124,6 +132,7 @@ class CLIExecBackend(BaseAgentBackend):
                 stdin=asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=self.subprocess_env(),
                 # Some CLIs emit very large single lines (e.g. Claude's init
                 # event lists every tool/skill). Raise the line buffer well
                 # past asyncio's 64KiB default so readline() doesn't overflow.

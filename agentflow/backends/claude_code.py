@@ -44,6 +44,7 @@ class ClaudeCodeBackend(CLIExecBackend):
         permission: PermissionPolicy | None = None,
         timeout: float | None = 600.0,
         extra_args: list[str] | None = None,
+        use_api_key_env: bool = False,
     ) -> None:
         super().__init__(cwd=cwd, permission=permission, timeout=timeout)
         self.model = model
@@ -53,9 +54,26 @@ class ClaudeCodeBackend(CLIExecBackend):
         self.permission_mode = permission_mode
         self.skip_permissions = skip_permissions
         self.extra_args = list(extra_args or [])
+        # The claude CLI authenticates via its own claude.ai login by default
+        # and errors when ANTHROPIC_API_KEY is present in the environment
+        # ("connectors are disabled because ANTHROPIC_API_KEY ... takes
+        # precedence"). Strip it from the child env unless the caller opts in
+        # to key-based auth.
+        self.use_api_key_env = use_api_key_env
         # Track streamed text so we don't double-count the final assistant
         # message block, which repeats the same text as the deltas.
         self._streamed_any = False
+
+    def subprocess_env(self):
+        import os
+
+        if self.use_api_key_env:
+            return None  # inherit parent env, including ANTHROPIC_* vars
+        # Claude Code uses its own claude.ai login and its own model config.
+        # Any ANTHROPIC_* var in the environment (API key, or a model pin like
+        # ANTHROPIC_MODEL) either disables its connectors or forces a
+        # possibly-deprecated model, so scrub them all for the child process.
+        return {k: v for k, v in os.environ.items() if not k.startswith("ANTHROPIC_")}
 
     def build_command(self, prompt: str, session_id: str | None) -> list[str]:
         cmd = [
