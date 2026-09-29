@@ -730,3 +730,29 @@ async def test_permission_future_cancelled_on_early_teardown(fake_proc):
     assert backend._turn_queue is None
     assert first is not None
     await backend.close()
+
+
+def test_extract_tool_name_v3_and_fallbacks():
+    from agentflow.backends.kiro import _extract_tool_name
+
+    # v3 shape: name lives under _meta.kiro.toolId
+    v3 = {
+        "toolCall": {"toolCallId": "t1", "title": "Write File", "status": "pending"},
+        "_meta": {"kiro": {"toolId": "fs_write", "consent": {"capability": "fs_write"}}},
+    }
+    assert _extract_tool_name(v3) == "fs_write"
+
+    # capability fallback when toolId missing
+    cap = {"_meta": {"kiro": {"consent": {"capability": "fs_read"}}}}
+    assert _extract_tool_name(cap) == "fs_read"
+
+    # toolCall.title fallback when no _meta
+    title_only = {"toolCall": {"title": "Execute Bash"}}
+    assert _extract_tool_name(title_only) == "Execute Bash"
+
+    # legacy flat keys still work
+    assert _extract_tool_name({"toolName": "grep"}) == "grep"
+    assert _extract_tool_name({"tool": "ls"}) == "ls"
+
+    # nothing recognizable -> empty string (no crash)
+    assert _extract_tool_name({}) == ""

@@ -30,6 +30,8 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+import signal
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
@@ -67,12 +69,18 @@ class KiroBackend(BaseAgentBackend):
         engine: str = "v3",
         cwd: Path | str = _DEFAULT_CWD,
         permission: PermissionPolicy,
+        close_grace: float = 0.5,
     ) -> None:
         super().__init__(permission=permission)
         self.agent = agent
         self.model = model
         self.engine = engine
         self.cwd = Path(cwd)
+        # Per-phase grace on close(): wait this long for a clean exit, then
+        # terminate, then (after another grace) kill. Kept short because the
+        # v3 engine typically will not exit on stdin close, and we should not
+        # block a caller's shutdown for seconds waiting on it.
+        self._close_grace = close_grace
 
         self._proc: asyncio.subprocess.Process | None = None
         self._session_id: str | None = None
@@ -114,6 +122,12 @@ class KiroBackend(BaseAgentBackend):
                 # ACP responses (e.g. session/new listing every available mode)
                 # can exceed asyncio's 64KiB default readline buffer; raise it.
                 limit=8 * 1024 * 1024,
+                # Put kiro-cli in its own process group so close() can signal
+                # the whole tree. The v3 CLI spawns a child (kiro-cli-chat)
+                # that outlives a kill of the parent alone, stranding the
+                # terminal; killing the group reaps it too. POSIX-only —
+                # ignored on platforms without it.
+                start_new_session=True,
             )
         except OSError as exc:
             raise BackendTransportError(f"could not start kiro-cli: {exc}") from exc
@@ -133,14 +147,20 @@ class KiroBackend(BaseAgentBackend):
         try:
             if proc.stdin and not proc.stdin.is_closing():
                 proc.stdin.close()
+            # The v3 engine often does not exit on stdin close (it waits on its
+            # own idle timeout), so don't block for seconds hoping it will.
+            # Give it a short grace to exit cleanly, then signal the whole
+            # process group (SIGTERM, then SIGKILL) so the CLI's child process
+            # (kiro-cli-chat) is reaped too, not just the parent. Each phase
+            # has a brief window so close() returns promptly.
             try:
-                await asyncio.wait_for(proc.wait(), timeout=3)
+                await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
             except TimeoutError:
-                proc.terminate()
+                self._signal_group(proc, signal.SIGTERM)
                 try:
-                    await asyncio.wait_for(proc.wait(), timeout=2)
+                    await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
                 except TimeoutError:
-                    proc.kill()
+                    self._signal_group(proc, signal.SIGKILL)
         finally:
             if self._reader_task:
                 self._reader_task.cancel()
@@ -148,6 +168,26 @@ class KiroBackend(BaseAgentBackend):
                     await self._reader_task
             self._proc = None
             self._fail_pending(BackendTransportError("backend closed"))
+
+    @staticmethod
+    def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
+        """Send ``sig`` to the child's whole process group, if possible.
+
+        The child was started with ``start_new_session=True`` so it leads its
+        own group; signalling ``-pgid`` reaches its descendants too. Falls back
+        to signalling just the process where process groups aren't available
+        (e.g. Windows) or the group has already gone. Never raises.
+        """
+        with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, sig)
+            return
+        # Fallback: signal the process directly.
+        with contextlib.suppress(ProcessLookupError, OSError):
+            if sig == signal.SIGKILL:
+                proc.kill()
+            else:
+                proc.terminate()
 
     # ------------------------------------------------------------------
     # Public API — one turn as an event stream
@@ -412,7 +452,7 @@ class KiroBackend(BaseAgentBackend):
         )
         req = PermissionRequest(
             id=str(request_id),
-            tool=params.get("toolName") or params.get("tool") or "",
+            tool=_extract_tool_name(params),
             options=options,
             detail=params,
         )
@@ -506,6 +546,30 @@ class KiroBackend(BaseAgentBackend):
         queue = self._turn_queue
         if queue is not None:
             queue.put_nowait(event)
+
+
+def _extract_tool_name(params: dict[str, Any]) -> str:
+    """Pull the tool name out of a session/request_permission payload.
+
+    Kiro v3 does not use ``toolName``/``tool``; it puts the machine name under
+    ``_meta.kiro.toolId`` (and ``_meta.kiro.consent.capability``) and a
+    human-readable label under ``toolCall.title``. Fall back through those,
+    then to the legacy flat keys, so older shapes still work.
+    """
+    meta = params.get("_meta")
+    if isinstance(meta, dict):
+        kiro_meta = meta.get("kiro")
+        if isinstance(kiro_meta, dict):
+            tool_id = kiro_meta.get("toolId")
+            if tool_id:
+                return str(tool_id)
+            consent = kiro_meta.get("consent")
+            if isinstance(consent, dict) and consent.get("capability"):
+                return str(consent["capability"])
+    tool_call = params.get("toolCall")
+    if isinstance(tool_call, dict) and tool_call.get("title"):
+        return str(tool_call["title"])
+    return params.get("toolName") or params.get("tool") or ""
 
 
 def _map_status(status: Any) -> Literal["ok", "error", "pending"]:
