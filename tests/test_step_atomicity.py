@@ -10,9 +10,15 @@ from __future__ import annotations
 from typing import Annotated
 
 import pytest
-
 from agentflow import (
-    END, START, Graph, State, add, append, MemoryCheckpointer, NodeError,
+    END,
+    START,
+    Graph,
+    MemoryCheckpointer,
+    NodeError,
+    State,
+    add,
+    append,
 )
 
 
@@ -40,8 +46,7 @@ async def test_partial_failure_discards_whole_step():
     g.add_node("bad", bad)
     g.add_node("join", lambda s, c: {})
     g.add_edge(START, "start")
-    g.add_conditional_edges("start", lambda s: ["good", "bad"],
-                            {"good": "good", "bad": "bad"})
+    g.add_conditional_edges("start", lambda s: ["good", "bad"], {"good": "good", "bad": "bad"})
     g.add_edge("good", "join")
     g.add_edge("bad", "join")
     g.add_edge("join", END)
@@ -56,8 +61,8 @@ async def test_partial_failure_discards_whole_step():
     # fan-out step. 'good's +100 must not be there.
     last = await app.get_state("t")
     assert last is not None
-    assert last.state["total"] == 0            # good's update discarded
-    assert last.state["log"] == ["start"]      # only the start step committed
+    assert last.state["total"] == 0  # good's update discarded
+    assert last.state["log"] == ["start"]  # only the start step committed
     assert "good" not in last.state["log"]
 
 

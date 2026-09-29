@@ -343,6 +343,15 @@ Tests are async and run under `pytest-asyncio` in `auto` mode, so no
 per-test decorator is needed. Coverage is opt-in via `--cov` to keep the
 default run fast.
 
+Lint, format, and type checks (run in CI):
+
+```bash
+ruff check agentflow tests examples
+ruff format --check agentflow tests examples
+mypy agentflow
+pip-audit
+```
+
 See `CHANGELOG.md` for the release history.
 
 The suite is split by a `live` marker. The default run skips live tests

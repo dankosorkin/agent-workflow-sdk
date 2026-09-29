@@ -8,11 +8,13 @@ to find out.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import CheckpointError
@@ -23,10 +25,8 @@ __all__ = ["FileCheckpointer"]
 
 def _chmod(path: Path, mode: int) -> None:
     """Best-effort permission set; ignored on filesystems that don't support it."""
-    try:
+    with contextlib.suppress(OSError):
         path.chmod(mode)
-    except OSError:
-        pass
 
 
 class FileCheckpointer:
@@ -55,7 +55,7 @@ class FileCheckpointer:
         self,
         root: Path | str = ".runs",
         *,
-        redact: "Redactor | None" = None,
+        redact: Redactor | None = None,
         secure_permissions: bool = True,
     ) -> None:
         self.root = Path(root)

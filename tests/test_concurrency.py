@@ -17,8 +17,7 @@ import asyncio
 from typing import Annotated
 
 import pytest
-
-from agentflow import END, START, Graph, State, add, append, union
+from agentflow import END, START, Graph, NodeError, State, add, append, union
 
 
 class FanState(State):
@@ -39,9 +38,7 @@ def _fanout_graph(schema, worker_names, worker_fn, join_fn=None):
     g.add_node("join", join_fn or (lambda s, c: {}))
 
     g.add_edge(START, "start")
-    g.add_conditional_edges(
-        "start", lambda s: list(worker_names), {n: n for n in worker_names}
-    )
+    g.add_conditional_edges("start", lambda s: list(worker_names), {n: n for n in worker_names})
     for name in worker_names:
         g.add_edge(name, "join")
     g.add_edge("join", END)
@@ -73,6 +70,7 @@ async def test_union_reducer_merges_concurrent_writes():
     def worker(name):
         async def fn(state, ctx):
             return {"tags": {name}}
+
         return fn
 
     app = _fanout_graph(FanState, names, worker).compile()
@@ -97,12 +95,11 @@ async def test_fanout_nodes_actually_overlap():
             # time and this wait would never be released.
             await asyncio.wait_for(arrived.wait(), timeout=2.0)
             return {"total": 1, "log": name}
+
         return fn
 
     app = _fanout_graph(FanState, names, worker).compile()
-    out = await asyncio.wait_for(
-        app.invoke({"total": 0, "log": [], "tags": set()}), timeout=5.0
-    )
+    out = await asyncio.wait_for(app.invoke({"total": 0, "log": [], "tags": set()}), timeout=5.0)
     assert out["total"] == n
     assert counter["in"] == n
 
@@ -121,5 +118,5 @@ async def test_sequential_baseline_would_not_overlap():
     g.add_edge(START, "w")
     g.add_edge("w", END)
     app = g.compile()
-    with pytest.raises(Exception):  # NodeError wrapping the TimeoutError
+    with pytest.raises(NodeError):  # wraps the TimeoutError
         await app.invoke({"total": 0, "log": [], "tags": set()})

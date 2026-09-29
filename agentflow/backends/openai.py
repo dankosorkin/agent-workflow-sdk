@@ -20,10 +20,11 @@ shared. Install: ``pip install 'agentic-workflow-sdk[ollama]'``.
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
-from agentflow.backends.base import BaseLLMBackend
 from agentflow.backends._http import RetryPolicy, open_stream
+from agentflow.backends.base import BaseLLMBackend
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
     BackendEvent,
@@ -32,7 +33,6 @@ from agentflow.events import (
     ErrorEvent,
     Message,
     TextChunk,
-    ToolCall,
     ToolCallSpec,
     TurnEnd,
 )
@@ -91,9 +91,7 @@ class OpenAIBackend(BaseLLMBackend):
         self, request: BackendRequest, *, session: str | None = None
     ) -> AsyncIterator[BackendEvent]:
         if not isinstance(request, ChatRequest):
-            raise BackendError(
-                f"OpenAIBackend accepts ChatRequest, got {type(request).__name__}"
-            )
+            raise BackendError(f"OpenAIBackend accepts ChatRequest, got {type(request).__name__}")
         if self._client is None:
             raise BackendError("OpenAIBackend.start() was not called")
 
@@ -103,16 +101,23 @@ class OpenAIBackend(BaseLLMBackend):
         tool_frags: dict[int, dict[str, Any]] = {}
         finish_reason: str | None = None
 
-        async with self.concurrency_guard(), open_stream(
-            self._client, "POST", "/chat/completions",
-            json=body, policy=self.retry, label="chat/completions",
-        ) as resp:
+        async with (
+            self.concurrency_guard(),
+            open_stream(
+                self._client,
+                "POST",
+                "/chat/completions",
+                json=body,
+                policy=self.retry,
+                label="chat/completions",
+            ) as resp,
+        ):
             try:
                 async for line in resp.aiter_lines():
                     line = line.strip()
                     if not line or not line.startswith("data:"):
                         continue
-                    data = line[len("data:"):].strip()
+                    data = line[len("data:") :].strip()
                     if data == "[DONE]":
                         break
                     try:

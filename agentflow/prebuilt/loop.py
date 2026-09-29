@@ -14,8 +14,9 @@ the bookkeeping: best-so-far, no-improvement streak, and the stop decision.
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
-from typing import Annotated, Any, Awaitable, Callable
+from typing import Annotated, Any
 
 from agentflow.graph import END, START, Graph
 from agentflow.state import State, add, append, last
@@ -26,6 +27,7 @@ __all__ = ["Candidate", "iterate_until_converged"]
 @dataclass(frozen=True)
 class Candidate:
     """One turn's result. ``done`` lets the worker end the loop itself."""
+
     score: float
     payload: Any = None
     done: bool = False
@@ -105,7 +107,7 @@ def iterate_until_converged(
 
         return update
 
-    def route(state: dict) -> str:
+    def route(state: Mapping[str, Any]) -> str:
         return "stop" if state.get("_done") else "again"
 
     g = Graph(_LoopState)

@@ -19,7 +19,6 @@ import shutil
 import urllib.request
 
 import pytest
-
 from agentflow.backends.base import AllowAll
 from agentflow.events import Message, TextChunk, TurnEnd
 
@@ -133,8 +132,8 @@ async def test_live_kiro():
     agent = os.environ.get("KIRO_AGENT")
     if not shutil.which("kiro-cli") or not agent:
         pytest.skip("kiro-cli not installed or KIRO_AGENT not set (e.g. KIRO_AGENT=vibe)")
-    from agentflow.backends.kiro import KiroBackend
     from agentflow.backends.base import AllowAll
+    from agentflow.backends.kiro import KiroBackend
 
     backend = KiroBackend(agent, permission=AllowAll())
     await backend.start()
@@ -175,18 +174,32 @@ async def test_live_tool_loop_ollama():
     async def multiply(a: float, b: float) -> str:
         return str(a * b)
 
-    tools = [Tool("multiply", multiply, description="Multiply two numbers",
-                  schema={"type": "object",
-                          "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
-                          "required": ["a", "b"]})]
+    tools = [
+        Tool(
+            "multiply",
+            multiply,
+            description="Multiply two numbers",
+            schema={
+                "type": "object",
+                "properties": {"a": {"type": "number"}, "b": {"type": "number"}},
+                "required": ["a", "b"],
+            },
+        )
+    ]
 
     llm = OllamaBackend(model)
     await llm.start()
     try:
         app = tool_loop(llm, tools, max_turns=6)
-        out = await app.invoke({"messages": [
-            Message(role="user", content="Use multiply to compute 6 * 7, then state the result.")
-        ]})
+        out = await app.invoke(
+            {
+                "messages": [
+                    Message(
+                        role="user", content="Use multiply to compute 6 * 7, then state the result."
+                    )
+                ]
+            }
+        )
     finally:
         await llm.close()
     # The final assistant message should exist; if the model used the tool the

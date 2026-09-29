@@ -28,6 +28,7 @@ class AgentFlowError(Exception):
 # Graph / engine
 # ---------------------------------------------------------------------------
 
+
 class GraphError(AgentFlowError):
     """A problem with graph structure or execution."""
 
@@ -55,6 +56,7 @@ class NodeError(GraphError):
 # ---------------------------------------------------------------------------
 # Backends
 # ---------------------------------------------------------------------------
+
 
 class BackendError(AgentFlowError):
     """A recoverable backend/agent error.
@@ -98,6 +100,7 @@ class BackendRateLimitError(BackendTransportError):
 # Checkpointing / HITL
 # ---------------------------------------------------------------------------
 
+
 class CheckpointError(AgentFlowError):
     """A checkpoint could not be written, read, or resumed."""
 
@@ -115,8 +118,7 @@ class RunTimeout(GraphError):
         self.seconds = seconds
         self.step = step
         super().__init__(
-            f"run {thread!r} exceeded {seconds}s (reached step {step}); "
-            f"last checkpoint preserved"
+            f"run {thread!r} exceeded {seconds}s (reached step {step}); last checkpoint preserved"
         )
 
 

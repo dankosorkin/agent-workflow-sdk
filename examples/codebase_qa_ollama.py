@@ -36,11 +36,20 @@ from pathlib import Path
 from typing import Annotated
 
 from agentflow import (
-    END, START, Graph, JsonlTelemetry, MemoryCheckpointer, MultiHooks, RunMetrics,
-    State, add, append, last,
+    END,
+    START,
+    Graph,
+    JsonlTelemetry,
+    MemoryCheckpointer,
+    MultiHooks,
+    RunMetrics,
+    State,
+    add,
+    append,
+    last,
 )
-from agentflow.events import Message, TextChunk, ToolCall
 from agentflow.backends.ollama import OllamaBackend
+from agentflow.events import Message, TextChunk, ToolCall
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -49,17 +58,19 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 # State
 # --------------------------------------------------------------------------
 
+
 class QAState(State):
     question: Annotated[str, last]
-    keywords: Annotated[list, last]      # current search terms
-    snippets: Annotated[list, append]    # accumulated {file, line, text}
-    attempts: Annotated[int, add]        # search passes made
+    keywords: Annotated[list, last]  # current search terms
+    snippets: Annotated[list, append]  # accumulated {file, line, text}
+    attempts: Annotated[int, add]  # search passes made
     answer: Annotated[str, last]
 
 
 # --------------------------------------------------------------------------
 # The real tool: search the repository
 # --------------------------------------------------------------------------
+
 
 def search_files(keyword: str, *, max_hits: int = 8) -> list[dict]:
     """Search the repo for a keyword. Uses ripgrep if present, else Python."""
@@ -68,15 +79,34 @@ def search_files(keyword: str, *, max_hits: int = 8) -> list[dict]:
     if rg:
         try:
             out = subprocess.run(
-                [rg, "-n", "-i", "--max-count", str(max_hits),
-                 "-g", "*.py", "-g", "*.md", keyword, str(REPO_ROOT)],
-                capture_output=True, text=True, timeout=15, check=False,
+                [
+                    rg,
+                    "-n",
+                    "-i",
+                    "--max-count",
+                    str(max_hits),
+                    "-g",
+                    "*.py",
+                    "-g",
+                    "*.md",
+                    keyword,
+                    str(REPO_ROOT),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+                check=False,
             ).stdout
             for line in out.splitlines()[: max_hits * 2]:
                 m = re.match(r"^(.*?):(\d+):(.*)$", line)
                 if m:
-                    hits.append({"file": _rel(m.group(1)), "line": int(m.group(2)),
-                                 "text": m.group(3).strip()[:200]})
+                    hits.append(
+                        {
+                            "file": _rel(m.group(1)),
+                            "line": int(m.group(2)),
+                            "text": m.group(3).strip()[:200],
+                        }
+                    )
         except (OSError, subprocess.TimeoutExpired):
             pass
         return hits[:max_hits]
@@ -89,8 +119,7 @@ def search_files(keyword: str, *, max_hits: int = 8) -> list[dict]:
         try:
             for i, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
                 if needle in line.lower():
-                    hits.append({"file": _rel(str(path)), "line": i,
-                                 "text": line.strip()[:200]})
+                    hits.append({"file": _rel(str(path)), "line": i, "text": line.strip()[:200]})
                     if len(hits) >= max_hits:
                         return hits
         except (OSError, UnicodeDecodeError):
@@ -109,6 +138,7 @@ def _rel(p: str) -> str:
 # Nodes
 # --------------------------------------------------------------------------
 
+
 def build_graph(llm: OllamaBackend):
     async def plan(state, ctx):
         broaden = state.get("attempts", 0) > 0
@@ -116,8 +146,11 @@ def build_graph(llm: OllamaBackend):
             "You are planning a code search. Given the user's question about a "
             "Python library, output 2-4 short search keywords (single words or "
             "short phrases) most likely to appear in the source or docs. "
-            + ("The first search found nothing — pick BROADER, more generic "
-               "terms this time. " if broaden else "")
+            + (
+                "The first search found nothing — pick BROADER, more generic terms this time. "
+                if broaden
+                else ""
+            )
             + "Reply with ONLY a JSON array of strings, nothing else."
         )
         messages = [
@@ -144,16 +177,17 @@ def build_graph(llm: OllamaBackend):
         snippets = state.get("snippets", [])
         if not snippets:
             return {"answer": "I couldn't find anything relevant in the repository."}
-        context = "\n".join(
-            f"- {s['file']}:{s['line']}: {s['text']}" for s in snippets[:20]
-        )
+        context = "\n".join(f"- {s['file']}:{s['line']}: {s['text']}" for s in snippets[:20])
         messages = [
-            Message(role="system", content=(
-                "Answer the user's question about this codebase using ONLY the "
-                "search results below. Cite files as path:line. Be concise. If "
-                "the results are insufficient, say so.\n\n"
-                f"Search results:\n{context}"
-            )),
+            Message(
+                role="system",
+                content=(
+                    "Answer the user's question about this codebase using ONLY the "
+                    "search results below. Cite files as path:line. Be concise. If "
+                    "the results are insufficient, say so.\n\n"
+                    f"Search results:\n{context}"
+                ),
+            ),
             Message(role="user", content=state["question"]),
         ]
         text = await _complete(llm, messages, ctx)
@@ -171,8 +205,7 @@ def build_graph(llm: OllamaBackend):
     g.add_node("answer", answer)
     g.add_edge(START, "plan")
     g.add_edge("plan", "search")
-    g.add_conditional_edges("search", route_after_search,
-                            {"retry": "plan", "answer": "answer"})
+    g.add_conditional_edges("search", route_after_search, {"retry": "plan", "answer": "answer"})
     g.add_edge("answer", END)
     return g
 
@@ -180,6 +213,7 @@ def build_graph(llm: OllamaBackend):
 # --------------------------------------------------------------------------
 # LLM helpers
 # --------------------------------------------------------------------------
+
 
 async def _complete(llm, messages, ctx) -> str:
     parts: list[str] = []
@@ -203,8 +237,27 @@ def _parse_keywords(text: str) -> list[str]:
 
 
 def _fallback_keywords(question: str) -> list[str]:
-    stop = {"how", "does", "the", "is", "a", "an", "what", "why", "in", "of",
-            "and", "to", "do", "work", "works", "this", "that", "with", "for"}
+    stop = {
+        "how",
+        "does",
+        "the",
+        "is",
+        "a",
+        "an",
+        "what",
+        "why",
+        "in",
+        "of",
+        "and",
+        "to",
+        "do",
+        "work",
+        "works",
+        "this",
+        "that",
+        "with",
+        "for",
+    }
     words = [w for w in re.findall(r"[a-zA-Z_]{3,}", question.lower()) if w not in stop]
     return words[:4] or ["def"]
 
@@ -212,6 +265,7 @@ def _fallback_keywords(question: str) -> list[str]:
 # --------------------------------------------------------------------------
 # Entry point
 # --------------------------------------------------------------------------
+
 
 def _first_model() -> str | None:
     try:

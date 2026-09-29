@@ -6,10 +6,17 @@ from __future__ import annotations
 from typing import Annotated
 
 import pytest
-
 from agentflow import (
-    Graph, START, END, State, add, append, last,
-    MemoryCheckpointer, CompilationError, NodeError,
+    END,
+    START,
+    CompilationError,
+    Graph,
+    MemoryCheckpointer,
+    NodeError,
+    State,
+    add,
+    append,
+    last,
 )
 
 
@@ -185,6 +192,7 @@ async def test_stream_events():
 
 
 # ------------------- compilation validation -------------------
+
 
 def test_compile_rejects_missing_start_edge():
     g = Graph(Counter)

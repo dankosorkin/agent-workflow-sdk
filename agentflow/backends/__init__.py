@@ -11,6 +11,7 @@ dependency you did not ask for. Import them from their own modules, e.g.
 ``from agentflow.backends.kiro import KiroBackend``.
 """
 
+from agentflow.backends._http import RetryPolicy
 from agentflow.backends.base import (
     AgentBackend,
     AllowAll,
@@ -23,7 +24,6 @@ from agentflow.backends.base import (
     PermissionPolicy,
     ToolAllowlist,
 )
-from agentflow.backends._http import RetryPolicy
 
 __all__ = [
     "Backend",

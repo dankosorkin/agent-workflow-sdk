@@ -13,18 +13,32 @@ Compose your own for structural rules.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable
+from collections.abc import Callable, Iterable
+from typing import Any
 
 __all__ = ["Redactor", "RedactKeys", "redact_none"]
 
 Redactor = Callable[[Any], Any]
 
 #: Default sensitive key fragments (case-insensitive substring match).
-DEFAULT_SENSITIVE = frozenset({
-    "api_key", "apikey", "authorization", "auth", "token", "secret",
-    "password", "passwd", "x-api-key", "access_key", "private_key", "cookie",
-    "bearer", "credential",
-})
+DEFAULT_SENSITIVE = frozenset(
+    {
+        "api_key",
+        "apikey",
+        "authorization",
+        "auth",
+        "token",
+        "secret",
+        "password",
+        "passwd",
+        "x-api-key",
+        "access_key",
+        "private_key",
+        "cookie",
+        "bearer",
+        "credential",
+    }
+)
 
 _MASK = "***REDACTED***"
 

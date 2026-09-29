@@ -41,16 +41,20 @@ class PipelineState(State):
 
 # ---- backend selection (whatever is installed) ----
 
+
 def pick_agent():
     if shutil.which("codex"):
         from agentflow.backends.codex import CodexBackend
+
         return "codex", CodexBackend(sandbox="read-only", permission=AllowAll())
     if shutil.which("claude"):
         from agentflow.backends.claude_code import ClaudeCodeBackend
+
         return "claude", ClaudeCodeBackend(permission=AllowAll())
     agent = os.environ.get("KIRO_AGENT")
     if shutil.which("kiro-cli") and agent:
         from agentflow.backends.kiro import KiroBackend
+
         return f"kiro:{agent}", KiroBackend(agent, permission=AllowAll())
     return None, None
 
@@ -60,11 +64,13 @@ def pick_llm():
     if model:
         try:
             from agentflow.backends.ollama import OllamaBackend
+
             return f"ollama:{model}", OllamaBackend(model)
         except ModuleNotFoundError:
             pass
     if os.environ.get("OPENAI_API_KEY"):
         from agentflow.backends.openai import OpenAIBackend
+
         return "openai", OpenAIBackend(
             os.environ.get("OPENAI_MODEL", "gpt-4o-mini"),
             api_key=os.environ["OPENAI_API_KEY"],
@@ -112,9 +118,18 @@ async def main() -> None:
     # inside a node, composing graphs.
     summarizer = tool_loop(
         llm,
-        [Tool("word_count", word_count, description="Count words in a string",
-              schema={"type": "object", "properties": {"text": {"type": "string"}},
-                      "required": ["text"]})],
+        [
+            Tool(
+                "word_count",
+                word_count,
+                description="Count words in a string",
+                schema={
+                    "type": "object",
+                    "properties": {"text": {"type": "string"}},
+                    "required": ["text"],
+                },
+            )
+        ],
         max_turns=5,
     )
 
@@ -137,9 +152,11 @@ async def main() -> None:
     app = g.compile()
 
     try:
-        out = await app.invoke({
-            "task": "In one short paragraph, say what kind of project this repo is. Do not use tools.",
-        })
+        out = await app.invoke(
+            {
+                "task": "In one short paragraph, say what kind of project this repo is. Do not use tools.",
+            }
+        )
     finally:
         await agent.close()
         await llm.close()

@@ -14,9 +14,11 @@ Requires ``kiro-cli`` on PATH; no third-party Python dependency.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any, Literal
 
 from agentflow.backends.base import BaseAgentBackend, PermissionPolicy
 from agentflow.errors import BackendError, BackendTransportError
@@ -25,6 +27,7 @@ from agentflow.events import (
     BackendEvent,
     BackendRequest,
     ErrorEvent,
+    PermissionDecision,
     PermissionOption,
     PermissionRequest,
     TextChunk,
@@ -118,19 +121,17 @@ class KiroBackend(BaseAgentBackend):
                 proc.stdin.close()
             try:
                 await asyncio.wait_for(proc.wait(), timeout=3)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.terminate()
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=2)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     proc.kill()
         finally:
             if self._reader_task:
                 self._reader_task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError, Exception):
                     await self._reader_task
-                except (asyncio.CancelledError, Exception):
-                    pass
             self._proc = None
             self._fail_pending(BackendTransportError("backend closed"))
 
@@ -142,9 +143,7 @@ class KiroBackend(BaseAgentBackend):
         self, request: BackendRequest, *, session: str | None = None
     ) -> AsyncIterator[BackendEvent]:
         if not isinstance(request, TextRequest):
-            raise BackendError(
-                f"KiroBackend accepts TextRequest, got {type(request).__name__}"
-            )
+            raise BackendError(f"KiroBackend accepts TextRequest, got {type(request).__name__}")
         if self._session_id is None:
             raise BackendError("KiroBackend.start() was not called")
         if self._turn_queue is not None:
@@ -180,7 +179,7 @@ class KiroBackend(BaseAgentBackend):
         try:
             while True:
                 item = await queue.get()
-                if item is _SENTINEL:
+                if isinstance(item, _Sentinel):
                     break
                 if isinstance(item, PermissionRequest):
                     # Resolve here, in the node's frame, so an Interactive
@@ -209,16 +208,14 @@ class KiroBackend(BaseAgentBackend):
                 future.cancel()
 
     @staticmethod
-    async def _drain_finisher(finisher: "asyncio.Task[None]") -> None:
+    async def _drain_finisher(finisher: asyncio.Task[None]) -> None:
         if finisher.done():
             # Surface any exception the finisher captured.
             finisher.result()
             return
         finisher.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await finisher
-        except asyncio.CancelledError:
-            pass
 
     # ------------------------------------------------------------------
     # Session setup
@@ -235,9 +232,7 @@ class KiroBackend(BaseAgentBackend):
         )
 
     async def _create_session(self) -> None:
-        result = await self._request(
-            "session/new", {"cwd": str(self.cwd), "mcpServers": []}
-        )
+        result = await self._request("session/new", {"cwd": str(self.cwd), "mcpServers": []})
         session_id = result.get("sessionId")
         if not session_id:
             raise BackendTransportError(f"session/new returned no sessionId: {result}")
@@ -251,17 +246,13 @@ class KiroBackend(BaseAgentBackend):
             return
         available = {m.get("id") for m in modes.get("availableModes", [])}
         if self.agent not in available:
-            raise BackendError(
-                f"agent {self.agent!r} not in available modes: {sorted(available)}"
-            )
+            raise BackendError(f"agent {self.agent!r} not in available modes: {sorted(available)}")
         await self._request(
             "session/set_mode", {"sessionId": self._session_id, "modeId": self.agent}
         )
 
     async def _set_model(self, model: str) -> None:
-        await self._request(
-            "session/set_model", {"sessionId": self._session_id, "modelId": model}
-        )
+        await self._request("session/set_model", {"sessionId": self._session_id, "modelId": model})
 
     # ------------------------------------------------------------------
     # JSON-RPC transport (async)
@@ -334,6 +325,8 @@ class KiroBackend(BaseAgentBackend):
             return
         # Response to one of our requests.
         request_id = message.get("id")
+        if not isinstance(request_id, int):
+            return
         future = self._pending.pop(request_id, None)
         if future is None or future.done():
             return
@@ -371,11 +364,13 @@ class KiroBackend(BaseAgentBackend):
             await self._handle_permission(request_id, params)
             return
 
-        self._write({
-            "jsonrpc": "2.0",
-            "id": request_id,
-            "error": {"code": -32601, "message": f"Unsupported client method: {method}"},
-        })
+        self._write(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {"code": -32601, "message": f"Unsupported client method: {method}"},
+            }
+        )
 
     async def _handle_permission(self, request_id: Any, params: dict[str, Any]) -> None:
         raw_options = params.get("options", [])
@@ -449,9 +444,7 @@ class KiroBackend(BaseAgentBackend):
         if not isinstance(update, dict):
             return
 
-        update_type = (
-            update.get("sessionUpdate") or update.get("type") or update.get("kind")
-        )
+        update_type = update.get("sessionUpdate") or update.get("type") or update.get("kind")
         event = self._notification_to_event(update_type, update)
         if event is not None:
             self._emit(event)
@@ -487,7 +480,7 @@ class KiroBackend(BaseAgentBackend):
             queue.put_nowait(event)
 
 
-def _map_status(status: Any) -> str:
+def _map_status(status: Any) -> Literal["ok", "error", "pending"]:
     if status in ("completed", "success", "ok"):
         return "ok"
     if status in ("failed", "error"):

@@ -12,7 +12,7 @@ types.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Literal, Union
+from typing import Any, Literal
 
 __all__ = [
     # chat vocabulary
@@ -46,9 +46,11 @@ Role = Literal["system", "user", "assistant", "tool"]
 # Chat vocabulary
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class ToolCallSpec:
     """A single tool call an assistant message requested."""
+
     id: str
     name: str
     args: dict[str, Any] = field(default_factory=dict)
@@ -63,6 +65,7 @@ class Message:
     requested tools; ``tool_call_id`` links a ``role="tool"`` result back to
     the call that produced it.
     """
+
     role: Role
     content: str = ""
     tool_calls: tuple[ToolCallSpec, ...] = ()
@@ -73,6 +76,7 @@ class Message:
 @dataclass(frozen=True, slots=True)
 class ToolSpec:
     """Describes a tool offered to an LLM (JSON-Schema parameters)."""
+
     name: str
     description: str = ""
     schema: dict[str, Any] = field(default_factory=dict)
@@ -82,30 +86,35 @@ class ToolSpec:
 # Requests — the input side of Backend.invoke
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class TextRequest:
     """Prompt an agent backend with free text."""
+
     text: str
 
 
 @dataclass(frozen=True, slots=True)
 class ChatRequest:
     """Call an LLM backend with a message list and optional tool schemas."""
+
     messages: tuple[Message, ...]
     tools: tuple[ToolSpec, ...] = ()
     options: dict[str, Any] = field(default_factory=dict)
 
 
-BackendRequest = Union[TextRequest, ChatRequest]
+BackendRequest = TextRequest | ChatRequest
 
 
 # ---------------------------------------------------------------------------
 # Events — the output side of Backend.invoke
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class TextChunk:
     """A streamed delta of the assistant's message text."""
+
     text: str
 
 
@@ -114,6 +123,7 @@ class ToolCall:
     """The backend/model invoked a tool. For an LLM backend this is a
     *request* the graph must fulfil; for an agent backend it is informational
     (the agent runs the tool itself)."""
+
     id: str
     name: str
     args: dict[str, Any] = field(default_factory=dict)
@@ -124,6 +134,7 @@ class ToolCall:
 class ToolResult:
     """A tool call resolved (emitted by agent backends that run their own
     tools)."""
+
     id: str
     status: Literal["ok", "error", "pending"] = "ok"
     content: Any = None
@@ -132,6 +143,7 @@ class ToolResult:
 @dataclass(frozen=True, slots=True)
 class PermissionOption:
     """One choice a backend offers for a permission request."""
+
     option_id: str
     name: str
     kind: str  # e.g. "allow_always", "allow_once", "reject_once"
@@ -145,6 +157,7 @@ class PermissionRequest:
     yielded to node code (agent backends handle it inline). It is a public
     type so an ``Interactive`` policy can surface it to a human.
     """
+
     id: str
     tool: str
     options: tuple[PermissionOption, ...] = ()
@@ -155,6 +168,7 @@ class PermissionRequest:
 class TurnEnd:
     """Terminal event of a turn. Carries the fully assembled assistant text
     and the backend's stop reason (e.g. ``end_turn``, ``max_tokens``)."""
+
     text: str = ""
     stop_reason: str | None = None
     message: Message | None = None
@@ -165,29 +179,25 @@ class ErrorEvent:
     """A recoverable error surfaced as data (not raised). A node may branch
     on it. Fatal transport failures raise
     :class:`~agentflow.errors.BackendTransportError` instead."""
+
     message: str
     detail: dict[str, Any] = field(default_factory=dict)
 
 
-BackendEvent = Union[
-    TextChunk,
-    ToolCall,
-    ToolResult,
-    PermissionRequest,
-    TurnEnd,
-    ErrorEvent,
-]
+BackendEvent = TextChunk | ToolCall | ToolResult | PermissionRequest | TurnEnd | ErrorEvent
 
 
 # ---------------------------------------------------------------------------
 # Permission decisions — the output of a PermissionPolicy
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class Allow:
     """Approve a permission request. ``option_id`` selects a specific offered
     option; when ``None`` the backend picks the most permissive allow option
     it was given."""
+
     option_id: str | None = None
     remember: bool = False
 
@@ -195,7 +205,8 @@ class Allow:
 @dataclass(frozen=True, slots=True)
 class Deny:
     """Reject a permission request."""
+
     reason: str | None = None
 
 
-PermissionDecision = Union[Allow, Deny]
+PermissionDecision = Allow | Deny

@@ -3,16 +3,19 @@
 from __future__ import annotations
 
 import pytest
-
 from agentflow.backends.base import (
-    AllowAll, DenyAll, ToolAllowlist, BaseAgentBackend,
+    AllowAll,
+    BaseAgentBackend,
+    DenyAll,
+    ToolAllowlist,
 )
 from agentflow.events import Allow, Deny, PermissionOption, PermissionRequest
 
 
 def _req(tool: str) -> PermissionRequest:
-    return PermissionRequest(id="1", tool=tool,
-                             options=(PermissionOption("a", "Allow", "allow_once"),))
+    return PermissionRequest(
+        id="1", tool=tool, options=(PermissionOption("a", "Allow", "allow_once"),)
+    )
 
 
 def test_agent_backend_requires_explicit_permission():
@@ -23,12 +26,14 @@ def test_agent_backend_requires_explicit_permission():
 
 def test_kiro_requires_permission():
     from agentflow.backends.kiro import KiroBackend
+
     with pytest.raises(TypeError):
         KiroBackend("vibe")  # missing required keyword-only permission
 
 
 def test_codex_requires_permission():
     from agentflow.backends.codex import CodexBackend
+
     with pytest.raises(TypeError):
         CodexBackend(sandbox="read-only")  # missing permission
 

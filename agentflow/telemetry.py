@@ -15,11 +15,12 @@ Nothing here is required by the engine; it is one more optional listener.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import dataclasses
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from agentflow.observability import Hooks, _safe
 from agentflow.redaction import Redactor, redact_none
@@ -37,7 +38,7 @@ class MultiHooks(Hooks):
     def __init__(self, *hooks: Hooks) -> None:
         self._hooks: tuple[Hooks, ...] = tuple(hooks)
 
-    def add(self, hook: Hooks) -> "MultiHooks":
+    def add(self, hook: Hooks) -> MultiHooks:
         self._hooks += (hook,)
         return self
 
@@ -71,7 +72,7 @@ class MultiHooks(Hooks):
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 class JsonlTelemetry(Hooks):
@@ -87,7 +88,7 @@ class JsonlTelemetry(Hooks):
         path: Path | str,
         *,
         per_thread: bool | None = None,
-        redact: "Redactor | None" = None,
+        redact: Redactor | None = None,
         secure_permissions: bool = True,
     ) -> None:
         p = Path(path)
@@ -105,11 +106,10 @@ class JsonlTelemetry(Hooks):
             self._chmod_dir(self.path.parent)
 
     def _chmod_dir(self, d: Path) -> None:
+        # best-effort; some filesystems (e.g. Windows) ignore this
         if self._secure:
-            try:
+            with contextlib.suppress(OSError):
                 d.chmod(0o700)
-            except OSError:
-                pass  # best-effort; some filesystems (e.g. Windows) ignore this
 
     def _file_for(self, thread: str) -> Path:
         if self._is_dir:
@@ -129,10 +129,8 @@ class JsonlTelemetry(Hooks):
             with path.open("a", encoding="utf-8") as fh:
                 fh.write(line)
             if new_file and self._secure:
-                try:
+                with contextlib.suppress(OSError):
                     path.chmod(0o600)
-                except OSError:
-                    pass
 
     async def on_run_start(self, thread, step):
         await self._write(thread, "run_start", step=step)
@@ -141,12 +139,12 @@ class JsonlTelemetry(Hooks):
         await self._write(thread, "node_start", step=step, node=node)
 
     async def on_node_end(self, thread, step, node, seconds):
-        await self._write(thread, "node_end", step=step, node=node,
-                          seconds=round(seconds, 6))
+        await self._write(thread, "node_end", step=step, node=node, seconds=round(seconds, 6))
 
     async def on_node_error(self, thread, step, node, exc):
-        await self._write(thread, "node_error", step=step, node=node,
-                          error=f"{type(exc).__name__}: {exc}")
+        await self._write(
+            thread, "node_error", step=step, node=node, error=f"{type(exc).__name__}: {exc}"
+        )
 
     async def on_step_end(self, thread, step, ran):
         await self._write(thread, "step", step=step, ran=list(ran))
@@ -155,8 +153,14 @@ class JsonlTelemetry(Hooks):
         await self._write(thread, "run_end", step=step, completed=completed)
 
     async def on_event(self, thread, step, node, event):
-        await self._write(thread, "event", step=step, node=node,
-                          eventType=type(event).__name__, payload=_summarize(event))
+        await self._write(
+            thread,
+            "event",
+            step=step,
+            node=node,
+            eventType=type(event).__name__,
+            payload=_summarize(event),
+        )
 
 
 def _json_default(obj: Any) -> Any:

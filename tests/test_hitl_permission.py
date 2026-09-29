@@ -13,7 +13,6 @@ import json
 from typing import Annotated
 
 import pytest
-
 from agentflow import END, START, Graph, MemoryCheckpointer, State, last
 from agentflow.backends.base import AllowAll, DenyAll, Interactive
 from agentflow.backends.kiro import KiroBackend
@@ -67,9 +66,14 @@ class _Proc:
         self.stdout = _Stdout()
         self.returncode = None
 
-    def terminate(self): self.returncode = -15
-    def kill(self): self.returncode = -9
-    async def wait(self): return self.returncode or 0
+    def terminate(self):
+        self.returncode = -15
+
+    def kill(self):
+        self.returncode = -9
+
+    async def wait(self):
+        return self.returncode or 0
 
 
 class GState(State):
@@ -101,25 +105,39 @@ def _spawn_permission_driver(proc, turns: int = 1):
     left unanswered) and the post-resume re-run (answered), because the engine
     re-runs the node on resume.
     """
+
     async def run():
         for i in range(turns):
             perm_id = 7001 + i
-            p = await proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt"
-                                          and m.get("_seen") is not True)
+            p = await proc.stdin.wait_for(
+                lambda m: m.get("method") == "session/prompt" and m.get("_seen") is not True
+            )
             p["_seen"] = True
-            proc.stdout.feed({
-                "jsonrpc": "2.0", "id": perm_id, "method": "session/request_permission",
-                "params": {"toolName": "fs_write",
-                           "options": [{"optionId": "ok", "name": "o", "kind": "allow_once"}]},
-            })
+            proc.stdout.feed(
+                {
+                    "jsonrpc": "2.0",
+                    "id": perm_id,
+                    "method": "session/request_permission",
+                    "params": {
+                        "toolName": "fs_write",
+                        "options": [{"optionId": "ok", "name": "o", "kind": "allow_once"}],
+                    },
+                }
+            )
             try:
                 ans = await asyncio.wait_for(
-                    proc.stdin.wait_for(lambda m: m.get("id") == perm_id and "result" in m), 1)
+                    proc.stdin.wait_for(
+                        lambda m, _pid=perm_id: m.get("id") == _pid and "result" in m
+                    ),
+                    1,
+                )
                 outcome = ans["result"]["outcome"]["outcome"]
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 outcome = "unanswered"
-            proc.stdout.feed({"jsonrpc": "2.0", "id": p["id"],
-                              "result": {"stopReason": f"done:{outcome}"}})
+            proc.stdout.feed(
+                {"jsonrpc": "2.0", "id": p["id"], "result": {"stopReason": f"done:{outcome}"}}
+            )
+
     return asyncio.create_task(run())
 
 

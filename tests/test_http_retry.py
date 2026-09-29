@@ -6,7 +6,6 @@ import json
 
 import httpx
 import pytest
-
 from agentflow.backends._http import RetryPolicy, open_stream
 from agentflow.backends.ollama import OllamaBackend
 from agentflow.errors import BackendTransportError
@@ -14,8 +13,12 @@ from agentflow.events import Message, TurnEnd
 
 
 def _ndjson_ok() -> bytes:
-    return (json.dumps({"message": {"role": "assistant", "content": "hi"},
-                        "done": True, "done_reason": "stop"}) + "\n").encode()
+    return (
+        json.dumps(
+            {"message": {"role": "assistant", "content": "hi"}, "done": True, "done_reason": "stop"}
+        )
+        + "\n"
+    ).encode()
 
 
 class _Sequence:
@@ -47,15 +50,19 @@ async def _drain(backend):
 
 # --- via a real backend (Ollama) ---
 
+
 async def test_retries_then_succeeds(monkeypatch):
     import agentflow.backends._http as h
+
     monkeypatch.setattr(h.asyncio, "sleep", _no_sleep)
 
-    seq = _Sequence([
-        httpx.Response(503, content=b"busy"),
-        httpx.Response(503, content=b"busy"),
-        httpx.Response(200, content=_ndjson_ok()),
-    ])
+    seq = _Sequence(
+        [
+            httpx.Response(503, content=b"busy"),
+            httpx.Response(503, content=b"busy"),
+            httpx.Response(200, content=_ndjson_ok()),
+        ]
+    )
     b = _backend(seq, RetryPolicy(max_retries=3, backoff=0.01, jitter=0))
     events = await _drain(b)
     await b.close()
@@ -65,6 +72,7 @@ async def test_retries_then_succeeds(monkeypatch):
 
 async def test_gives_up_after_max_retries(monkeypatch):
     import agentflow.backends._http as h
+
     monkeypatch.setattr(h.asyncio, "sleep", _no_sleep)
 
     seq = _Sequence([httpx.Response(503, content=b"busy")])
@@ -78,6 +86,7 @@ async def test_gives_up_after_max_retries(monkeypatch):
 
 async def test_does_not_retry_client_error(monkeypatch):
     import agentflow.backends._http as h
+
     monkeypatch.setattr(h.asyncio, "sleep", _no_sleep)
 
     seq = _Sequence([httpx.Response(401, content=b"bad key")])
@@ -90,6 +99,7 @@ async def test_does_not_retry_client_error(monkeypatch):
 
 async def test_retries_connection_error(monkeypatch):
     import agentflow.backends._http as h
+
     monkeypatch.setattr(h.asyncio, "sleep", _no_sleep)
 
     state = {"calls": 0}
@@ -109,8 +119,10 @@ async def test_retries_connection_error(monkeypatch):
 
 # --- the shared helper directly, incl. Retry-After ---
 
+
 async def test_open_stream_respects_retry_after(monkeypatch):
     import agentflow.backends._http as h
+
     slept: list[float] = []
 
     async def record_sleep(seconds):
@@ -118,10 +130,12 @@ async def test_open_stream_respects_retry_after(monkeypatch):
 
     monkeypatch.setattr(h.asyncio, "sleep", record_sleep)
 
-    seq = _Sequence([
-        httpx.Response(429, headers={"retry-after": "7"}, content=b"slow down"),
-        httpx.Response(200, content=b"ok"),
-    ])
+    seq = _Sequence(
+        [
+            httpx.Response(429, headers={"retry-after": "7"}, content=b"slow down"),
+            httpx.Response(200, content=b"ok"),
+        ]
+    )
     client = httpx.AsyncClient(base_url="http://x", transport=httpx.MockTransport(seq))
     policy = RetryPolicy(max_retries=2, backoff=99, jitter=0)  # backoff would be huge
     async with open_stream(client, "POST", "/y", json={}, policy=policy, label="t") as resp:

@@ -19,7 +19,8 @@ Design rules:
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
+from typing import Any
 
 from agentflow.errors import InterruptError
 

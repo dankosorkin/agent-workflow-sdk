@@ -10,14 +10,11 @@ from __future__ import annotations
 import asyncio
 import json
 
-import pytest
-
 from agentflow.backends.base import AllowAll
-from agentflow.backends.cli_exec import CLIExecBackend, TurnAccumulator
 from agentflow.backends.claude_code import ClaudeCodeBackend
+from agentflow.backends.cli_exec import TurnAccumulator
 from agentflow.backends.codex import CodexBackend
 from agentflow.events import TextChunk, ToolCall, ToolResult, TurnEnd
-
 
 # --- captured Codex event stream (trimmed to the essentials) ---
 CODEX_LINES = [
@@ -30,12 +27,22 @@ CODEX_LINES = [
 # --- captured Claude Code stream (trimmed) ---
 CLAUDE_LINES = [
     {"type": "system", "subtype": "init", "session_id": "e8d6202d", "model": "claude-sonnet-5"},
-    {"type": "stream_event", "event": {"type": "content_block_delta",
-     "delta": {"type": "text_delta", "text": "po"}}},
-    {"type": "stream_event", "event": {"type": "content_block_delta",
-     "delta": {"type": "text_delta", "text": "ng"}}},
-    {"type": "result", "subtype": "success", "result": "pong",
-     "stop_reason": "end_turn", "session_id": "e8d6202d", "is_error": False},
+    {
+        "type": "stream_event",
+        "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "po"}},
+    },
+    {
+        "type": "stream_event",
+        "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "ng"}},
+    },
+    {
+        "type": "result",
+        "subtype": "success",
+        "result": "pong",
+        "stop_reason": "end_turn",
+        "session_id": "e8d6202d",
+        "is_error": False,
+    },
 ]
 
 
@@ -60,9 +67,16 @@ def test_codex_parses_command_execution():
     backend = CodexBackend(permission=AllowAll())
     acc = TurnAccumulator()
     events = backend.parse_line(
-        {"type": "item.completed",
-         "item": {"id": "c1", "type": "command_execution",
-                  "command": "ls", "exit_code": 0, "aggregated_output": "file.txt"}},
+        {
+            "type": "item.completed",
+            "item": {
+                "id": "c1",
+                "type": "command_execution",
+                "command": "ls",
+                "exit_code": 0,
+                "aggregated_output": "file.txt",
+            },
+        },
         acc,
     )
     calls = [e for e in events if isinstance(e, ToolCall)]
@@ -89,7 +103,8 @@ def test_claude_result_fallback_when_no_stream():
     events = []
     events += backend.parse_line({"type": "system", "subtype": "init", "session_id": "s"}, acc)
     events += backend.parse_line(
-        {"type": "result", "result": "hello", "stop_reason": "end_turn", "is_error": False}, acc)
+        {"type": "result", "result": "hello", "stop_reason": "end_turn", "is_error": False}, acc
+    )
     text = [e for e in events if isinstance(e, TextChunk)]
     assert acc.text == "hello"
     assert text and text[0].text == "hello"
@@ -99,12 +114,23 @@ def test_claude_parses_tool_use():
     backend = ClaudeCodeBackend(permission=AllowAll())
     acc = TurnAccumulator()
     # stream some text first so tool_use isn't treated as text fallback
-    backend.parse_line({"type": "stream_event", "event": {"type": "content_block_delta",
-                        "delta": {"type": "text_delta", "text": "ok"}}}, acc)
+    backend.parse_line(
+        {
+            "type": "stream_event",
+            "event": {"type": "content_block_delta", "delta": {"type": "text_delta", "text": "ok"}},
+        },
+        acc,
+    )
     events = backend.parse_line(
-        {"type": "assistant", "message": {"content": [
-            {"type": "text", "text": "ok"},
-            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}}]}},
+        {
+            "type": "assistant",
+            "message": {
+                "content": [
+                    {"type": "text", "text": "ok"},
+                    {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls"}},
+                ]
+            },
+        },
         acc,
     )
     calls = [e for e in events if isinstance(e, ToolCall)]
@@ -113,6 +139,7 @@ def test_claude_parses_tool_use():
 
 
 # --- full-turn drive of the CLIExecBackend base against a fake subprocess ---
+
 
 class _FakeStdout:
     def __init__(self, lines: list[dict]):

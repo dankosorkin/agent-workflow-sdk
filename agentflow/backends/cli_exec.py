@@ -21,9 +21,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from agentflow.backends.base import BaseAgentBackend, PermissionPolicy
 from agentflow.errors import BackendError, BackendTransportError
@@ -129,7 +130,11 @@ class CLIExecBackend(BaseAgentBackend):
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(self.cwd),
-                stdin=asyncio.subprocess.PIPE if stdin_text is not None else asyncio.subprocess.DEVNULL,
+                stdin=(
+                    asyncio.subprocess.PIPE
+                    if stdin_text is not None
+                    else asyncio.subprocess.DEVNULL
+                ),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env=self.subprocess_env(),
@@ -172,7 +177,7 @@ class CLIExecBackend(BaseAgentBackend):
         while True:
             try:
                 line = await _readline(proc.stdout, self.timeout)
-            except asyncio.TimeoutError as exc:
+            except TimeoutError as exc:
                 proc.kill()
                 raise BackendTransportError(
                     f"{self.cli_name} produced no output within {self.timeout}s"
@@ -186,8 +191,10 @@ class CLIExecBackend(BaseAgentBackend):
                 obj = json.loads(text)
             except json.JSONDecodeError:
                 # Some CLIs interleave non-JSON banner lines; surface as data.
-                yield ErrorEvent(message=f"non-JSON line from {self.cli_name}",
-                                 detail={"line": text.decode("utf-8", "replace")})
+                yield ErrorEvent(
+                    message=f"non-JSON line from {self.cli_name}",
+                    detail={"line": text.decode("utf-8", "replace")},
+                )
                 continue
             if not isinstance(obj, dict):
                 continue
@@ -198,7 +205,7 @@ class CLIExecBackend(BaseAgentBackend):
         if proc.returncode is None:
             try:
                 await asyncio.wait_for(proc.wait(), timeout=5)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 proc.kill()
                 await proc.wait()
         # Drain stderr for diagnostics on a nonzero exit.

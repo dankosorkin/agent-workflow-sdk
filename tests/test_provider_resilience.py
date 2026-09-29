@@ -7,19 +7,29 @@ from typing import Annotated
 
 import httpx
 import pytest
-
 from agentflow import (
-    END, START, Graph, State, add, BackendRateLimitError, BackendTransportError,
+    END,
+    START,
+    BackendRateLimitError,
+    BackendTransportError,
+    Graph,
+    State,
+    add,
 )
 from agentflow.backends._http import RetryPolicy
 from agentflow.backends.ollama import OllamaBackend
-from agentflow.events import Message, TurnEnd
+from agentflow.events import Message
 
 
 def _ndjson_ok() -> bytes:
     import json
-    return (json.dumps({"message": {"role": "assistant", "content": "hi"},
-                        "done": True, "done_reason": "stop"}) + "\n").encode()
+
+    return (
+        json.dumps(
+            {"message": {"role": "assistant", "content": "hi"}, "done": True, "done_reason": "stop"}
+        )
+        + "\n"
+    ).encode()
 
 
 def _backend(handler, **kw):
@@ -33,6 +43,7 @@ async def _drain(b):
 
 
 # --- typed errors ---
+
 
 async def test_429_raises_rate_limit_error_with_retry_after():
     def handler(request):
@@ -60,9 +71,8 @@ async def test_500_raises_transport_error_with_status():
 
 # --- per-backend concurrency ---
 
-async def test_backend_max_concurrency_limits_inflight():
-    inflight = {"cur": 0, "max": 0}
 
+async def test_backend_max_concurrency_limits_inflight():
     def handler(request):
         # httpx MockTransport handler is sync; can't easily block here, so we
         # assert the semaphore via the guard object instead (below).
@@ -80,6 +90,7 @@ async def test_backend_max_concurrency_limits_inflight():
 
 async def test_no_concurrency_guard_by_default():
     import contextlib
+
     b = _backend(lambda r: httpx.Response(200, content=_ndjson_ok()))
     guard = b.concurrency_guard()
     # nullcontext when unset
@@ -89,6 +100,7 @@ async def test_no_concurrency_guard_by_default():
 
 # --- super-step fan-out concurrency limit ---
 
+
 class S(State):
     n: Annotated[int, add]
 
@@ -96,7 +108,6 @@ class S(State):
 async def test_max_node_concurrency_bounds_fanout():
     """With max_node_concurrency=2 and 4 fan-out nodes, no more than 2 run at once."""
     live = {"cur": 0, "max": 0}
-    gate = asyncio.Event()
 
     def worker(name):
         async def fn(state, ctx):
@@ -105,6 +116,7 @@ async def test_max_node_concurrency_bounds_fanout():
             await asyncio.sleep(0.02)
             live["cur"] -= 1
             return {"n": 1}
+
         return fn
 
     names = [f"w{i}" for i in range(4)]
@@ -139,6 +151,7 @@ async def test_unbounded_fanout_runs_all_at_once():
             await asyncio.sleep(0.02)
             live["cur"] -= 1
             return {"n": 1}
+
         return fn
 
     names = [f"w{i}" for i in range(4)]

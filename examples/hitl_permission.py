@@ -29,10 +29,12 @@ class S(State):
 def pick_agent():
     if shutil.which("codex"):
         from agentflow.backends.codex import CodexBackend
+
         # workspace-write so the agent actually wants permission to edit.
         return "codex", CodexBackend(sandbox="workspace-write", permission=Interactive())
     if shutil.which("claude"):
         from agentflow.backends.claude_code import ClaudeCodeBackend
+
         return "claude", ClaudeCodeBackend(permission=Interactive())
     return None, None
 
@@ -70,8 +72,10 @@ async def main() -> None:
 
         while state is not None and state.interrupted:
             req: PermissionRequest = state.interrupt_payload
-            print(f"\n[permission requested] tool={req.tool!r} options="
-                  f"{[o.kind for o in req.options]}")
+            print(
+                f"\n[permission requested] tool={req.tool!r} options="
+                f"{[o.kind for o in req.options]}"
+            )
             answer = input("approve? [y/N] ").strip().lower()
             decision = Allow() if answer in ("y", "yes") else Deny()
             print(f"  -> {'ALLOW' if isinstance(decision, Allow) else 'DENY'}")

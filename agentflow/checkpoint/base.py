@@ -8,8 +8,9 @@ human-in-the-loop interrupt and, if so, what payload the human must answer.
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator, Mapping, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 __all__ = ["Checkpoint", "Checkpointer"]
 

@@ -11,7 +11,8 @@ This module imports only :mod:`agentflow.events` and
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Protocol, runtime_checkable
+from collections.abc import AsyncIterator
+from typing import Any, Protocol, runtime_checkable
 
 from agentflow.errors import InterruptError
 from agentflow.events import (
@@ -42,6 +43,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Backend protocols
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class Backend(Protocol):
@@ -76,11 +78,9 @@ class AgentBackend(Backend, Protocol):
     :class:`PermissionPolicy` used to answer the agent's permission prompts.
     """
 
-    permission: "PermissionPolicy"
+    permission: PermissionPolicy
 
-    def prompt(
-        self, text: str, *, session: str | None = None
-    ) -> AsyncIterator[BackendEvent]:
+    def prompt(self, text: str, *, session: str | None = None) -> AsyncIterator[BackendEvent]:
         """Convenience wrapper over ``invoke(TextRequest(text))``."""
         ...
 
@@ -109,6 +109,7 @@ class LLMBackend(Backend, Protocol):
 # Base classes with the convenience wrappers implemented once
 # ---------------------------------------------------------------------------
 
+
 class BaseAgentBackend:
     """Mixin implementing :meth:`prompt` on top of :meth:`invoke`.
 
@@ -130,9 +131,9 @@ class BaseAgentBackend:
     capability matrix in the README.
     """
 
-    permission: "PermissionPolicy"
+    permission: PermissionPolicy
 
-    def __init__(self, permission: "PermissionPolicy") -> None:
+    def __init__(self, permission: PermissionPolicy) -> None:
         if permission is None:
             raise TypeError(
                 "an agent backend requires an explicit permission policy "
@@ -141,9 +142,7 @@ class BaseAgentBackend:
             )
         self.permission = permission
 
-    def prompt(
-        self, text: str, *, session: str | None = None
-    ) -> AsyncIterator[BackendEvent]:
+    def prompt(self, text: str, *, session: str | None = None) -> AsyncIterator[BackendEvent]:
         return self.invoke(TextRequest(text), session=session)  # type: ignore[attr-defined]
 
 
@@ -197,12 +196,12 @@ class BaseLLMBackend:
 # Permission policies (agent backends only)
 # ---------------------------------------------------------------------------
 
+
 @runtime_checkable
 class PermissionPolicy(Protocol):
     """Decides how to answer an agent's permission request."""
 
-    async def decide(self, req: PermissionRequest) -> PermissionDecision:
-        ...
+    async def decide(self, req: PermissionRequest) -> PermissionDecision: ...
 
 
 class AllowAll:

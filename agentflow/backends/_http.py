@@ -23,10 +23,11 @@ from __future__ import annotations
 import asyncio
 import email.utils
 import random
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator
+from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 
@@ -78,8 +79,8 @@ def _parse_retry_after(value: str | None) -> float | None:
     if dt is None:
         return None
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    return max(0.0, (dt - datetime.now(timezone.utc)).total_seconds())
+        dt = dt.replace(tzinfo=UTC)
+    return max(0.0, (dt - datetime.now(UTC)).total_seconds())
 
 
 @asynccontextmanager
@@ -105,7 +106,6 @@ async def open_stream(
     if sleep is None:
         sleep = asyncio.sleep
     attempt = 0
-    last_detail = ""
 
     while True:
         attempt += 1
@@ -131,7 +131,6 @@ async def open_stream(
         detail = (await resp.aread()).decode("utf-8", "replace")
         retry_after = resp.headers.get("retry-after")
         await stream_cm.__aexit__(None, None, None)
-        last_detail = detail
 
         retryable = status in pol.retryable_status
         parsed_retry_after = _parse_retry_after(retry_after)
@@ -145,8 +144,12 @@ async def open_stream(
         if status == 429:
             raise BackendRateLimitError(
                 f"{label} rate limited (429): {detail}",
-                status=status, headers=hdrs, retry_after=parsed_retry_after,
+                status=status,
+                headers=hdrs,
+                retry_after=parsed_retry_after,
             )
         raise BackendTransportError(
-            f"{label} returned {status}: {detail}", status=status, headers=hdrs,
+            f"{label} returned {status}: {detail}",
+            status=status,
+            headers=hdrs,
         )

@@ -6,9 +6,14 @@ import asyncio
 from typing import Annotated
 
 import pytest
-
 from agentflow import (
-    END, START, Graph, State, add, MemoryCheckpointer, RunTimeout,
+    END,
+    START,
+    Graph,
+    MemoryCheckpointer,
+    RunTimeout,
+    State,
+    add,
 )
 
 
@@ -62,8 +67,9 @@ async def test_timeout_preserves_last_checkpoint_and_resumes():
 
     g.add_node("tick", tick)
     g.add_edge(START, "tick")
-    g.add_conditional_edges("tick", lambda s: "again" if s["n"] < 100 else "done",
-                            {"again": "tick", "done": END})
+    g.add_conditional_edges(
+        "tick", lambda s: "again" if s["n"] < 100 else "done", {"again": "tick", "done": END}
+    )
     app = g.compile(checkpointer=cp, step_limit=10_000)
 
     with pytest.raises(RunTimeout) as ei:

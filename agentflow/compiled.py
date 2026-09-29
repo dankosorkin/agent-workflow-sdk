@@ -12,7 +12,8 @@ structure and drives it through :mod:`agentflow.runtime`, exposing:
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Mapping
+from typing import Any
 
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import CheckpointError, GraphError, RunTimeout
@@ -122,9 +123,7 @@ class CompiledGraph:
         result = await self._run_with_timeout(coro, thread, timeout)
         return dict(result.state)
 
-    async def stream_resume(
-        self, thread: str, value: Any = None
-    ) -> AsyncIterator[StreamEvent]:
+    async def stream_resume(self, thread: str, value: Any = None) -> AsyncIterator[StreamEvent]:
         """Streaming form of :meth:`resume`."""
         cp = await self._load_for_resume(thread)
         resume_values = {cp.interrupt_node: value} if cp.interrupt_node else {}
@@ -141,9 +140,7 @@ class CompiledGraph:
     # Inspection / time-travel
     # ------------------------------------------------------------------
 
-    async def get_state(
-        self, thread: str, step: int | None = None
-    ) -> Checkpoint | None:
+    async def get_state(self, thread: str, step: int | None = None) -> Checkpoint | None:
         if self.checkpointer is None:
             raise CheckpointError("no checkpointer configured")
         return await self.checkpointer.get(thread, step)
@@ -168,7 +165,8 @@ class CompiledGraph:
             return data
         declared = set(self._graph.channels)
         unknown = [
-            k for k in data
+            k
+            for k in data
             if k not in declared or k.startswith(RESERVED_PREFIX) or k in RESERVED_NAMES
         ]
         if unknown:
@@ -183,7 +181,7 @@ class CompiledGraph:
             return await coro
         try:
             return await asyncio.wait_for(coro, timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             # The in-flight super-step was cancelled; the last completed step
             # is already checkpointed. Report the step reached, if known.
             step = 0

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from agentflow.backends.base import BaseLLMBackend
 from agentflow.events import ChatRequest, Message, TextChunk, ToolCallSpec, TurnEnd
 from agentflow.prebuilt import Tool, tool_loop
@@ -39,14 +37,25 @@ async def test_single_tool_call_then_answer():
         calls.append(city)
         return f"{city}: sunny, 22C"
 
-    tools = [Tool("get_weather", get_weather, description="weather",
-                  schema={"type": "object", "properties": {"city": {"type": "string"}}})]
+    tools = [
+        Tool(
+            "get_weather",
+            get_weather,
+            description="weather",
+            schema={"type": "object", "properties": {"city": {"type": "string"}}},
+        )
+    ]
 
-    llm = ScriptedLLM([
-        Message(role="assistant", content="",
-                tool_calls=(ToolCallSpec(id="c1", name="get_weather", args={"city": "Paris"}),)),
-        Message(role="assistant", content="It's sunny and 22C in Paris."),
-    ])
+    llm = ScriptedLLM(
+        [
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=(ToolCallSpec(id="c1", name="get_weather", args={"city": "Paris"}),),
+            ),
+            Message(role="assistant", content="It's sunny and 22C in Paris."),
+        ]
+    )
     app = tool_loop(llm, tools)
     out = await app.invoke({"messages": [Message(role="user", content="weather in Paris?")]})
 
@@ -77,14 +86,19 @@ async def test_multiple_tool_calls_in_one_turn():
         return str(a + b)
 
     tools = [Tool("add", add)]
-    llm = ScriptedLLM([
-        Message(role="assistant", content="",
+    llm = ScriptedLLM(
+        [
+            Message(
+                role="assistant",
+                content="",
                 tool_calls=(
                     ToolCallSpec(id="c1", name="add", args={"a": 1, "b": 2}),
                     ToolCallSpec(id="c2", name="add", args={"a": 3, "b": 4}),
-                )),
-        Message(role="assistant", content="3 and 7"),
-    ])
+                ),
+            ),
+            Message(role="assistant", content="3 and 7"),
+        ]
+    )
     app = tool_loop(llm, tools)
     out = await app.invoke({"messages": [Message(role="user", content="add them")]})
 
@@ -99,11 +113,16 @@ async def test_tool_error_is_reported_to_model():
         raise ValueError("nope")
 
     tools = [Tool("boom", boom)]
-    llm = ScriptedLLM([
-        Message(role="assistant", content="",
-                tool_calls=(ToolCallSpec(id="c1", name="boom", args={}),)),
-        Message(role="assistant", content="handled it"),
-    ])
+    llm = ScriptedLLM(
+        [
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=(ToolCallSpec(id="c1", name="boom", args={}),),
+            ),
+            Message(role="assistant", content="handled it"),
+        ]
+    )
     app = tool_loop(llm, tools)
     out = await app.invoke({"messages": [Message(role="user", content="go")]})
     tool_msg = [m for m in out["messages"] if m.role == "tool"][0]
@@ -111,11 +130,16 @@ async def test_tool_error_is_reported_to_model():
 
 
 async def test_unknown_tool_reported():
-    llm = ScriptedLLM([
-        Message(role="assistant", content="",
-                tool_calls=(ToolCallSpec(id="c1", name="ghost", args={}),)),
-        Message(role="assistant", content="ok"),
-    ])
+    llm = ScriptedLLM(
+        [
+            Message(
+                role="assistant",
+                content="",
+                tool_calls=(ToolCallSpec(id="c1", name="ghost", args={}),),
+            ),
+            Message(role="assistant", content="ok"),
+        ]
+    )
     app = tool_loop(llm, [])
     out = await app.invoke({"messages": [Message(role="user", content="go")]})
     tool_msg = [m for m in out["messages"] if m.role == "tool"][0]
@@ -125,8 +149,9 @@ async def test_unknown_tool_reported():
 async def test_max_turns_stops_loop():
     # A model that always asks for a tool would loop forever; max_turns caps it.
     def make_turn():
-        return Message(role="assistant", content="",
-                       tool_calls=(ToolCallSpec(id="c", name="noop", args={}),))
+        return Message(
+            role="assistant", content="", tool_calls=(ToolCallSpec(id="c", name="noop", args={}),)
+        )
 
     async def noop(**kwargs) -> str:
         return "ok"

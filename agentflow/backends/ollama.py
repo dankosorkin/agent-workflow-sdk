@@ -15,10 +15,11 @@ the request body, and the stream parser; the event mapping is identical.
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
-from agentflow.backends.base import BaseLLMBackend
 from agentflow.backends._http import RetryPolicy, open_stream
+from agentflow.backends.base import BaseLLMBackend
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
     BackendEvent,
@@ -77,9 +78,7 @@ class OllamaBackend(BaseLLMBackend):
         self, request: BackendRequest, *, session: str | None = None
     ) -> AsyncIterator[BackendEvent]:
         if not isinstance(request, ChatRequest):
-            raise BackendError(
-                f"OllamaBackend accepts ChatRequest, got {type(request).__name__}"
-            )
+            raise BackendError(f"OllamaBackend accepts ChatRequest, got {type(request).__name__}")
         if self._client is None:
             raise BackendError("OllamaBackend.start() was not called")
 
@@ -88,10 +87,17 @@ class OllamaBackend(BaseLLMBackend):
         tool_calls: list[ToolCallSpec] = []
         stop_reason: str | None = None
 
-        async with self.concurrency_guard(), open_stream(
-            self._client, "POST", "/api/chat",
-            json=body, policy=self.retry, label="ollama /api/chat",
-        ) as resp:
+        async with (
+            self.concurrency_guard(),
+            open_stream(
+                self._client,
+                "POST",
+                "/api/chat",
+                json=body,
+                policy=self.retry,
+                label="ollama /api/chat",
+            ) as resp,
+        ):
             try:
                 async for line in resp.aiter_lines():
                     line = line.strip()

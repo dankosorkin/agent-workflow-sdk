@@ -5,8 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 import pytest
-
-from agentflow import END, START, Graph, Hooks, RunMetrics, State, add
+from agentflow import END, START, Graph, Hooks, NodeError, RunMetrics, State, add
 
 
 class S(State):
@@ -36,7 +35,7 @@ async def test_metrics_collect_node_and_step_counts():
     assert out["n"] == 3
     s = m.summary()
     assert s["completed"] is True
-    assert s["steps"] == 2                 # two super-steps (a, then b)
+    assert s["steps"] == 2  # two super-steps (a, then b)
     assert s["nodes"]["a"]["calls"] == 1
     assert s["nodes"]["b"]["calls"] == 1
     assert s["nodes"]["a"]["errors"] == 0
@@ -91,7 +90,7 @@ async def test_metrics_count_errors():
     g.add_edge(START, "boom")
     g.add_edge("boom", END)
     app = g.compile(hooks=m)
-    with pytest.raises(Exception):
+    with pytest.raises(NodeError):
         await app.invoke({"n": 0})
     assert m.summary()["nodes"]["boom"]["errors"] == 1
     assert m.completed is False

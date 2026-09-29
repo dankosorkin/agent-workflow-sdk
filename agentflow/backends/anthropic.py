@@ -18,10 +18,11 @@ shared): ``pip install 'agentic-workflow-sdk[ollama]'``.
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
-from agentflow.backends.base import BaseLLMBackend
 from agentflow.backends._http import RetryPolicy, open_stream
+from agentflow.backends.base import BaseLLMBackend
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
     BackendEvent,
@@ -119,16 +120,23 @@ class AnthropicBackend(BaseLLMBackend):
         tool_calls: list[ToolCallSpec] = []
         stop_reason: str | None = None
 
-        async with self.concurrency_guard(), open_stream(
-            self._client, "POST", "/v1/messages",
-            json=body, policy=self.retry, label="/v1/messages",
-        ) as resp:
+        async with (
+            self.concurrency_guard(),
+            open_stream(
+                self._client,
+                "POST",
+                "/v1/messages",
+                json=body,
+                policy=self.retry,
+                label="/v1/messages",
+            ) as resp,
+        ):
             try:
                 async for line in resp.aiter_lines():
                     line = line.strip()
                     if not line or not line.startswith("data:"):
                         continue
-                    data = line[len("data:"):].strip()
+                    data = line[len("data:") :].strip()
                     try:
                         event = json.loads(data)
                     except json.JSONDecodeError:
@@ -176,8 +184,12 @@ class AnthropicBackend(BaseLLMBackend):
         if etype == "content_block_start":
             index = event.get("index", 0)
             block = event.get("content_block") or {}
-            blocks[index] = {"type": block.get("type"), "id": block.get("id"),
-                             "name": block.get("name"), "json": ""}
+            blocks[index] = {
+                "type": block.get("type"),
+                "id": block.get("id"),
+                "name": block.get("name"),
+                "json": "",
+            }
             return []
 
         if etype == "content_block_delta":
@@ -206,10 +218,10 @@ class AnthropicBackend(BaseLLMBackend):
                     args = {"_raw": raw}
                 call_id = blk.get("id") or f"call_{index}"
                 name = blk.get("name") or ""
-                tool_calls.append(ToolCallSpec(id=call_id, name=name,
-                                               args=args if isinstance(args, dict) else {"_value": args}))
-                return [ToolCall(id=call_id, name=name,
-                                 args=args if isinstance(args, dict) else {})]
+                spec_args = args if isinstance(args, dict) else {"_value": args}
+                tool_calls.append(ToolCallSpec(id=call_id, name=name, args=spec_args))
+                event_args = args if isinstance(args, dict) else {}
+                return [ToolCall(id=call_id, name=name, args=event_args)]
             return []
 
         return []
@@ -239,11 +251,13 @@ def _message_to_anthropic(m: Message) -> dict[str, Any]:
     if m.role == "tool":
         return {
             "role": "user",
-            "content": [{
-                "type": "tool_result",
-                "tool_use_id": m.tool_call_id or "",
-                "content": m.content,
-            }],
+            "content": [
+                {
+                    "type": "tool_result",
+                    "tool_use_id": m.tool_call_id or "",
+                    "content": m.content,
+                }
+            ],
         }
     if m.tool_calls:
         content: list[dict[str, Any]] = []

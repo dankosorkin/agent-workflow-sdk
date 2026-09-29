@@ -8,9 +8,16 @@ from pathlib import Path
 from typing import Annotated
 
 import pytest
-
 from agentflow import (
-    END, START, Graph, JsonlTelemetry, MultiHooks, RunMetrics, State, add,
+    END,
+    START,
+    Graph,
+    JsonlTelemetry,
+    MultiHooks,
+    NodeError,
+    RunMetrics,
+    State,
+    add,
 )
 from agentflow.events import TextChunk
 
@@ -69,7 +76,7 @@ async def test_jsonl_records_node_error(tmp_path):
     g.add_node("boom", boom)
     g.add_edge(START, "boom")
     g.add_edge("boom", END)
-    with pytest.raises(Exception):
+    with pytest.raises(NodeError):
         await g.compile(hooks=tel).invoke({"n": 0}, thread="err")
 
     events = _read_jsonl(tmp_path / "err.jsonl")
@@ -127,9 +134,13 @@ async def test_multihooks_isolates_a_failing_child(tmp_path):
     tel = JsonlTelemetry(tmp_path)
 
     class Bad:
-        async def on_run_start(self, *a): raise RuntimeError("boom")
+        async def on_run_start(self, *a):
+            raise RuntimeError("boom")
+
         def __getattr__(self, _):  # any other hook -> no-op coroutine
-            async def noop(*a, **k): return None
+            async def noop(*a, **k):
+                return None
+
             return noop
 
     hooks = MultiHooks(Bad(), tel)

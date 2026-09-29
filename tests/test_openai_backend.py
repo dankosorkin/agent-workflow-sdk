@@ -8,14 +8,14 @@ from __future__ import annotations
 
 import httpx
 import pytest
-
 from agentflow.backends.openai import OpenAIBackend
 from agentflow.errors import BackendError, BackendTransportError
-from agentflow.events import ChatRequest, Message, TextChunk, ToolCall, TurnEnd
+from agentflow.events import Message, TurnEnd
 
 
 def _sse(*chunks) -> bytes:
     import json
+
     lines = []
     for c in chunks:
         lines.append(f"data: {json.dumps(c)}")
@@ -27,9 +27,11 @@ def _sse(*chunks) -> bytes:
 
 def _make(handler) -> OpenAIBackend:
     from agentflow.backends._http import RetryPolicy
+
     b = OpenAIBackend("gpt-4o-mini", api_key="test", retry=RetryPolicy(max_retries=0))
     b._client = httpx.AsyncClient(
-        base_url=b.base_url, transport=httpx.MockTransport(handler),
+        base_url=b.base_url,
+        transport=httpx.MockTransport(handler),
         headers={"Authorization": "Bearer test"},
     )
     return b
@@ -42,8 +44,7 @@ async def test_streams_text_and_finish():
             {"choices": [{"delta": {"content": "lo"}, "finish_reason": None}]},
             {"choices": [{"delta": {}, "finish_reason": "stop"}]},
         )
-        return httpx.Response(200, content=body,
-                              headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
 
     b = _make(handler)
     events = [e async for e in b.chat([Message(role="user", content="hi")])]
@@ -59,21 +60,46 @@ async def test_streams_text_and_finish():
 
 async def test_assembles_streamed_tool_call():
     """A tool call streams as id/name in one chunk, then argument fragments."""
+
     def handler(request: httpx.Request) -> httpx.Response:
         body = _sse(
-            {"choices": [{"delta": {"tool_calls": [
-                {"index": 0, "id": "call_1", "function": {"name": "get_weather", "arguments": ""}}
-            ]}, "finish_reason": None}]},
-            {"choices": [{"delta": {"tool_calls": [
-                {"index": 0, "function": {"arguments": "{\"ci"}}
-            ]}, "finish_reason": None}]},
-            {"choices": [{"delta": {"tool_calls": [
-                {"index": 0, "function": {"arguments": "ty\": \"Paris\"}"}}
-            ]}, "finish_reason": None}]},
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "call_1",
+                                    "function": {"name": "get_weather", "arguments": ""},
+                                }
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {"tool_calls": [{"index": 0, "function": {"arguments": '{"ci'}}]},
+                        "finish_reason": None,
+                    }
+                ]
+            },
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [{"index": 0, "function": {"arguments": 'ty": "Paris"}'}}]
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            },
             {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
         )
-        return httpx.Response(200, content=body,
-                              headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
 
     b = _make(handler)
     events = [e async for e in b.chat([Message(role="user", content="weather?")])]
@@ -92,14 +118,30 @@ async def test_assembles_streamed_tool_call():
 async def test_two_parallel_tool_calls():
     def handler(request: httpx.Request) -> httpx.Response:
         body = _sse(
-            {"choices": [{"delta": {"tool_calls": [
-                {"index": 0, "id": "a", "function": {"name": "f", "arguments": "{}"}},
-                {"index": 1, "id": "b", "function": {"name": "g", "arguments": "{}"}},
-            ]}, "finish_reason": None}]},
+            {
+                "choices": [
+                    {
+                        "delta": {
+                            "tool_calls": [
+                                {
+                                    "index": 0,
+                                    "id": "a",
+                                    "function": {"name": "f", "arguments": "{}"},
+                                },
+                                {
+                                    "index": 1,
+                                    "id": "b",
+                                    "function": {"name": "g", "arguments": "{}"},
+                                },
+                            ]
+                        },
+                        "finish_reason": None,
+                    }
+                ]
+            },
             {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
         )
-        return httpx.Response(200, content=body,
-                              headers={"content-type": "text/event-stream"})
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
 
     b = _make(handler)
     events = [e async for e in b.chat([Message(role="user", content="go")])]
@@ -121,6 +163,7 @@ async def test_http_error_maps_to_transport_error():
 
 async def test_rejects_wrong_request_type():
     from agentflow.events import TextRequest
+
     b = _make(lambda r: httpx.Response(200, content=b""))
     with pytest.raises(BackendError):
         _ = [e async for e in b.invoke(TextRequest("nope"))]

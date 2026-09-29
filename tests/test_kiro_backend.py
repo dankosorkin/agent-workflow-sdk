@@ -12,7 +12,6 @@ import asyncio
 import json
 
 import pytest
-
 from agentflow.backends.base import AllowAll, DenyAll
 from agentflow.backends.kiro import KiroBackend
 from agentflow.events import TextChunk, ToolCall, ToolResult, TurnEnd
@@ -82,7 +81,9 @@ class _FakeProc:
 async def _drive_setup(proc: _FakeProc) -> None:
     """Answer initialize + session/new so start() completes (engine v2)."""
     init = await proc.stdin.wait_for(lambda m: m.get("method") == "initialize")
-    proc.stdout.feed({"jsonrpc": "2.0", "id": init["id"], "result": {"agentInfo": {"name": "fake"}}})
+    proc.stdout.feed(
+        {"jsonrpc": "2.0", "id": init["id"], "result": {"agentInfo": {"name": "fake"}}}
+    )
     new = await proc.stdin.wait_for(lambda m: m.get("method") == "session/new")
     proc.stdout.feed({"jsonrpc": "2.0", "id": new["id"], "result": {"sessionId": "sess-1"}})
 
@@ -99,7 +100,9 @@ def fake_proc(monkeypatch):
 
 
 async def test_prompt_streams_events_and_ends(fake_proc):
-    backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())  # v2 avoids set_mode path
+    backend = KiroBackend(
+        "fake-agent", engine="v2", permission=AllowAll()
+    )  # v2 avoids set_mode path
     setup = asyncio.create_task(_drive_setup(fake_proc))
     await backend.start()
     await setup
@@ -108,19 +111,51 @@ async def test_prompt_streams_events_and_ends(fake_proc):
         prompt = await fake_proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt")
         pid = prompt["id"]
         # stream: two text chunks, a tool call, a tool result
-        fake_proc.stdout.feed({"jsonrpc": "2.0", "method": "session/update",
-                               "params": {"update": {"sessionUpdate": "agent_message_chunk",
-                                                       "content": {"text": "Hel"}}}})
-        fake_proc.stdout.feed({"jsonrpc": "2.0", "method": "session/update",
-                               "params": {"update": {"sessionUpdate": "agent_message_chunk",
-                                                       "content": {"text": "lo"}}}})
-        fake_proc.stdout.feed({"jsonrpc": "2.0", "method": "session/update",
-                               "params": {"update": {"sessionUpdate": "tool_call",
-                                                       "toolCallId": "t1", "name": "search",
-                                                       "args": {"q": "x"}}}})
-        fake_proc.stdout.feed({"jsonrpc": "2.0", "method": "session/update",
-                               "params": {"update": {"sessionUpdate": "tool_call_update",
-                                                       "toolCallId": "t1", "status": "completed"}}})
+        fake_proc.stdout.feed(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "Hel"}}
+                },
+            }
+        )
+        fake_proc.stdout.feed(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "lo"}}
+                },
+            }
+        )
+        fake_proc.stdout.feed(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "update": {
+                        "sessionUpdate": "tool_call",
+                        "toolCallId": "t1",
+                        "name": "search",
+                        "args": {"q": "x"},
+                    }
+                },
+            }
+        )
+        fake_proc.stdout.feed(
+            {
+                "jsonrpc": "2.0",
+                "method": "session/update",
+                "params": {
+                    "update": {
+                        "sessionUpdate": "tool_call_update",
+                        "toolCallId": "t1",
+                        "status": "completed",
+                    }
+                },
+            }
+        )
         # terminal response
         fake_proc.stdout.feed({"jsonrpc": "2.0", "id": pid, "result": {"stopReason": "end_turn"}})
 
@@ -149,10 +184,20 @@ async def test_permission_allow(fake_proc):
         prompt = await fake_proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt")
         pid = prompt["id"]
         # agent asks for permission (agent->client request with an id)
-        fake_proc.stdout.feed({"jsonrpc": "2.0", "id": 9001, "method": "session/request_permission",
-                               "params": {"toolName": "fs_write",
-                                          "options": [{"optionId": "a", "name": "Allow always", "kind": "allow_always"},
-                                                      {"optionId": "o", "name": "Once", "kind": "allow_once"}]}})
+        fake_proc.stdout.feed(
+            {
+                "jsonrpc": "2.0",
+                "id": 9001,
+                "method": "session/request_permission",
+                "params": {
+                    "toolName": "fs_write",
+                    "options": [
+                        {"optionId": "a", "name": "Allow always", "kind": "allow_always"},
+                        {"optionId": "o", "name": "Once", "kind": "allow_once"},
+                    ],
+                },
+            }
+        )
         # client must answer 9001 before we finish; wait for it
         ans = await fake_proc.stdin.wait_for(lambda m: m.get("id") == 9001 and "result" in m)
         assert ans["result"]["outcome"]["outcome"] == "selected"
@@ -175,9 +220,17 @@ async def test_permission_deny(fake_proc):
     async def _drive_turn() -> None:
         prompt = await fake_proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt")
         pid = prompt["id"]
-        fake_proc.stdout.feed({"jsonrpc": "2.0", "id": 9002, "method": "session/request_permission",
-                               "params": {"toolName": "fs_write",
-                                          "options": [{"optionId": "a", "name": "Allow", "kind": "allow_once"}]}})
+        fake_proc.stdout.feed(
+            {
+                "jsonrpc": "2.0",
+                "id": 9002,
+                "method": "session/request_permission",
+                "params": {
+                    "toolName": "fs_write",
+                    "options": [{"optionId": "a", "name": "Allow", "kind": "allow_once"}],
+                },
+            }
+        )
         ans = await fake_proc.stdin.wait_for(lambda m: m.get("id") == 9002 and "result" in m)
         assert ans["result"]["outcome"]["outcome"] == "cancelled"
         fake_proc.stdout.feed({"jsonrpc": "2.0", "id": pid, "result": {"stopReason": "end_turn"}})

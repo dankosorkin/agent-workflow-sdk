@@ -25,7 +25,15 @@ This module is pure data: no async, no I/O, no engine imports.
 from __future__ import annotations
 
 import typing
-from typing import Annotated, Any, Callable, Mapping, TypedDict, get_args, get_origin, get_type_hints
+from collections.abc import Callable, Mapping
+from typing import (
+    Annotated,
+    Any,
+    TypedDict,
+    get_args,
+    get_origin,
+    get_type_hints,
+)
 
 __all__ = [
     "State",
@@ -58,6 +66,7 @@ Reducer = Callable[[Any, Any], Any]
 # Base schema marker
 # ---------------------------------------------------------------------------
 
+
 class State(TypedDict, total=False):
     """Base class for a workflow state schema.
 
@@ -70,6 +79,7 @@ class State(TypedDict, total=False):
 # ---------------------------------------------------------------------------
 # Built-in reducers
 # ---------------------------------------------------------------------------
+
 
 def last(current: Any, update: Any) -> Any:
     """Last-value-wins. The default reducer."""
@@ -116,8 +126,10 @@ def union(current: Any, update: Any) -> set:
 # Channel resolution from an annotated schema
 # ---------------------------------------------------------------------------
 
+
 class Channel(typing.NamedTuple):
     """A resolved channel: its name and the reducer that folds its updates."""
+
     name: str
     reducer: Reducer
 
@@ -163,6 +175,7 @@ def channels_from_schema(schema: type) -> dict[str, Channel]:
 # Update application
 # ---------------------------------------------------------------------------
 
+
 def apply_update(
     state: Mapping[str, Any],
     update: Mapping[str, Any] | None,
@@ -183,8 +196,7 @@ def apply_update(
         channel = channels.get(key)
         if channel is None:
             raise KeyError(
-                f"node wrote undeclared channel {key!r}; "
-                f"declared channels: {sorted(channels)}"
+                f"node wrote undeclared channel {key!r}; declared channels: {sorted(channels)}"
             )
         result[key] = channel.reducer(result.get(key), value)
     return result

@@ -3,21 +3,22 @@
 from __future__ import annotations
 
 import json
-import os
 import stat
 import sys
-from pathlib import Path
 from typing import Annotated
 
 import pytest
-
 from agentflow import (
-    END, START, Graph, JsonlTelemetry, MemoryCheckpointer, RedactKeys, State,
-    add, append, last,
+    END,
+    START,
+    Graph,
+    JsonlTelemetry,
+    RedactKeys,
+    State,
+    last,
 )
-from agentflow.checkpoint.file import FileCheckpointer
 from agentflow.checkpoint.base import Checkpoint
-from agentflow.events import TextChunk
+from agentflow.checkpoint.file import FileCheckpointer
 
 
 class S(State):
@@ -27,10 +28,12 @@ class S(State):
 
 # --- RedactKeys unit behavior ---
 
+
 def test_redact_masks_sensitive_keys():
     r = RedactKeys()
-    out = r({"api_key": "sk-secret", "note": "ok",
-             "nested": {"authorization": "Bearer x", "keep": 1}})
+    out = r(
+        {"api_key": "sk-secret", "note": "ok", "nested": {"authorization": "Bearer x", "keep": 1}}
+    )
     assert out["api_key"] == "***REDACTED***"
     assert out["note"] == "ok"
     assert out["nested"]["authorization"] == "***REDACTED***"
@@ -56,6 +59,7 @@ def test_redact_case_insensitive_substring():
 
 # --- telemetry redaction end-to-end ---
 
+
 async def test_telemetry_redacts_backend_event_payload(tmp_path):
     tel = JsonlTelemetry(tmp_path, redact=RedactKeys())
 
@@ -64,6 +68,7 @@ async def test_telemetry_redacts_backend_event_payload(tmp_path):
     async def leak(state, ctx):
         # A tool-call-like event whose args carry a secret.
         from agentflow.events import ToolCall
+
         ctx.emit(ToolCall(id="1", name="login", args={"api_key": "sk-LEAK"}))
         return {"note": "done"}
 
@@ -73,6 +78,7 @@ async def test_telemetry_redacts_backend_event_payload(tmp_path):
     await g.compile(hooks=tel).invoke({"note": ""}, thread="t")
 
     import asyncio
+
     await asyncio.sleep(0.05)  # let fire-and-forget event hook flush
 
     text = (tmp_path / "t.jsonl").read_text()
@@ -81,6 +87,7 @@ async def test_telemetry_redacts_backend_event_payload(tmp_path):
 
 
 # --- checkpoint permissions + redaction ---
+
 
 @pytest.mark.skipif(sys.platform == "win32", reason="POSIX permissions")
 async def test_checkpoint_files_are_owner_only(tmp_path):
@@ -95,8 +102,9 @@ async def test_checkpoint_files_are_owner_only(tmp_path):
 
 async def test_checkpoint_redaction_masks_state(tmp_path):
     cp = FileCheckpointer(tmp_path / "runs", redact=RedactKeys())
-    await cp.put(Checkpoint(thread="t", step=1,
-                            state={"api_key": "sk-SECRET", "note": "keep"}, next=()))
+    await cp.put(
+        Checkpoint(thread="t", step=1, state={"api_key": "sk-SECRET", "note": "keep"}, next=())
+    )
     f = next((tmp_path / "runs" / "t").glob("*.json"))
     data = json.loads(f.read_text())
     assert data["state"]["api_key"] == "***REDACTED***"

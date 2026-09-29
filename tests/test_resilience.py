@@ -6,7 +6,6 @@ import asyncio
 from typing import Annotated
 
 import pytest
-
 from agentflow import END, START, Graph, NodeError, State, add
 from agentflow.errors import InterruptError
 from agentflow.prebuilt import with_retry, with_timeout
@@ -17,6 +16,7 @@ class S(State):
 
 
 # --- with_retry ---
+
 
 async def test_retry_succeeds_after_failures():
     attempts = {"count": 0}
@@ -76,6 +76,7 @@ async def test_retry_rejects_negative():
 
 # --- with_timeout ---
 
+
 async def test_timeout_passes_fast_node():
     async def quick(state, ctx):
         return {"n": 1}
@@ -105,6 +106,7 @@ async def test_timeout_lets_interrupt_through():
 
 # --- composition + engine integration ---
 
+
 async def test_compose_retry_over_timeout():
     calls = {"count": 0}
 
@@ -114,8 +116,9 @@ async def test_compose_retry_over_timeout():
             await asyncio.sleep(1.0)  # first attempt times out
         return {"n": calls["count"]}
 
-    node = with_retry(with_timeout(slow_then_ok, seconds=0.05),
-                      retries=3, backoff=0, on=(asyncio.TimeoutError,))
+    node = with_retry(
+        with_timeout(slow_then_ok, seconds=0.05), retries=3, backoff=0, on=(asyncio.TimeoutError,)
+    )
     out = await node({}, None)
     assert calls["count"] == 2
     assert out == {"n": 2}

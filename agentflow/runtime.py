@@ -18,15 +18,16 @@ import asyncio
 import contextvars
 import copy
 import time
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
-from typing import Any, AsyncIterator, Mapping
+from datetime import UTC, datetime
+from typing import Any
 
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import InterruptError, NodeError
 from agentflow.events import BackendEvent
 from agentflow.graph import END, START, _ConditionalEdge
-from agentflow.observability import Hooks, _NOOP, _safe
+from agentflow.observability import _NOOP, Hooks, _safe
 from agentflow.state import Channel, apply_updates
 
 __all__ = ["Context", "StreamEvent", "run", "current_context"]
@@ -38,7 +39,7 @@ __all__ = ["Context", "StreamEvent", "run", "current_context"]
 #: consuming) can reach ``ctx.interrupt`` without it being threaded through
 #: every call. This works because a node and any backend generator it iterates
 #: run in the same task, and contextvars are per-task.
-current_context: contextvars.ContextVar["Context | None"] = contextvars.ContextVar(
+current_context: contextvars.ContextVar[Context | None] = contextvars.ContextVar(
     "agentflow_current_context", default=None
 )
 
@@ -47,9 +48,11 @@ current_context: contextvars.ContextVar["Context | None"] = contextvars.ContextV
 # Streaming events emitted by a run (distinct from backend events)
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True, slots=True)
 class StreamEvent:
     """One observable moment in a run, yielded by ``CompiledGraph.stream``."""
+
     kind: str  # "node_start" | "node_end" | "backend" | "step" | "interrupt" | "done"
     step: int
     node: str | None = None
@@ -59,6 +62,7 @@ class StreamEvent:
 # ---------------------------------------------------------------------------
 # Context handed to every node
 # ---------------------------------------------------------------------------
+
 
 class _Resume:
     """Carries a human's answer for a node awaiting an interrupt on resume."""
@@ -77,9 +81,9 @@ class Context:
     node: str
     thread: str
     step: int
-    _emit_queue: "asyncio.Queue[StreamEvent] | None" = field(default=None, repr=False)
+    _emit_queue: asyncio.Queue[StreamEvent] | None = field(default=None, repr=False)
     _resume: _Resume | None = field(default=None, repr=False)
-    _hooks: "Hooks | None" = field(default=None, repr=False)
+    _hooks: Hooks | None = field(default=None, repr=False)
 
     def emit(self, event: BackendEvent) -> None:
         """Surface a backend event to the run's stream and telemetry hooks."""
@@ -95,9 +99,7 @@ class Context:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 return
-            loop.create_task(
-                _safe(self._hooks.on_event(self.thread, self.step, self.node, event))
-            )
+            loop.create_task(_safe(self._hooks.on_event(self.thread, self.step, self.node, event)))
 
     async def interrupt(self, payload: Any = None) -> Any:
         """Suspend the run for a human, or return the supplied answer on resume.
@@ -116,9 +118,11 @@ class Context:
 # The scheduler
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class _Graph:
     """The compiled structure the runtime executes."""
+
     channels: Mapping[str, Channel]
     nodes: Mapping[str, Any]
     edges: Mapping[Any, list[Any]]
@@ -132,7 +136,7 @@ class _Graph:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 async def _resolve_targets(graph: _Graph, node: str, state: Mapping[str, Any]) -> list[str]:
@@ -140,7 +144,7 @@ async def _resolve_targets(graph: _Graph, node: str, state: Mapping[str, Any]) -
     targets: list[str] = []
 
     for dst in graph.edges.get(node, ()):
-        if dst is not END:
+        if isinstance(dst, str):  # a node name (END is the sentinel, skipped)
             targets.append(dst)
 
     branch = graph.branches.get(node)
@@ -153,7 +157,7 @@ async def _resolve_targets(graph: _Graph, node: str, state: Mapping[str, Any]) -
             if k not in branch.mapping:
                 raise NodeError(node, f"router returned unmapped key {k!r}")
             dst = branch.mapping[k]
-            if dst is not END:
+            if isinstance(dst, str):  # a node name (END is the sentinel, skipped)
                 targets.append(dst)
 
     return targets
@@ -196,7 +200,7 @@ async def run(
     start_step: int,
     checkpointer: Any,
     resume_values: Mapping[str, Any] | None = None,
-    emit_queue: "asyncio.Queue[StreamEvent] | None" = None,
+    emit_queue: asyncio.Queue[StreamEvent] | None = None,
     hooks: Hooks = _NOOP,
 ) -> Checkpoint:
     """Drive super-steps until the graph ends, interrupts, or hits the limit.
@@ -255,34 +259,44 @@ async def run(
         isolate = graph.isolate_state
         do_copy = isolate == "always" or (isolate == "fanout" and len(frontier) > 1)
 
-        def _input_for(_name: str) -> Mapping[str, Any]:
-            return copy.deepcopy(state) if do_copy else state
-
         # Run the whole frontier concurrently, bounded by max_node_concurrency
         # so a wide fan-out to one external API does not spike request pressure.
         limit = graph.max_node_concurrency
         sem = asyncio.Semaphore(limit) if limit else None
 
-        async def _run_bounded(name: str):
-            node_state = _input_for(name)
-            if sem is None:
-                return await _run_node(graph, name, node_state, contexts[name], hooks)
-            async with sem:
-                return await _run_node(graph, name, node_state, contexts[name], hooks)
+        async def _run_bounded(
+            name: str,
+            *,
+            _state=state,
+            _do_copy=do_copy,
+            _sem=sem,
+            _contexts=contexts,
+        ):
+            node_state = copy.deepcopy(_state) if _do_copy else _state
+            if _sem is None:
+                return await _run_node(graph, name, node_state, _contexts[name], hooks)
+            async with _sem:
+                return await _run_node(graph, name, node_state, _contexts[name], hooks)
 
         coros = [_run_bounded(name) for name in frontier]
         results = await asyncio.gather(*coros, return_exceptions=True)
 
         # Handle interrupts: if any node interrupted, suspend the run now. The
         # frontier is preserved so resume re-runs the same super-step.
-        for name, res in zip(frontier, results):
+        for name, res in zip(frontier, results, strict=True):
             if isinstance(res, InterruptError):
                 await _emit(StreamEvent("interrupt", step, node=name, data=res.payload))
                 await _safe(hooks.on_run_end(thread, step, completed=False))
                 cp = Checkpoint(
-                    thread=thread, step=step, state=state, next=tuple(frontier),
-                    parent=parent_id, ts=_now(),
-                    interrupted=True, interrupt_node=name, interrupt_payload=res.payload,
+                    thread=thread,
+                    step=step,
+                    state=state,
+                    next=tuple(frontier),
+                    parent=parent_id,
+                    ts=_now(),
+                    interrupted=True,
+                    interrupt_node=name,
+                    interrupt_payload=res.payload,
                 )
                 if checkpointer is not None:
                     parent_id = await checkpointer.put(cp)
@@ -291,8 +305,11 @@ async def run(
                 await _safe(hooks.on_run_end(thread, step, completed=False))
                 raise res  # NodeError or a real crash
 
-        # No interrupts: fold updates in deterministic frontier order.
-        updates = [r for r in results]  # each is a Mapping or None
+        # No interrupts: every result here is a node's Mapping update or None
+        # (interrupts/exceptions were handled above), so fold in frontier order.
+        updates: list[Mapping[str, Any] | None] = [
+            r for r in results if not isinstance(r, BaseException)
+        ]
         state = apply_updates(state, updates, graph.channels)
 
         for name in frontier:
@@ -306,8 +323,12 @@ async def run(
                     next_frontier.append(dst)
 
         cp = Checkpoint(
-            thread=thread, step=step, state=state,
-            next=tuple(next_frontier), parent=parent_id, ts=_now(),
+            thread=thread,
+            step=step,
+            state=state,
+            next=tuple(next_frontier),
+            parent=parent_id,
+            ts=_now(),
         )
         if checkpointer is not None:
             parent_id = await checkpointer.put(cp)

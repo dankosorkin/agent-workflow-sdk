@@ -78,6 +78,7 @@ async def main() -> None:
     # Codex (agent backend).
     if shutil.which("codex"):
         from agentflow.backends.codex import CodexBackend
+
         await drive("codex", CodexBackend(sandbox="read-only", permission=AllowAll()))
     else:
         print("\n=== codex === skipped (not installed)")
@@ -85,6 +86,7 @@ async def main() -> None:
     # Claude Code (agent backend).
     if shutil.which("claude"):
         from agentflow.backends.claude_code import ClaudeCodeBackend
+
         await drive("claude", ClaudeCodeBackend(permission=AllowAll()))
     else:
         print("\n=== claude === skipped (not installed)")
@@ -93,9 +95,11 @@ async def main() -> None:
     # Kiro v3 selects an agent as a session mode; without a known agent id we
     # can't guarantee a valid mode, so this is opt-in via KIRO_AGENT.
     import os
+
     kiro_agent = os.environ.get("KIRO_AGENT")
     if shutil.which("kiro-cli") and kiro_agent:
         from agentflow.backends.kiro import KiroBackend
+
         await drive("kiro", KiroBackend(kiro_agent, permission=AllowAll()))
     else:
         reason = "not installed" if not shutil.which("kiro-cli") else "set KIRO_AGENT to run"

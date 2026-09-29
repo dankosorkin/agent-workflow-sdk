@@ -18,8 +18,9 @@ from __future__ import annotations
 import asyncio
 import json
 import sqlite3
+from collections.abc import AsyncIterator
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import CheckpointError
@@ -47,7 +48,7 @@ class SqliteCheckpointer:
         self,
         path: Path | str = ".runs/checkpoints.db",
         *,
-        redact: "Redactor | None" = None,
+        redact: Redactor | None = None,
     ) -> None:
         self.path = Path(path)
         self._redact = redact or redact_none
@@ -129,8 +130,7 @@ class SqliteCheckpointer:
         try:
             if step is None:
                 cur = conn.execute(
-                    "SELECT payload FROM checkpoints WHERE thread=? "
-                    "ORDER BY step DESC LIMIT 1",
+                    "SELECT payload FROM checkpoints WHERE thread=? ORDER BY step DESC LIMIT 1",
                     (thread,),
                 )
             else:

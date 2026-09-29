@@ -77,8 +77,10 @@ class ClaudeCodeBackend(CLIExecBackend):
 
     def build_command(self, prompt: str, session_id: str | None) -> list[str]:
         cmd = [
-            "claude", "-p",
-            "--output-format", "stream-json",
+            "claude",
+            "-p",
+            "--output-format",
+            "stream-json",
             "--verbose",
             "--include-partial-messages",
         ]
@@ -128,7 +130,9 @@ class ClaudeCodeBackend(CLIExecBackend):
 
         return []
 
-    def _parse_stream_event(self, event: dict[str, Any], acc: TurnAccumulator) -> list[BackendEvent]:
+    def _parse_stream_event(
+        self, event: dict[str, Any], acc: TurnAccumulator
+    ) -> list[BackendEvent]:
         if event.get("type") == "content_block_delta":
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta":

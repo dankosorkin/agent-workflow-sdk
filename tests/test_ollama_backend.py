@@ -11,9 +11,8 @@ import json
 
 import httpx
 import pytest
-
 from agentflow.backends.ollama import OllamaBackend
-from agentflow.events import ChatRequest, Message, TextChunk, ToolCall, TurnEnd
+from agentflow.events import Message, TextChunk, ToolCall, TurnEnd
 
 
 def _ndjson(*objs) -> bytes:
@@ -22,6 +21,7 @@ def _ndjson(*objs) -> bytes:
 
 def _make_backend(handler) -> OllamaBackend:
     from agentflow.backends._http import RetryPolicy
+
     backend = OllamaBackend("llama3.2", retry=RetryPolicy(max_retries=0))
     backend._client = httpx.AsyncClient(
         base_url=backend.host, transport=httpx.MockTransport(handler)
@@ -34,8 +34,7 @@ async def test_streams_text_and_turn_end():
         body = _ndjson(
             {"message": {"role": "assistant", "content": "Hel"}, "done": False},
             {"message": {"role": "assistant", "content": "lo"}, "done": False},
-            {"message": {"role": "assistant", "content": ""}, "done": True,
-             "done_reason": "stop"},
+            {"message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "stop"},
         )
         return httpx.Response(200, content=body)
 
@@ -56,18 +55,28 @@ async def test_streams_text_and_turn_end():
 async def test_extracts_tool_call():
     def handler(request: httpx.Request) -> httpx.Response:
         body = _ndjson(
-            {"message": {"role": "assistant", "content": "",
-                         "tool_calls": [{"function": {"name": "get_weather",
-                                                       "arguments": {"city": "Paris"}}}]},
-             "done": True, "done_reason": "stop"},
+            {
+                "message": {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"function": {"name": "get_weather", "arguments": {"city": "Paris"}}}
+                    ],
+                },
+                "done": True,
+                "done_reason": "stop",
+            },
         )
         return httpx.Response(200, content=body)
 
     backend = _make_backend(handler)
-    events = [e async for e in backend.chat(
-        [Message(role="user", content="weather?")],
-        tools=[],
-    )]
+    events = [
+        e
+        async for e in backend.chat(
+            [Message(role="user", content="weather?")],
+            tools=[],
+        )
+    ]
     await backend.close()
 
     tool_calls = [e for e in events if isinstance(e, ToolCall)]

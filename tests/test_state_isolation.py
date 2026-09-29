@@ -6,12 +6,11 @@ from __future__ import annotations
 from typing import Annotated
 
 import pytest
-
-from agentflow import END, START, Graph, State, append, last, CompilationError
+from agentflow import END, START, CompilationError, Graph, State, append, last
 
 
 class S(State):
-    shared: Annotated[list, last]   # a nested container nodes might mutate
+    shared: Annotated[list, last]  # a nested container nodes might mutate
     log: Annotated[list, append]
 
 
@@ -25,11 +24,11 @@ def _fanout_graph(isolate_state):
         return {"shared": []}
 
     async def a(state, ctx):
-        state["shared"].append("a")     # illegal in-place mutation
+        state["shared"].append("a")  # illegal in-place mutation
         return {"log": f"a saw {len(state['shared'])}"}
 
     async def b(state, ctx):
-        state["shared"].append("b")     # illegal in-place mutation
+        state["shared"].append("b")  # illegal in-place mutation
         return {"log": f"b saw {len(state['shared'])}"}
 
     g.add_node("start", start)

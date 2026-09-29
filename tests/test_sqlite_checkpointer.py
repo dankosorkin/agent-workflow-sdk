@@ -5,10 +5,15 @@ from __future__ import annotations
 import sqlite3
 from typing import Annotated
 
-import pytest
-
 from agentflow import (
-    END, START, Graph, SqliteCheckpointer, State, add, append, last,
+    END,
+    START,
+    Graph,
+    SqliteCheckpointer,
+    State,
+    add,
+    append,
+    last,
 )
 from agentflow.checkpoint.base import Checkpoint
 
@@ -51,7 +56,9 @@ async def test_overwrite_bumps_revision(tmp_path):
     # revision incremented to 2
     conn = sqlite3.connect(dbpath)
     try:
-        rev = conn.execute("SELECT revision FROM checkpoints WHERE thread='t' AND step=1").fetchone()[0]
+        rev = conn.execute(
+            "SELECT revision FROM checkpoints WHERE thread='t' AND step=1"
+        ).fetchone()[0]
     finally:
         conn.close()
     assert rev == 2
@@ -64,6 +71,7 @@ async def test_missing_thread_returns_none(tmp_path):
 
 async def test_drives_a_real_graph_and_resumes(tmp_path):
     """End-to-end: a checkpointed graph run + HITL interrupt/resume on SQLite."""
+
     class S(State):
         answer: Annotated[str, last]
         stage: Annotated[list, append]

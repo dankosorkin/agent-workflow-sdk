@@ -10,7 +10,8 @@ Execution semantics (super-steps, fan-out, reducers) live in
 
 from __future__ import annotations
 
-from typing import Any, Awaitable, Callable, Mapping, Sequence, Union
+from collections.abc import Awaitable, Callable, Mapping, Sequence
+from typing import Any, Union
 
 from agentflow.errors import CompilationError
 from agentflow.state import Channel, channels_from_schema
@@ -21,6 +22,7 @@ __all__ = ["START", "END", "Graph", "Node", "Router"]
 # ---------------------------------------------------------------------------
 # Sentinels for the virtual entry/exit nodes
 # ---------------------------------------------------------------------------
+
 
 class _Sentinel:
     def __init__(self, name: str) -> None:
@@ -76,7 +78,7 @@ class Graph:
     # Building
     # ------------------------------------------------------------------
 
-    def add_node(self, name: str, fn: "Node | Any") -> "Graph":
+    def add_node(self, name: str, fn: Node | Any) -> Graph:
         """Register a node.
 
         ``fn`` is an async ``(state, ctx) -> update`` callable, or a
@@ -107,7 +109,7 @@ class Graph:
         *,
         input_map: Mapping[str, str] | None = None,
         output_map: Mapping[str, str] | None = None,
-    ) -> "Graph":
+    ) -> Graph:
         """Embed a :class:`~agentflow.compiled.CompiledGraph` with explicit
         channel mapping between parent and child.
 
@@ -121,12 +123,15 @@ class Graph:
         if name in self.nodes:
             raise CompilationError(f"duplicate node {name!r}")
         self.nodes[name] = _subgraph_node(
-            name, subgraph, parent_channels=self.channels,
-            input_map=input_map, output_map=output_map,
+            name,
+            subgraph,
+            parent_channels=self.channels,
+            input_map=input_map,
+            output_map=output_map,
         )
         return self
 
-    def add_edge(self, src: Target, dst: Target) -> "Graph":
+    def add_edge(self, src: Target, dst: Target) -> Graph:
         """Add an unconditional edge ``src -> dst``.
 
         ``src`` may be :data:`START` or a node name; ``dst`` may be a node name
@@ -140,7 +145,7 @@ class Graph:
         src: str,
         router: Router,
         mapping: Mapping[str, Target],
-    ) -> "Graph":
+    ) -> Graph:
         """Route out of ``src`` by a ``router(state) -> key`` into ``mapping``.
 
         The router may return a single key or a list of keys (fan-out). Each
@@ -156,8 +161,15 @@ class Graph:
     # Compilation
     # ------------------------------------------------------------------
 
-    def compile(self, *, checkpointer: Any = None, step_limit: int = 100, hooks: Any = None,
-                max_node_concurrency: int | None = None, isolate_state: str = "fanout"):
+    def compile(
+        self,
+        *,
+        checkpointer: Any = None,
+        step_limit: int = 100,
+        hooks: Any = None,
+        max_node_concurrency: int | None = None,
+        isolate_state: str = "fanout",
+    ):
         """Validate the graph and return a :class:`CompiledGraph`.
 
         ``hooks`` is an optional :class:`~agentflow.observability.Hooks` for
@@ -166,8 +178,7 @@ class Graph:
         """
         if isolate_state not in ("fanout", "always", "never"):
             raise CompilationError(
-                f"isolate_state must be 'fanout', 'always', or 'never', "
-                f"got {isolate_state!r}"
+                f"isolate_state must be 'fanout', 'always', or 'never', got {isolate_state!r}"
             )
         self._validate()
         from agentflow.compiled import CompiledGraph
@@ -224,8 +235,7 @@ class Graph:
             has_branch = name in self._branches
             if not has_static and not has_branch:
                 raise CompilationError(
-                    f"node {name!r} has no outgoing edge (add an edge to END "
-                    f"if it is terminal)"
+                    f"node {name!r} has no outgoing edge (add an edge to END if it is terminal)"
                 )
 
     def _check_reachability(self, start_targets: Sequence[Target]) -> None:
@@ -246,14 +256,13 @@ class Graph:
 
         unreachable = set(self.nodes) - seen
         if unreachable:
-            raise CompilationError(
-                f"nodes unreachable from START: {sorted(unreachable)}"
-            )
+            raise CompilationError(f"nodes unreachable from START: {sorted(unreachable)}")
 
 
 # ---------------------------------------------------------------------------
 # Subgraph-as-node
 # ---------------------------------------------------------------------------
+
 
 def _subgraph_node(
     name: str,
@@ -285,9 +294,7 @@ def _subgraph_node(
     async def run_subgraph(state: Mapping[str, Any], ctx: Any) -> Mapping[str, Any]:
         if input_map is not None:
             sub_input = {
-                sub_key: state[p_key]
-                for p_key, sub_key in input_map.items()
-                if p_key in state
+                sub_key: state[p_key] for p_key, sub_key in input_map.items() if p_key in state
             }
         else:
             sub_input = {k: v for k, v in state.items() if k in sub_channels}

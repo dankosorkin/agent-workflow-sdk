@@ -12,10 +12,9 @@ durations, counts, and errors, plus step and run totals.
 
 from __future__ import annotations
 
-import time
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Any, Mapping
+from typing import Any
 
 __all__ = ["Hooks", "RunMetrics", "NodeStat"]
 
@@ -30,7 +29,9 @@ class Hooks:
     async def on_run_start(self, thread: str, step: int) -> None: ...
     async def on_node_start(self, thread: str, step: int, node: str) -> None: ...
     async def on_node_end(self, thread: str, step: int, node: str, seconds: float) -> None: ...
-    async def on_node_error(self, thread: str, step: int, node: str, exc: BaseException) -> None: ...
+    async def on_node_error(
+        self, thread: str, step: int, node: str, exc: BaseException
+    ) -> None: ...
     async def on_step_end(self, thread: str, step: int, ran: tuple[str, ...]) -> None: ...
     async def on_run_end(self, thread: str, step: int, completed: bool) -> None: ...
     #: A backend event a node surfaced via ``ctx.emit`` (TextChunk, ToolCall,
@@ -42,6 +43,7 @@ class Hooks:
 @dataclass
 class NodeStat:
     """Aggregated stats for one node across a run."""
+
     calls: int = 0
     errors: int = 0
     total_seconds: float = 0.0
@@ -99,8 +101,12 @@ _NOOP = Hooks()
 
 
 async def _safe(coro) -> None:
-    """Await a hook coroutine, swallowing any exception it raises."""
-    try:
+    """Await a hook coroutine, swallowing any exception it raises.
+
+    Intentionally broad: instrumentation must never break a run. Kept as an
+    explicit try/except (not contextlib.suppress) to document that intent.
+    """
+    try:  # noqa: SIM105 - explicit form documents the intent
         await coro
     except Exception:  # noqa: BLE001 - instrumentation must never break a run
         pass

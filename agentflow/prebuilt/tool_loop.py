@@ -24,8 +24,9 @@ owns execution, which is the whole point of the ``LLMBackend`` split.
 from __future__ import annotations
 
 import inspect
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Annotated, Any, Awaitable, Callable
+from typing import Annotated, Any
 
 from agentflow.backends.base import LLMBackend
 from agentflow.events import (
@@ -33,7 +34,6 @@ from agentflow.events import (
     Message,
     TextChunk,
     ToolCall,
-    ToolCallSpec,
     ToolSpec,
     TurnEnd,
 )
@@ -63,10 +63,11 @@ class Tool:
 
 class ToolLoopState(State):
     """Conversation plus loop bookkeeping."""
-    messages: Annotated[list, append]   # the running chat transcript
-    turns: Annotated[int, add]          # model calls made
-    _pending: Annotated[list, last]     # tool calls awaiting execution
-    status: Annotated[str, last]        # terminal status (see tool_loop docs)
+
+    messages: Annotated[list, append]  # the running chat transcript
+    turns: Annotated[int, add]  # model calls made
+    _pending: Annotated[list, last]  # tool calls awaiting execution
+    status: Annotated[str, last]  # terminal status (see tool_loop docs)
 
 
 async def _run_tool(tool: Tool, args: dict[str, Any]) -> tuple[str, bool]:
@@ -121,19 +122,16 @@ def tool_loop(
             raise RuntimeError("LLM turn produced no TurnEnd")
 
         assistant = final.message or Message(role="assistant", content=final.text)
-        pending = [
-            {"id": tc.id, "name": tc.name, "args": tc.args}
-            for tc in assistant.tool_calls
-        ]
+        pending = [{"id": tc.id, "name": tc.name, "args": tc.args} for tc in assistant.tool_calls]
         turns_after = state.get("turns", 0) + 1
 
         # Decide the terminal status if the loop is about to stop.
         if not pending:
-            status = "completed"                    # model answered, no tools
+            status = "completed"  # model answered, no tools
         elif turns_after >= max_turns:
-            status = "tool_calls_unresolved"         # hit cap with tools pending
+            status = "tool_calls_unresolved"  # hit cap with tools pending
         else:
-            status = "running"                       # will loop into tools
+            status = "running"  # will loop into tools
 
         return {
             "messages": [assistant],
@@ -158,7 +156,7 @@ def tool_loop(
         # Clear pending; append tool results to the transcript.
         return {"messages": results, "_pending": []}
 
-    def route(state: dict) -> str:
+    def route(state: Mapping[str, Any]) -> str:
         pending = state.get("_pending") or []
         if pending and state.get("turns", 0) < max_turns:
             return "tools"

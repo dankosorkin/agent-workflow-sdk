@@ -43,6 +43,9 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   (model answered tool-free) or `"tool_calls_unresolved"` (hit `max_turns` with
   pending tool calls). Callers must check it rather than assume the last
   message is a final answer.
+- Tooling: Ruff (lint + format), mypy (type check, `agentflow` clean), and
+  pip-audit added to the `dev` extra and CI. Codebase formatted and typed to
+  zero findings.
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and

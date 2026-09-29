@@ -16,7 +16,7 @@ A session is the ``thread_id``; subsequent turns resume it via
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from agentflow.backends.base import PermissionPolicy
 from agentflow.backends.cli_exec import CLIExecBackend, TurnAccumulator
@@ -98,7 +98,7 @@ class CodexBackend(CLIExecBackend):
             call_id = str(item.get("id") or "")
             command = item.get("command") or ""
             exit_code = item.get("exit_code")
-            status = "ok" if exit_code in (0, None) else "error"
+            status: Literal["ok", "error"] = "ok" if exit_code in (0, None) else "error"
             return [
                 ToolCall(id=call_id, name="shell", args={"command": command}, title=command),
                 ToolResult(id=call_id, status=status, content=item.get("aggregated_output")),

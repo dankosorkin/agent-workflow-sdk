@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from typing import Annotated
 
-import pytest
-
 from agentflow import END, START, Graph, MemoryCheckpointer, State, add, append, last
 
 
@@ -17,7 +15,7 @@ class Inner(State):
 class Outer(State):
     n: Annotated[int, add]
     trace: Annotated[list, append]
-    result: Annotated[int, last]        # distinct channel for subgraph output
+    result: Annotated[int, last]  # distinct channel for subgraph output
     outer_only: Annotated[str, last]
 
 
@@ -69,8 +67,8 @@ async def test_subgraph_with_output_map_avoids_double_count():
     g.add_subgraph(
         "inner",
         _inner_graph(),
-        input_map={"n": "n"},           # feed parent n -> subgraph n
-        output_map={"n": "result"},      # subgraph n -> parent `result` (last)
+        input_map={"n": "n"},  # feed parent n -> subgraph n
+        output_map={"n": "result"},  # subgraph n -> parent `result` (last)
     )
     g.add_edge(START, "seed")
     g.add_edge("seed", "inner")
@@ -83,14 +81,13 @@ async def test_subgraph_with_output_map_avoids_double_count():
 
 async def test_subgraph_only_sees_mapped_input():
     g = Graph(Outer)
-    g.add_subgraph("inner", _inner_graph(),
-                   input_map={"n": "n"}, output_map={"n": "result"})
+    g.add_subgraph("inner", _inner_graph(), input_map={"n": "n"}, output_map={"n": "result"})
     g.add_edge(START, "inner")
     g.add_edge("inner", END)
     out = await g.compile().invoke({"n": 2, "trace": [], "result": 0, "outer_only": "keep"})
-    assert out["outer_only"] == "keep"   # untouched
-    assert out["result"] == 5            # 2 -> double->4 -> bump->5
-    assert out["n"] == 2                 # parent n not modified by subgraph
+    assert out["outer_only"] == "keep"  # untouched
+    assert out["result"] == 5  # 2 -> double->4 -> bump->5
+    assert out["n"] == 2  # parent n not modified by subgraph
 
 
 async def test_subgraph_checkpoints_on_isolated_subthread():
