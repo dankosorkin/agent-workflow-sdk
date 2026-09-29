@@ -322,6 +322,53 @@ store = PostgresStore("postgresql://localhost/app")
 await store.put(("cache",), "doc-42", payload, ttl=3600)
 ```
 
+## Control plane (run queue + workers)
+
+`invoke`/`stream`/`resume` run a graph inline in your code. The control plane
+lets you manage runs from *outside* that process: enqueue a run, let a pool of
+workers execute it, and list, cancel, or resume it from anywhere sharing the
+same queue. Runs survive a process restart and scale across workers.
+
+A run request references a graph by name (graphs are code, not data), so an
+enqueuer and its workers share a `GraphRegistry` mapping names to compiled
+graphs, and the same checkpointer so workers see the run's state.
+
+```python
+from agentflow import GraphRegistry, MemoryRunQueue, Worker
+
+registry = GraphRegistry()
+registry.register("summarize", lambda: build_graph().compile(checkpointer=cp))
+
+queue = MemoryRunQueue()
+run = await queue.enqueue("summarize", {"text": "..."})
+
+# A worker (usually a separate long-running process) drains the queue.
+worker = Worker(queue, registry)
+await worker.run_once()          # or: await worker.run_forever()
+
+record = await queue.get(run.run_id)   # status: succeeded / interrupted / ...
+```
+
+Run lifecycle: `queued -> running -> succeeded | interrupted | failed |
+cancelled`. An interrupted run (a graph that hit `ctx.interrupt`) is resumed by
+re-queuing it with the human answer:
+
+```python
+await queue.enqueue_resume(run.run_id, value="approved")  # back to queued
+```
+
+Cancellation is cooperative — `await queue.request_cancel(run_id)` stops a
+running graph at the next super-step boundary, leaving a consistent checkpoint.
+
+`MemoryRunQueue` is for a single process/tests. `PostgresRunQueue` (install the
+`postgres` extra) is durable and safe for many concurrent workers: `claim`
+hands each run to exactly one worker via `FOR UPDATE SKIP LOCKED`, and a
+time-bounded lease means a crashed worker's run is re-claimed once the lease
+expires.
+
+An HTTP layer (each queue method maps 1:1 to an endpoint) is planned and not
+part of this release.
+
 ## Prebuilt patterns
 
 `agentflow.prebuilt.iterate_until_converged(work, ...)` compiles the classic
@@ -394,6 +441,7 @@ agentflow/
   backends/           base protocols + kiro/codex/claude_code/ollama/openai/anthropic
   checkpoint/         Checkpointer protocol + memory/file/sqlite/redis/postgres
   store/              Store protocol (cross-thread memory) + memory/postgres
+  controlplane/       RunQueue + GraphRegistry + Worker (memory/postgres)
   prebuilt/           iterate_until_converged, tool_loop, with_retry/with_timeout
 examples/             runnable examples
 tests/                pytest suite (async; offline by default, `-m live` for real backends)

@@ -58,6 +58,19 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Synchronous facade on `CompiledGraph`: `invoke_sync`, `resume_sync`, and
   `stream_sync` wrap `asyncio.run` for non-async callers, and refuse to run
   inside an existing event loop rather than deadlock.
+- Control plane for managing runs outside the process that created them
+  (`agentflow.controlplane`). A `RunQueue` holds run requests; a `GraphRegistry`
+  maps a graph name to a compiled-graph factory (graphs are code, not data);
+  and a `Worker`/`WorkerPool` claims requests and executes them, so runs
+  survive a process restart and scale across workers. Run lifecycle:
+  `queued -> running -> succeeded | interrupted | failed | cancelled`, with
+  interrupted runs resumed via `enqueue_resume(run_id, value)` and cooperative
+  `request_cancel` (stops at a super-step boundary). Ships `MemoryRunQueue`
+  (single process) and `PostgresRunQueue` (in the `postgres` extra; `claim` uses
+  `FOR UPDATE SKIP LOCKED` for safe concurrent workers, with a lease/heartbeat
+  so a crashed worker's run is re-claimed). Also adds `Checkpointer.list_threads`
+  (+ `ThreadInfo`) to enumerate runs across all backends. An HTTP layer over
+  the queue is planned but not included.
 - `Store` protocol for durable cross-thread memory (distinct from a
   checkpointer, which persists one thread's execution state). Items are
   addressed by a `namespace` tuple and a string `key`, hold any JSON value, and

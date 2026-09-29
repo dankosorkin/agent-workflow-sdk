@@ -375,3 +375,67 @@ async def test_live_postgres_store():
         pool = await s._get_pool()
         await pool.execute(f"DROP TABLE IF EXISTS {table}")
         await s.close()
+
+
+async def test_live_postgres_run_queue():
+    """PostgresRunQueue against real Postgres: claim/SKIP LOCKED, lease, cancel."""
+    dsn = os.environ.get("AGENTFLOW_TEST_POSTGRES_DSN")
+    if not dsn:
+        pytest.skip(
+            "AGENTFLOW_TEST_POSTGRES_DSN not set "
+            "(e.g. postgresql://postgres:pw@localhost:5432/postgres)"
+        )
+
+    from agentflow import RunStatus
+    from agentflow.controlplane.postgres import PostgresRunQueue
+
+    table = f"runs_test_{os.getpid()}"
+    q = PostgresRunQueue(dsn, table=table)
+    try:
+        # Enqueue N runs; two concurrent claimers must partition them with no
+        # duplicates (FOR UPDATE SKIP LOCKED).
+        n = 20
+        for i in range(n):
+            await q.enqueue("g", {"i": i})
+
+        claimed_ids: list[str] = []
+
+        async def claimer():
+            got = []
+            while True:
+                rec = await q.claim(lease_seconds=60)
+                if rec is None:
+                    return got
+                got.append(rec.run_id)
+                await asyncio.sleep(0)  # yield to interleave
+
+        a, b = await asyncio.gather(claimer(), claimer())
+        claimed_ids = a + b
+        assert len(claimed_ids) == n
+        assert len(set(claimed_ids)) == n  # no run claimed twice
+        assert not (set(a) & set(b))  # disjoint partitions
+
+        # All are now running; a fresh claim finds nothing (leases not expired).
+        assert await q.claim(lease_seconds=60) is None
+
+        # Expired-lease reclaim: enqueue one, claim with a tiny lease, wait, reclaim.
+        rec = await q.enqueue("g", {"i": 99})
+        first = await q.claim(lease_seconds=1)
+        assert first is not None
+        await asyncio.sleep(1.2)
+        again = await q.claim(lease_seconds=60)
+        assert again is not None and again.attempt == 2
+
+        # Cancel a queued run is immediate.
+        c = await q.enqueue("g")
+        assert await q.request_cancel(c.run_id) is True
+        assert (await q.get(c.run_id)).status == RunStatus.CANCELLED
+
+        # complete + list filter.
+        await q.complete(rec.run_id, status=RunStatus.SUCCEEDED)
+        done = await q.list(status=RunStatus.SUCCEEDED)
+        assert rec.run_id in {r.run_id for r in done}
+    finally:
+        pool = await q._get_pool()
+        await pool.execute(f"DROP TABLE IF EXISTS {table}")
+        await q.close()

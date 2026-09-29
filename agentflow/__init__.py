@@ -16,6 +16,15 @@ from agentflow.checkpoint import (
     ThreadInfo,
 )
 from agentflow.compiled import CompiledGraph
+from agentflow.controlplane import (
+    GraphRegistry,
+    MemoryRunQueue,
+    RunQueue,
+    RunRecord,
+    RunStatus,
+    Worker,
+    WorkerPool,
+)
 from agentflow.errors import (
     AgentFlowError,
     BackendError,
@@ -24,9 +33,11 @@ from agentflow.errors import (
     CheckpointConflict,
     CheckpointError,
     CompilationError,
+    ControlPlaneError,
     GraphError,
     InterruptError,
     NodeError,
+    RunNotFound,
     RunTimeout,
 )
 from agentflow.events import (
@@ -122,6 +133,15 @@ __all__ = [
     "Store",
     "MemoryStore",
     "PostgresStore",
+    # control plane
+    "RunStatus",
+    "RunRecord",
+    "RunQueue",
+    "MemoryRunQueue",
+    "PostgresRunQueue",
+    "GraphRegistry",
+    "Worker",
+    "WorkerPool",
     # errors
     "AgentFlowError",
     "GraphError",
@@ -133,6 +153,8 @@ __all__ = [
     "BackendRateLimitError",
     "CheckpointError",
     "CheckpointConflict",
+    "ControlPlaneError",
+    "RunNotFound",
     "InterruptError",
 ]
 
@@ -152,4 +174,8 @@ def __getattr__(name: str):
         from agentflow.store import PostgresStore
 
         return PostgresStore
+    if name == "PostgresRunQueue":
+        from agentflow.controlplane import PostgresRunQueue
+
+        return PostgresRunQueue
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

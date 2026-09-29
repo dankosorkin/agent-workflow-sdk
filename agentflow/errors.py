@@ -17,6 +17,8 @@ __all__ = [
     "BackendRateLimitError",
     "CheckpointError",
     "CheckpointConflict",
+    "ControlPlaneError",
+    "RunNotFound",
     "InterruptError",
 ]
 
@@ -137,6 +139,23 @@ class RunTimeout(GraphError):
         super().__init__(
             f"run {thread!r} exceeded {seconds}s (reached step {step}); last checkpoint preserved"
         )
+
+
+# ---------------------------------------------------------------------------
+# Control plane
+# ---------------------------------------------------------------------------
+
+
+class ControlPlaneError(AgentFlowError):
+    """A control-plane (run queue / worker) operation failed."""
+
+
+class RunNotFound(ControlPlaneError):
+    """No run exists for the given id."""
+
+    def __init__(self, run_id: str):
+        self.run_id = run_id
+        super().__init__(f"no run with id {run_id!r}")
 
 
 class InterruptError(AgentFlowError):
