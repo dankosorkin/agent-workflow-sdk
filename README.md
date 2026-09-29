@@ -242,25 +242,28 @@ machine (set `KIRO_AGENT` to a valid agent id, e.g. `vibe`, to include Kiro).
 A `PermissionPolicy` is **required** when constructing an agent backend — there
 is no default, because auto-approving an agent's tool use is a security choice
 the caller must make explicitly. Options: `AllowAll` (trusted local sandbox
-only), `DenyAll`, `Interactive` (escalate to a human via an engine interrupt),
-or `ToolAllowlist({"read_file", ...}, fallback=DenyAll())` for least-privilege
-scoping.
+only), `DenyAll`, `ToolAllowlist({"read_file", ...}, fallback=DenyAll())` for
+least-privilege scoping, and two ways to ask a human — `Interactive` (suspends
+the run via an engine interrupt; resume with a decision) and `Callback(async
+fn)` (asks inline within the same turn, no interrupt — the right choice for a
+persistent-session backend like Kiro).
 
 ```python
 from agentflow.backends import AllowAll, ToolAllowlist, DenyAll
 KiroBackend("vibe", permission=ToolAllowlist({"read_file"}, fallback=DenyAll()))
 ```
 
-Capability matrix — where the policy actually applies:
+Capability matrix — how the policy is applied:
 
-| Backend | Routes tool requests through `PermissionPolicy`? |
+| Backend | How `PermissionPolicy` applies |
 | --- | --- |
-| `KiroBackend` | Yes — ACP `session/request_permission` is resolved by the policy (and `Interactive` drives a real HITL interrupt). |
-| `CodexBackend` | No — one-shot CLI; permission is governed by its `--sandbox` mode. The policy field is still required but does not intercept prompts. |
-| `ClaudeCodeBackend` | No — one-shot CLI; permission is governed by CLI flags (`--permission-mode`, `--allowed-tools`). |
+| `KiroBackend` | Runtime gate — ACP `session/request_permission` is resolved by the policy per tool call (`Interactive`/`Callback` ask a human; `ToolAllowlist` filters). |
+| `CodexBackend` | Translated to a launch flag — the policy sets Codex's `--sandbox` when you don't set it yourself: `AllowAll` → `workspace-write`, `DenyAll`/`ToolAllowlist` → `read-only`. No per-tool runtime gate. |
+| `ClaudeCodeBackend` | Translated to launch flags — `ToolAllowlist` → `--allowed-tools`, `DenyAll` → `--permission-mode plan` (read-only), when you don't set those yourself. No per-tool runtime gate. |
 
-For the one-shot CLI agents, configure their own controls (sandbox, allowed
-tools) — the SDK policy alone does not sandbox them.
+For the one-shot CLI agents the policy is a best-effort *upfront* mapping to
+their own controls, not our runtime interception — an explicit `sandbox=` /
+`allowed_tools=` you pass always wins over the derived value.
 
 ## Checkpointing and human-in-the-loop
 

@@ -4,6 +4,41 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-09-29
+
+### Added
+
+- `Callback(async_fn)` permission policy: asks a human (or any resolver) inline
+  within the same turn and answers the agent's request immediately, without an
+  engine interrupt/resume. This is the correct policy for a persistent-session
+  backend like Kiro — `Interactive` suspends the run and resumes a new turn,
+  which deadlocks a live ACP session that is holding the original turn open
+  awaiting the decision. `Interactive` remains right for one-shot backends.
+- Permission policy is now translated to CLI launch flags for the one-shot
+  agents (best-effort upfront enforcement, since they have no per-tool runtime
+  gate): `CodexBackend` derives `--sandbox` (`AllowAll` → `workspace-write`,
+  `DenyAll`/`ToolAllowlist` → `read-only`); `ClaudeCodeBackend` derives
+  `--allowed-tools` from a `ToolAllowlist` and `--permission-mode plan` from
+  `DenyAll`. An explicit `sandbox=`/`allowed_tools=`/`permission_mode=` you pass
+  always wins over the derived value.
+
+### Changed
+
+- `CodexBackend(sandbox=...)` now defaults to `None` (derive from the policy)
+  instead of `"read-only"`. With `permission=AllowAll()` this means Codex now
+  launches `workspace-write` rather than `read-only`; pass `sandbox="read-only"`
+  explicitly to keep the old behavior.
+
+### Fixed
+
+- `KiroBackend` now extracts the tool name from the v3 permission request
+  (`_meta.kiro.toolId` / `consent.capability` / `toolCall.title`), so a
+  `PermissionRequest` no longer arrives with an empty `tool`.
+- `KiroBackend.close()` returns promptly (short per-phase grace, configurable
+  via `close_grace`) and signals the child's whole process group, so the v3
+  CLI's helper process (`kiro-cli-chat`) is reaped instead of stranding the
+  terminal.
+
 ## [0.1.0] - 2026-09-29
 
 First public release: an async-first, LangGraph-style SDK for agent workflows
@@ -165,4 +200,5 @@ Core engine (the foundation the above builds on):
   GitHub Actions CI (offline suite + wheel build), and a `live` pytest marker
   separating opt-in real-backend smoke tests from the hermetic default run.
 
+[0.1.1]: https://github.com/dankosorkin/agent-workflow-sdk/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/dankosorkin/agent-workflow-sdk/releases/tag/v0.1.0
