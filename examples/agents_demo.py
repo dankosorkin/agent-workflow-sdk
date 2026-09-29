@@ -74,11 +74,11 @@ async def main() -> None:
             await ollama.start()
             try:
                 parts, final = [], None
-                async for ev in ollama.chat([Message(role="user", content=PROMPT)]):
-                    if isinstance(ev, TextChunk):
-                        parts.append(ev.text)
-                    elif isinstance(ev, TurnEnd):
-                        final = ev
+                async for event in ollama.chat([Message(role="user", content=PROMPT)]):
+                    if isinstance(event, TextChunk):
+                        parts.append(event.text)
+                    elif isinstance(event, TurnEnd):
+                        final = event
                 print(f"  streamed: {''.join(parts)!r}")
                 if final:
                     print(f"  TurnEnd : text={final.text!r} stop={final.stop_reason}")
@@ -108,9 +108,8 @@ async def main() -> None:
     # Kiro (agent backend) — needs a configured agent; skip if none supplied.
     # Kiro v3 selects an agent as a session mode; without a known agent id we
     # can't guarantee a valid mode, so this is opt-in via KIRO_AGENT.
-    import os
 
-    kiro_agent = os.environ.get("KIRO_AGENT")
+    kiro_agent = "vibe"
     if shutil.which("kiro-cli") and kiro_agent:
         from agentflow.backends.kiro import KiroBackend
 

@@ -50,12 +50,14 @@ async def main() -> None:
 
     app = g.compile()
 
-    # Stream the run so you can watch each super-step.
+    # Stream one run: its `done` event carries the final state.
+    final = None
     async for ev in app.stream({"n": 0, "log": []}):
         if ev.kind in ("node_end", "done"):
             print(f"[{ev.kind}] step={ev.step} node={ev.node}")
+        if ev.kind == "done":
+            final = ev.data
 
-    final = await app.invoke({"n": 0, "log": []}, thread="hello")
     print("final:", final)
 
 
