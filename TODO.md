@@ -17,3 +17,9 @@
   evaluators)` с отчётом. Обсудить дизайн.
 - Опционально: OpenTelemetry-экспортер (спаны) как ещё одна реализация
   `Hooks`, поверх той же событийной модели.
+
+## Сделано (продолжение)
+
+- HTTP retry/backoff в httpx-бэкендах (RetryPolicy + open_stream) — закрыто.
+- pytest-cov + coverage-конфиг (opt-in `pytest --cov`), CI репортит — закрыто.
+- CHANGELOG.md (Keep a Changelog) — закрыто.

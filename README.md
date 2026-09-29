@@ -191,6 +191,19 @@ stream. Backends are constructed by you and passed into your nodes. The core
 never imports a backend, so importing `agentflow` pulls in no subprocess or
 HTTP dependency.
 
+The HTTP LLM backends retry transient failures (connection errors, timeouts,
+429/5xx) on the connect/initial-response phase only — never mid-stream, so a
+partial token stream is never replayed. `Retry-After` is honored. Tune it with
+a `RetryPolicy`:
+
+```python
+from agentflow.backends import RetryPolicy
+from agentflow.backends.openai import OpenAIBackend
+
+llm = OpenAIBackend("gpt-4o-mini", api_key="...",
+                    retry=RetryPolicy(max_retries=4, backoff=0.5))
+```
+
 Run `python examples/agents_demo.py` to smoke every backend installed on your
 machine (set `KIRO_AGENT` to a valid agent id, e.g. `vibe`, to include Kiro).
 
@@ -300,10 +313,14 @@ DESIGN.md             architecture and contracts
 ```bash
 pip install -e '.[ollama,dev]'
 pytest -q                 # offline suite only (hermetic, fast)
+pytest --cov              # with coverage (source=agentflow, branch)
 ```
 
 Tests are async and run under `pytest-asyncio` in `auto` mode, so no
-per-test decorator is needed.
+per-test decorator is needed. Coverage is opt-in via `--cov` to keep the
+default run fast.
+
+See `CHANGELOG.md` for the release history.
 
 The suite is split by a `live` marker. The default run skips live tests
 (`addopts = -m 'not live'`) so CI stays hermetic — everything mocks its
