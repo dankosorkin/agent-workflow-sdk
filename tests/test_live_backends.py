@@ -126,6 +126,23 @@ async def test_live_kiro():
     assert (text + (final.text or "")).strip()
 
 
+async def test_live_anthropic():
+    key = os.environ.get("ANTHROPIC_API_KEY")
+    if not key:
+        pytest.skip("ANTHROPIC_API_KEY not set")
+    from agentflow.backends.anthropic import AnthropicBackend
+
+    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+    backend = AnthropicBackend(model, api_key=key, max_tokens=64)
+    await backend.start()
+    try:
+        text, final = await _collect(backend.chat([Message(role="user", content=PROMPT)]))
+    finally:
+        await backend.close()
+    assert final is not None
+    assert (text + (final.text or "")).strip()
+
+
 async def test_live_tool_loop_ollama():
     """Full tool-calling loop over Ollama with a graph-executed tool."""
     model = _ollama_model()
