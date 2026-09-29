@@ -21,6 +21,11 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Capability matrix in the README documenting which backends route tool
   requests through `PermissionPolicy` (Kiro does; the one-shot CLI agents use
   their own sandbox/flags).
+- Sensitive-data controls for persistence: `RedactKeys` redactor (mask values
+  by key fragment). `JsonlTelemetry(redact=...)` and `FileCheckpointer(
+  redact=...)` apply it before writing. Both create files/dirs owner-only
+  (0o600/0o700) by default (`secure_permissions=`). Checkpoint redaction is
+  opt-in and documented as non-resumable (masked values are lost).
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and

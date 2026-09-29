@@ -16,15 +16,43 @@ from typing import Any, AsyncIterator
 
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import CheckpointError
+from agentflow.redaction import Redactor, redact_none
 
 __all__ = ["FileCheckpointer"]
 
 
-class FileCheckpointer:
-    """Persist checkpoints under ``root/<thread>/<step>.json``."""
+def _chmod(path: Path, mode: int) -> None:
+    """Best-effort permission set; ignored on filesystems that don't support it."""
+    try:
+        path.chmod(mode)
+    except OSError:
+        pass
 
-    def __init__(self, root: Path | str = ".runs") -> None:
+
+class FileCheckpointer:
+    """Persist checkpoints under ``root/<thread>/<step>.json``.
+
+    Files and directories are created owner-only (0o600/0o700) by default so a
+    persisted run's state is not world-readable. Pass ``secure_permissions=
+    False`` to disable (e.g. on filesystems that don't support it).
+
+    ``redact`` optionally masks sensitive values in the persisted ``state``
+    before writing. WARNING: a redacted checkpoint cannot be resumed to the
+    exact original state — masked values are lost. Use redaction only for
+    archival/debug copies, not for the checkpointer you resume from. Default is
+    no redaction.
+    """
+
+    def __init__(
+        self,
+        root: Path | str = ".runs",
+        *,
+        redact: "Redactor | None" = None,
+        secure_permissions: bool = True,
+    ) -> None:
         self.root = Path(root)
+        self._redact = redact or redact_none
+        self._secure = secure_permissions
 
     def _thread_dir(self, thread: str) -> Path:
         # Keep thread ids filesystem-safe without inventing a scheme: reject
@@ -36,8 +64,13 @@ class FileCheckpointer:
     async def put(self, cp: Checkpoint) -> str:
         directory = self._thread_dir(cp.thread)
         directory.mkdir(parents=True, exist_ok=True)
+        if self._secure:
+            _chmod(directory, 0o700)
+            _chmod(self.root, 0o700)
         path = directory / f"{cp.step:06d}.json"
         payload = _to_payload(cp)
+        payload["state"] = self._redact(payload["state"])
+        payload["interrupt_payload"] = self._redact(payload["interrupt_payload"])
         try:
             data = json.dumps(payload, ensure_ascii=False, indent=2)
         except TypeError as exc:
@@ -45,6 +78,8 @@ class FileCheckpointer:
                 f"checkpoint state for thread {cp.thread!r} is not JSON-serializable: {exc}"
             ) from exc
         _atomic_write(path, data)
+        if self._secure:
+            _chmod(path, 0o600)
         return f"{cp.thread}:{cp.step}"
 
     async def get(self, thread: str, step: int | None = None) -> Checkpoint | None:

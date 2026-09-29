@@ -22,6 +22,7 @@ from agentflow.compiled import CompiledGraph
 from agentflow.runtime import Context, StreamEvent
 from agentflow.observability import Hooks, RunMetrics, NodeStat
 from agentflow.telemetry import MultiHooks, JsonlTelemetry
+from agentflow.redaction import Redactor, RedactKeys, redact_none
 from agentflow.events import (
     Message,
     ToolSpec,
@@ -67,6 +68,7 @@ __all__ = [
     "Context", "StreamEvent",
     # observability + telemetry
     "Hooks", "RunMetrics", "NodeStat", "MultiHooks", "JsonlTelemetry",
+    "Redactor", "RedactKeys", "redact_none",
     # events
     "Message", "ToolSpec", "ToolCallSpec",
     "TextRequest", "ChatRequest",

@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from agentflow.observability import Hooks, _safe
+from agentflow.redaction import Redactor, redact_none
 
 __all__ = ["MultiHooks", "JsonlTelemetry"]
 
@@ -81,16 +82,34 @@ class JsonlTelemetry(Hooks):
     lock so concurrent nodes in a super-step don't interleave partial lines.
     """
 
-    def __init__(self, path: Path | str, *, per_thread: bool | None = None) -> None:
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        per_thread: bool | None = None,
+        redact: "Redactor | None" = None,
+        secure_permissions: bool = True,
+    ) -> None:
         p = Path(path)
         # Heuristic: a path without a .jsonl suffix is treated as a directory.
         self._is_dir = per_thread if per_thread is not None else (p.suffix == "")
         self.path = p
+        self._redact = redact or redact_none
+        self._secure = secure_permissions
         self._lock = asyncio.Lock()
         if self._is_dir:
             self.path.mkdir(parents=True, exist_ok=True)
+            self._chmod_dir(self.path)
         else:
             self.path.parent.mkdir(parents=True, exist_ok=True)
+            self._chmod_dir(self.path.parent)
+
+    def _chmod_dir(self, d: Path) -> None:
+        if self._secure:
+            try:
+                d.chmod(0o700)
+            except OSError:
+                pass  # best-effort; some filesystems (e.g. Windows) ignore this
 
     def _file_for(self, thread: str) -> Path:
         if self._is_dir:
@@ -100,12 +119,20 @@ class JsonlTelemetry(Hooks):
 
     async def _write(self, thread: str, event: str, **data: Any) -> None:
         entry = {"ts": _now(), "thread": thread, "event": event, **data}
+        entry = self._redact(entry)
         line = json.dumps(entry, ensure_ascii=False, default=_json_default) + "\n"
         async with self._lock:
+            path = self._file_for(thread)
+            new_file = not path.exists()
             # Local file append is fast; running it inline keeps ordering
             # deterministic within the lock.
-            with self._file_for(thread).open("a", encoding="utf-8") as fh:
+            with path.open("a", encoding="utf-8") as fh:
                 fh.write(line)
+            if new_file and self._secure:
+                try:
+                    path.chmod(0o600)
+                except OSError:
+                    pass
 
     async def on_run_start(self, thread, step):
         await self._write(thread, "run_start", step=step)
