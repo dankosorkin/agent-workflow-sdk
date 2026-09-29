@@ -64,6 +64,7 @@ class AnthropicBackend(BaseLLMBackend):
         headers: dict[str, str] | None = None,
         timeout: float = 120.0,
         retry: RetryPolicy | None = None,
+        max_concurrency: int | None = None,
     ) -> None:
         self.model = model
         self.api_key = api_key
@@ -77,6 +78,7 @@ class AnthropicBackend(BaseLLMBackend):
         self.extra_headers = dict(headers or {})
         self.timeout = timeout
         self.retry = retry if retry is not None else RetryPolicy()
+        self.max_concurrency = max_concurrency
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -117,7 +119,7 @@ class AnthropicBackend(BaseLLMBackend):
         tool_calls: list[ToolCallSpec] = []
         stop_reason: str | None = None
 
-        async with open_stream(
+        async with self.concurrency_guard(), open_stream(
             self._client, "POST", "/v1/messages",
             json=body, policy=self.retry, label="/v1/messages",
         ) as resp:

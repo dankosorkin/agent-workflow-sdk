@@ -30,7 +30,7 @@ from typing import Any, AsyncIterator
 
 import httpx
 
-from agentflow.errors import BackendTransportError
+from agentflow.errors import BackendRateLimitError, BackendTransportError
 
 __all__ = ["RetryPolicy", "open_stream"]
 
@@ -134,11 +134,19 @@ async def open_stream(
         last_detail = detail
 
         retryable = status in pol.retryable_status
+        parsed_retry_after = _parse_retry_after(retry_after)
         if retryable and attempt <= pol.max_retries:
-            wait = None
-            if pol.respect_retry_after:
-                wait = _parse_retry_after(retry_after)
+            wait = parsed_retry_after if pol.respect_retry_after else None
             await sleep(wait if wait is not None else pol.delay_for(attempt))
             continue
 
-        raise BackendTransportError(f"{label} returned {status}: {detail}")
+        # Exhausted or non-retryable: raise a typed error carrying status/headers.
+        hdrs = dict(resp.headers)
+        if status == 429:
+            raise BackendRateLimitError(
+                f"{label} rate limited (429): {detail}",
+                status=status, headers=hdrs, retry_after=parsed_retry_after,
+            )
+        raise BackendTransportError(
+            f"{label} returned {status}: {detail}", status=status, headers=hdrs,
+        )

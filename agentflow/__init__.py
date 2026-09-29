@@ -54,6 +54,7 @@ from agentflow.errors import (
     RunTimeout,
     BackendError,
     BackendTransportError,
+    BackendRateLimitError,
     CheckpointError,
     InterruptError,
 )
@@ -81,5 +82,6 @@ __all__ = [
     "SqliteCheckpointer",
     # errors
     "AgentFlowError", "GraphError", "CompilationError", "NodeError", "RunTimeout",
-    "BackendError", "BackendTransportError", "CheckpointError", "InterruptError",
+    "BackendError", "BackendTransportError", "BackendRateLimitError",
+    "CheckpointError", "InterruptError",
 ]

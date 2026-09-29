@@ -123,6 +123,8 @@ class _Graph:
     edges: Mapping[Any, list[Any]]
     branches: Mapping[str, _ConditionalEdge]
     step_limit: int
+    #: Max nodes run concurrently within one super-step (None = unbounded).
+    max_node_concurrency: int | None = None
 
 
 def _now() -> str:
@@ -242,8 +244,19 @@ async def run(
         for name in frontier:
             await _emit(StreamEvent("node_start", step, node=name))
 
-        # Run the whole frontier concurrently against the same input state.
-        coros = [_run_node(graph, name, state, contexts[name], hooks) for name in frontier]
+        # Run the whole frontier concurrently against the same input state,
+        # bounded by max_node_concurrency so a wide fan-out to one external API
+        # does not spike request pressure.
+        limit = graph.max_node_concurrency
+        sem = asyncio.Semaphore(limit) if limit else None
+
+        async def _run_bounded(name: str):
+            if sem is None:
+                return await _run_node(graph, name, state, contexts[name], hooks)
+            async with sem:
+                return await _run_node(graph, name, state, contexts[name], hooks)
+
+        coros = [_run_bounded(name) for name in frontier]
         results = await asyncio.gather(*coros, return_exceptions=True)
 
         # Handle interrupts: if any node interrupted, suspend the run now. The

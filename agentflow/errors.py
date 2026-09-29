@@ -14,6 +14,7 @@ __all__ = [
     "RunTimeout",
     "BackendError",
     "BackendTransportError",
+    "BackendRateLimitError",
     "CheckpointError",
     "InterruptError",
 ]
@@ -66,7 +67,31 @@ class BackendError(AgentFlowError):
 
 class BackendTransportError(BackendError):
     """A fatal transport failure: the process died, the socket dropped, or
-    the wire produced unparseable data. Not recoverable within the turn."""
+    the wire produced unparseable data. Not recoverable within the turn.
+
+    ``status`` and ``headers`` are populated when the failure came from an HTTP
+    response, so callers can branch on them (e.g. distinguish a 429 from a 500).
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        status: int | None = None,
+        headers: dict[str, str] | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        self.status = status
+        self.headers = headers or {}
+        self.retry_after = retry_after
+        super().__init__(message)
+
+
+class BackendRateLimitError(BackendTransportError):
+    """A provider rate limit (HTTP 429) that outlived the retry policy.
+
+    Carries ``retry_after`` (seconds) when the provider supplied it, so a
+    caller can back off at the application level."""
 
 
 # ---------------------------------------------------------------------------

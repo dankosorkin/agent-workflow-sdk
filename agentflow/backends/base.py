@@ -152,7 +152,31 @@ class BaseLLMBackend:
 
     Concrete LLM backends inherit this and implement ``start``, ``close``,
     and ``invoke``.
+
+    Set ``max_concurrency`` (an int) to cap in-flight requests from this
+    backend instance; :meth:`concurrency_guard` returns an async context to
+    wrap the request with. This bounds pressure when many graph nodes hit the
+    same provider at once.
     """
+
+    max_concurrency: int | None = None
+
+    def concurrency_guard(self):
+        """Return an async context manager limiting concurrent requests.
+
+        A no-op when ``max_concurrency`` is unset; otherwise a lazily-created
+        :class:`asyncio.Semaphore` shared across this backend instance.
+        """
+        import asyncio
+        import contextlib
+
+        if not self.max_concurrency:
+            return contextlib.nullcontext()
+        sem = getattr(self, "_sem", None)
+        if sem is None:
+            sem = asyncio.Semaphore(self.max_concurrency)
+            self._sem = sem
+        return sem
 
     def chat(
         self,

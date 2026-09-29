@@ -54,12 +54,14 @@ class OllamaBackend(BaseLLMBackend):
         options: dict[str, Any] | None = None,
         timeout: float = 120.0,
         retry: RetryPolicy | None = None,
+        max_concurrency: int | None = None,
     ) -> None:
         self.model = model
         self.host = host.rstrip("/")
         self.options = dict(options or {})
         self.timeout = timeout
         self.retry = retry if retry is not None else RetryPolicy()
+        self.max_concurrency = max_concurrency
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -86,7 +88,7 @@ class OllamaBackend(BaseLLMBackend):
         tool_calls: list[ToolCallSpec] = []
         stop_reason: str | None = None
 
-        async with open_stream(
+        async with self.concurrency_guard(), open_stream(
             self._client, "POST", "/api/chat",
             json=body, policy=self.retry, label="ollama /api/chat",
         ) as resp:

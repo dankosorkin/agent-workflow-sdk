@@ -61,6 +61,7 @@ class OpenAIBackend(BaseLLMBackend):
         headers: dict[str, str] | None = None,
         timeout: float = 120.0,
         retry: RetryPolicy | None = None,
+        max_concurrency: int | None = None,
     ) -> None:
         self.model = model
         self.base_url = base_url.rstrip("/")
@@ -69,6 +70,7 @@ class OpenAIBackend(BaseLLMBackend):
         self.extra_headers = dict(headers or {})
         self.timeout = timeout
         self.retry = retry if retry is not None else RetryPolicy()
+        self.max_concurrency = max_concurrency
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
@@ -101,7 +103,7 @@ class OpenAIBackend(BaseLLMBackend):
         tool_frags: dict[int, dict[str, Any]] = {}
         finish_reason: str | None = None
 
-        async with open_stream(
+        async with self.concurrency_guard(), open_stream(
             self._client, "POST", "/chat/completions",
             json=body, policy=self.retry, label="chat/completions",
         ) as resp:

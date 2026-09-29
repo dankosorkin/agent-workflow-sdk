@@ -30,6 +30,11 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   per-`(thread, step)` revisions (WAL mode, upsert-with-revision-bump), safe
   for concurrent/multi-process runners. `FileCheckpointer` is now documented as
   single-writer/single-process.
+- Provider resilience: typed `BackendTransportError` now carries `status` and
+  `headers`; a 429 that outlives retries raises `BackendRateLimitError` with
+  `retry_after`. HTTP LLM backends accept `max_concurrency` to bound in-flight
+  requests, and `compile(max_node_concurrency=...)` bounds how many nodes run
+  concurrently within a super-step (limits fan-out request pressure).
 
 - HTTP retry/backoff for the httpx LLM backends (`OllamaBackend`,
   `OpenAIBackend`, `AnthropicBackend`) via a shared `RetryPolicy` and

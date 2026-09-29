@@ -156,7 +156,8 @@ class Graph:
     # Compilation
     # ------------------------------------------------------------------
 
-    def compile(self, *, checkpointer: Any = None, step_limit: int = 100, hooks: Any = None):
+    def compile(self, *, checkpointer: Any = None, step_limit: int = 100, hooks: Any = None,
+                max_node_concurrency: int | None = None):
         """Validate the graph and return a :class:`CompiledGraph`.
 
         ``hooks`` is an optional :class:`~agentflow.observability.Hooks` for
@@ -175,6 +176,7 @@ class Graph:
             checkpointer=checkpointer,
             step_limit=step_limit,
             hooks=hooks,
+            max_node_concurrency=max_node_concurrency,
         )
 
     def _validate(self) -> None:

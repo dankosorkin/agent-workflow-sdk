@@ -34,6 +34,7 @@ class CompiledGraph:
         checkpointer: Any = None,
         step_limit: int = 100,
         hooks: Any = None,
+        max_node_concurrency: int | None = None,
     ) -> None:
         from agentflow.observability import Hooks
 
@@ -46,6 +47,7 @@ class CompiledGraph:
             edges=edges,
             branches=branches,
             step_limit=step_limit,
+            max_node_concurrency=max_node_concurrency,
         )
 
     # ------------------------------------------------------------------
