@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """In-memory RunQueue: fast, ephemeral, for tests and single-process use."""
 
 from __future__ import annotations
@@ -9,7 +19,7 @@ from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from agentflow.controlplane.records import RunRecord, RunStatus
+from agentflow.controlplane.records import QueueStats, RunRecord, RunStatus
 from agentflow.errors import RunNotFound
 
 __all__ = ["MemoryRunQueue"]
@@ -145,6 +155,20 @@ class MemoryRunQueue:
             )
             self._runs[run_id] = updated
             return updated
+
+    async def stats(self) -> QueueStats:
+        now = _now()
+        by_status: dict[str, int] = {}
+        expired = 0
+        for rec in self._runs.values():
+            by_status[rec.status] = by_status.get(rec.status, 0) + 1
+            if (
+                rec.status == RunStatus.RUNNING
+                and rec.lease_until is not None
+                and datetime.fromisoformat(rec.lease_until) <= now
+            ):
+                expired += 1
+        return QueueStats(total=len(self._runs), by_status=by_status, expired_leases=expired)
 
     def _require(self, run_id: str) -> RunRecord:
         rec = self._runs.get(run_id)

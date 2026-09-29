@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """AgentFlow — async-first, LangGraph-style agent workflow SDK.
 
 Importing this package pulls in only the dependency-free core (state, graph,
@@ -19,6 +29,8 @@ from agentflow.compiled import CompiledGraph
 from agentflow.controlplane import (
     GraphRegistry,
     MemoryRunQueue,
+    PoolHealth,
+    QueueStats,
     RunQueue,
     RunRecord,
     RunStatus,
@@ -136,6 +148,8 @@ __all__ = [
     # control plane
     "RunStatus",
     "RunRecord",
+    "QueueStats",
+    "PoolHealth",
     "RunQueue",
     "MemoryRunQueue",
     "PostgresRunQueue",

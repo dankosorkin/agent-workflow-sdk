@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Control plane: GraphRegistry, MemoryRunQueue, and end-to-end Worker."""
 
 from __future__ import annotations
@@ -229,3 +239,74 @@ async def test_worker_cooperative_cancel():
     assert await q.request_cancel(rec.run_id) is True
     await asyncio.wait_for(task, timeout=2.0)
     assert (await q.get(rec.run_id)).status == RunStatus.CANCELLED
+
+
+# --- Queue stats + pool health --------------------------------------------
+
+
+async def test_queue_stats_by_status():
+    from agentflow import QueueStats
+
+    q = MemoryRunQueue()
+    r1 = await q.enqueue("g")
+    await q.enqueue("g")
+    await q.claim()  # claims r1 -> running
+    await q.complete(r1.run_id, status=RunStatus.SUCCEEDED)
+
+    stats = await q.stats()
+    assert isinstance(stats, QueueStats)
+    assert stats.total == 2
+    assert stats.queued == 1
+    assert stats.by_status.get(RunStatus.SUCCEEDED) == 1
+    assert stats.running == 0
+    assert stats.expired_leases == 0
+
+
+async def test_queue_stats_counts_expired_leases():
+    q = MemoryRunQueue()
+    await q.enqueue("g")
+    await q.claim(lease_seconds=0.01)  # running with a lease about to expire
+    await asyncio.sleep(0.03)
+    stats = await q.stats()
+    assert stats.running == 1
+    assert stats.expired_leases == 1  # stranded, awaiting re-claim
+
+
+async def test_worker_busy_flag_transitions():
+    cp = MemoryCheckpointer()
+    reg = GraphRegistry()
+    reg.register("slow", lambda: _slow_graph(cp, delay=0.3))
+    q = MemoryRunQueue()
+    await q.enqueue("slow", {"n": 0})
+
+    worker = Worker(q, reg, poll_interval=0.01)
+    assert worker.busy is False
+    task = asyncio.ensure_future(worker.run_once())
+    await asyncio.sleep(0.1)
+    assert worker.busy is True  # mid-run
+    await asyncio.wait_for(task, timeout=2.0)
+    assert worker.busy is False  # settled after completion
+
+
+async def test_worker_pool_health_lifecycle():
+    from agentflow import PoolHealth, WorkerPool
+
+    reg = GraphRegistry()
+    reg.register("dbl", lambda: _linear_graph(MemoryCheckpointer()))
+    q = MemoryRunQueue()
+
+    pool = WorkerPool(q, reg, concurrency=3, poll_interval=0.01)
+    # Before start: nothing alive -> not healthy.
+    h0 = pool.health()
+    assert isinstance(h0, PoolHealth)
+    assert h0.workers == 3 and h0.alive == 0 and h0.healthy is False
+
+    await pool.start()
+    await asyncio.sleep(0.05)
+    h1 = pool.health()
+    assert h1.workers == 3 and h1.alive == 3 and h1.healthy is True
+    assert h1.idle == 3 and h1.busy == 0
+
+    await pool.stop()
+    h2 = pool.health()
+    assert h2.alive == 0 and h2.healthy is False

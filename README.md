@@ -385,6 +385,19 @@ hands each run to exactly one worker via `FOR UPDATE SKIP LOCKED`, and a
 time-bounded lease means a crashed worker's run is re-claimed once the lease
 expires.
 
+For monitoring, `await queue.stats()` returns a `QueueStats` snapshot (depth by
+status plus `expired_leases` — running runs whose lease is past due, i.e. work
+stranded by a crashed worker awaiting re-claim), and `pool.health()` returns a
+`PoolHealth` snapshot (`workers`/`alive`/`busy`/`idle`, and `healthy` when every
+worker loop is alive). Both are plain values you can expose through your own
+`/healthz` and `/metrics` handlers.
+
+```python
+stats = await queue.stats()          # stats.queued, stats.running, stats.expired_leases
+if not pool.health().healthy:
+    ...                              # a worker loop died — pool is degraded
+```
+
 An HTTP layer (each queue method maps 1:1 to an endpoint) is planned and not
 part of this release.
 

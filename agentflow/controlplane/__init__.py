@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Control plane: manage graph runs outside the process that created them.
 
 An execution plane (``CompiledGraph.invoke/stream/resume``) runs a graph inline
@@ -12,7 +22,7 @@ from typing import TYPE_CHECKING
 
 from agentflow.controlplane.memory import MemoryRunQueue
 from agentflow.controlplane.queue import RunQueue
-from agentflow.controlplane.records import RunRecord, RunStatus
+from agentflow.controlplane.records import PoolHealth, QueueStats, RunRecord, RunStatus
 from agentflow.controlplane.registry import GraphFactory, GraphRegistry
 from agentflow.controlplane.worker import Worker, WorkerPool
 
@@ -22,6 +32,8 @@ if TYPE_CHECKING:  # for type checkers only; the runtime import is lazy below
 __all__ = [
     "RunStatus",
     "RunRecord",
+    "QueueStats",
+    "PoolHealth",
     "RunQueue",
     "MemoryRunQueue",
     "PostgresRunQueue",

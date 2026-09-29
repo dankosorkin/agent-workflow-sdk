@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Control-plane data records: run status model and the RunRecord row.
 
 These are the serializable facts about a queued/executing run — everything a
@@ -10,7 +20,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any, Final
 
-__all__ = ["RunStatus", "RunRecord"]
+__all__ = ["RunStatus", "RunRecord", "QueueStats", "PoolHealth"]
 
 
 class RunStatus:
@@ -60,3 +70,49 @@ class RunRecord:
     lease_until: str | None = None
     cancel_requested: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True, slots=True)
+class QueueStats:
+    """A point-in-time snapshot of a run queue's depth, for monitoring.
+
+    ``by_status`` counts runs in every lifecycle state. ``expired_leases`` is
+    the number of ``running`` runs whose lease is past due — i.e. work stranded
+    by a crashed/stalled worker and awaiting re-claim. A rising value there is
+    the signal that workers are dying or falling behind their heartbeat.
+    """
+
+    total: int = 0
+    by_status: Mapping[str, int] = field(default_factory=dict)
+    expired_leases: int = 0
+
+    @property
+    def queued(self) -> int:
+        return self.by_status.get(RunStatus.QUEUED, 0)
+
+    @property
+    def running(self) -> int:
+        return self.by_status.get(RunStatus.RUNNING, 0)
+
+
+@dataclass(frozen=True, slots=True)
+class PoolHealth:
+    """Health snapshot of a :class:`~agentflow.controlplane.worker.WorkerPool`.
+
+    ``workers`` is the configured size; ``alive`` counts worker loops still
+    running (not stopped and not crashed); ``busy`` counts workers currently
+    executing a run; ``idle`` = alive - busy. ``healthy`` is True when every
+    configured worker loop is alive.
+    """
+
+    workers: int = 0
+    alive: int = 0
+    busy: int = 0
+
+    @property
+    def idle(self) -> int:
+        return max(self.alive - self.busy, 0)
+
+    @property
+    def healthy(self) -> bool:
+        return self.alive == self.workers and self.workers > 0

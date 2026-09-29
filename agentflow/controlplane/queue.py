@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """RunQueue protocol: durable queue of run requests, worked by a pool.
 
 A queue decouples *who asked for a run* from *who executes it*. An enqueuer
@@ -12,7 +22,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Protocol, runtime_checkable
 
-from agentflow.controlplane.records import RunRecord
+from agentflow.controlplane.records import QueueStats, RunRecord
 
 __all__ = ["RunQueue"]
 
@@ -67,4 +77,9 @@ class RunQueue(Protocol):
     async def enqueue_resume(self, run_id: str, value: Any = None) -> RunRecord:
         """Re-queue an interrupted run with the human ``value`` so a worker
         resumes it. Returns the updated record (status queued)."""
+        ...
+
+    async def stats(self) -> QueueStats:
+        """Return a point-in-time snapshot of queue depth by status plus the
+        count of expired-lease (stranded) runs — for health/monitoring."""
         ...

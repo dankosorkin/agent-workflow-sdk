@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Live end-to-end smoke tests against real backends.
 
 Opt-in only: marked ``live`` and skipped by the default ``pytest`` run
@@ -435,6 +445,13 @@ async def test_live_postgres_run_queue():
         await q.complete(rec.run_id, status=RunStatus.SUCCEEDED)
         done = await q.list(status=RunStatus.SUCCEEDED)
         assert rec.run_id in {r.run_id for r in done}
+
+        # stats(): depth by status + expired-lease count (the reclaim above
+        # left 'again' running with a 60s lease -> not expired).
+        stats = await q.stats()
+        assert stats.total >= 1
+        assert stats.by_status.get(RunStatus.SUCCEEDED, 0) >= 1
+        assert stats.expired_leases == 0
     finally:
         pool = await q._get_pool()
         await pool.execute(f"DROP TABLE IF EXISTS {table}")

@@ -16,6 +16,13 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Control-plane health/monitoring surface: `RunQueue.stats()` returns a
+  `QueueStats` (queue depth by status plus `expired_leases`, the running runs
+  whose lease is past due and await re-claim), and `WorkerPool.health()` returns
+  a `PoolHealth` (`workers`/`alive`/`busy`/`idle`, with `healthy` True when every
+  worker loop is alive). `Worker.busy` reports whether a worker is mid-run. Plain
+  values for the caller to expose via `/healthz` / `/metrics` (no HTTP layer
+  imposed). Implemented on both `MemoryRunQueue` and `PostgresRunQueue`.
 - `PrometheusHooks` (in the `prometheus` extra): a `Hooks` listener that records
   run/node/step counters, a node-duration histogram, and backend-event counts as
   Prometheus metrics, for operators who scrape Prometheus rather than run an OTel

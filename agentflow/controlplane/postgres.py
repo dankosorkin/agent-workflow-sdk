@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """PostgreSQL-backed RunQueue for multi-process, multi-worker control planes.
 
 Run requests live in a ``runs`` table. The key operation is ``claim``: an
@@ -19,7 +29,7 @@ from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
-from agentflow.controlplane.records import RunRecord, RunStatus
+from agentflow.controlplane.records import QueueStats, RunRecord, RunStatus
 from agentflow.errors import RunNotFound
 
 try:
@@ -267,3 +277,17 @@ class PostgresRunQueue:
         if row is None:
             raise RunNotFound(run_id)
         return self._row_to_record(row)
+
+    async def stats(self) -> QueueStats:
+        pool = await self._get_pool()
+        rows = await pool.fetch(f"SELECT status, COUNT(*) AS n FROM {self.table} GROUP BY status")
+        by_status = {r["status"]: r["n"] for r in rows}
+        expired = await pool.fetchval(
+            f"SELECT COUNT(*) FROM {self.table} "
+            f"WHERE status = '{RunStatus.RUNNING}' AND lease_until < NOW()"
+        )
+        return QueueStats(
+            total=sum(by_status.values()),
+            by_status=by_status,
+            expired_leases=int(expired or 0),
+        )

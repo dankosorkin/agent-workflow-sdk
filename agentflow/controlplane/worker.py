@@ -1,3 +1,13 @@
+# Copyright (C) 2026 Daniel Sorkin
+#
+# This file is part of AgentFlow.
+#
+# AgentFlow is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License
+# as published by the Free Software Foundation, version 3.
+#
+# See the LICENSE file for the full license text.
+
 """Worker + WorkerPool: claim run requests from a queue and execute them.
 
 A worker loops: ``claim`` a run under a lease, resolve its graph from the
@@ -12,7 +22,7 @@ import asyncio
 import contextlib
 
 from agentflow.controlplane.queue import RunQueue
-from agentflow.controlplane.records import RunRecord, RunStatus
+from agentflow.controlplane.records import PoolHealth, RunRecord, RunStatus
 from agentflow.controlplane.registry import GraphRegistry
 from agentflow.errors import InterruptError
 
@@ -46,13 +56,27 @@ class Worker:
         self.heartbeat_interval = heartbeat_interval
         self.poll_interval = poll_interval
         self._stopping = False
+        self._busy = False
+
+    @property
+    def busy(self) -> bool:
+        """True while this worker is executing a claimed run."""
+        return self._busy
+
+    @property
+    def stopping(self) -> bool:
+        return self._stopping
 
     async def run_once(self) -> bool:
         """Claim and execute at most one run. Return True if one was handled."""
         rec = await self.queue.claim(lease_seconds=self.lease_seconds)
         if rec is None:
             return False
-        await self._execute(rec)
+        self._busy = True
+        try:
+            await self._execute(rec)
+        finally:
+            self._busy = False
         return True
 
     async def run_forever(self) -> None:
@@ -178,3 +202,14 @@ class WorkerPool:
             with contextlib.suppress(asyncio.CancelledError):
                 await t
         self._tasks = []
+
+    def health(self) -> PoolHealth:
+        """Snapshot of the pool: configured size, live loops, and busy count.
+
+        A loop is "alive" if it was started and its task has not finished
+        (neither stopped cleanly nor crashed). ``busy`` counts workers mid-run.
+        Use ``health().healthy`` as a readiness signal — False means a worker
+        loop died and the pool is running degraded."""
+        alive = sum(1 for t in self._tasks if not t.done())
+        busy = sum(1 for w in self._workers if w.busy)
+        return PoolHealth(workers=len(self._workers), alive=alive, busy=busy)
