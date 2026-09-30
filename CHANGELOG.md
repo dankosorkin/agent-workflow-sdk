@@ -31,6 +31,16 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   reference (mkdocstrings), and the `examples/quality_gate.py` and
   `examples/research_plan_implement_review.py` examples.
 
+- Effect-level idempotency (`agentflow.prebuilt`): `IdempotentOp(store,
+  namespace)` protects one side effect inside a node with a claim → run →
+  commit marker in a `Store`, so a resume or retry does not repeat it. Its
+  `on_incomplete` policy (`"error"` default, `"rerun"`, `"skip"`) makes the
+  interrupted-mid-effect case an explicit choice rather than a silent repeat,
+  and `effect_key(*parts)` builds a stable token to pass downstream as the
+  provider's idempotency key. New `IncompleteEffectError`. This gives
+  exactly-once *effects* on top of the engine's at-least-once execution;
+  checkpoints alone cannot, since a super-step is atomic over state only.
+
 ### Fixed
 
 - `import agentflow.prebuilt` no longer requires the `ollama`/`httpx` extra.

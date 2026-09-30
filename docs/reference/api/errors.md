@@ -18,3 +18,7 @@ The exception hierarchy. See individual guides for where each is raised.
         - CheckpointConflict
         - ControlPlaneError
         - RunNotFound
+
+## Effect idempotency
+
+::: agentflow.prebuilt.effects.IncompleteEffectError

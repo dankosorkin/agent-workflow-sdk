@@ -25,7 +25,9 @@ flowchart TD
 
 ## All-or-nothing steps
 
-A super-step is atomic. If any node in it raises, the whole step's updates are discarded and no checkpoint is written for that step — the last good checkpoint remains the previous step. A resume therefore never sees a half-applied step: either a super-step committed in full or it did not happen. This is the invariant that makes crash recovery safe.
+A super-step is atomic **over state**. If any node in it raises, the whole step's updates are discarded and no checkpoint is written for that step — the last good checkpoint remains the previous step. A resume therefore never sees a half-applied step: either a super-step committed in full or it did not happen. This is the invariant that makes crash recovery safe.
+
+That atomicity covers the checkpointer, not the outside world. A side effect a node already performed — a file written, an API call sent — is not rolled back when the step is discarded, so on a resume it can happen again. Checkpoints give at-least-once execution; making an effect exactly-once is the effect's own job. See [side effects and delivery semantics](../patterns/long-running-loops.md#side-effects-and-delivery-semantics) for the `IdempotentOp` primitive and the techniques.
 
 ## Deterministic folding
 

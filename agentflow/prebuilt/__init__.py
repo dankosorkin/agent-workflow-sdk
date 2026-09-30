@@ -14,6 +14,7 @@
 
 """Prebuilt graph patterns built entirely from core primitives."""
 
+from agentflow.prebuilt.effects import IdempotentOp, IncompleteEffectError, effect_key
 from agentflow.prebuilt.gate import Evaluator, GateResult, GateState, add_quality_gate
 from agentflow.prebuilt.idempotent import artifact_key, skip_if_done
 from agentflow.prebuilt.loop import Candidate, iterate_until_converged
@@ -29,6 +30,9 @@ __all__ = [
     "add_quality_gate",
     "artifact_key",
     "skip_if_done",
+    "IdempotentOp",
+    "IncompleteEffectError",
+    "effect_key",
     "Tool",
     "ToolLoopState",
     "tool_loop",

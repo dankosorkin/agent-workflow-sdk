@@ -109,6 +109,57 @@ g.add_node("expensive", node)
 
 `artifact_key` is a stable SHA-256 of any JSON-serializable value (dict order does not matter), so it keys by *what* the input is rather than when it ran. Because the cache is a `Store`, a `PostgresStore` shares it across processes and a `ttl` expires stale entries. Only wrap deterministic work whose result depends solely on the hashed input — a node with side effects you always want is a poor fit.
 
+## Side effects and delivery semantics
+
+There is a boundary worth stating plainly, because it is easy to misread "atomic super-step" as more than it is. A super-step is atomic **over state**: if any node in the step raises, the step's state updates are discarded and no checkpoint is written. That transaction covers the checkpointer and nothing else. A side effect a node already performed — a file written, an HTTP `POST` sent, a row inserted in another system — is *not* rolled back, because the engine has no transaction over it. On a resume the node runs again and the effect can happen twice.
+
+This is not a defect to fix. It is the delivery contract of every durable executor that does not wrap your external systems in a distributed transaction: **checkpoints give at-least-once execution; exactly-once holds only if the effect itself is idempotent.** There is an irreducible window between "the effect happened" and "the checkpoint recorded it" — a crash in that gap always risks a repeat.
+
+So the fix lives at the effect, and AgentFlow gives you `IdempotentOp` to make it explicit. Unlike `skip_if_done`, which wraps a whole node to avoid recomputing harmless work, `IdempotentOp` guards *one specific effect inside a node* with a claim → run → commit marker in a [Store](../durability/store.md):
+
+```python
+from agentflow.prebuilt import IdempotentOp, effect_key
+
+op = IdempotentOp(store, ("effects", "send_email"))
+
+async def notify(state, ctx):
+    key = effect_key("send_email", state["message_id"])
+
+    async def send():
+        # pass the SAME key downstream as the provider's idempotency token
+        return await email_api.send(state["to"], state["body"], idempotency_key=key)
+
+    receipt = await op.run(key, send, on_incomplete="error")
+    return {"receipt": receipt}
+```
+
+The state machine per key, held in one store entry so a plain `get` reads it atomically:
+
+| Prior state | `op.run` does |
+| --- | --- |
+| absent | write `in_flight`, run the effect, write `done(result)`, return it |
+| `done` | return the stored result — the effect does not run again |
+| `in_flight` | a prior attempt died mid-effect; dispatch on `on_incomplete` |
+
+`on_incomplete` is the honest part: the SDK cannot know whether an interrupted effect actually landed, so you choose per effect.
+
+| `on_incomplete` | Meaning | Use when |
+| --- | --- | --- |
+| `"error"` (default) | raise `IncompleteEffectError` | the effect is not safe to repeat — let a human or gate decide |
+| `"rerun"` | run the effect again | the effect is genuinely idempotent |
+| `"skip"` | assume it completed, return `None` | a duplicate is worse than a miss |
+
+`IdempotentOp` does not close the crash-mid-effect window — nothing at the orchestrator layer can. What actually collapses duplicates is idempotency at the effect itself; use the key `IdempotentOp` gives you as the token that carries it there:
+
+| Effect | Idempotency technique |
+| --- | --- |
+| HTTP API | send an idempotency key / dedup token the server honors |
+| File write | write a temp file, then atomic `rename` into place |
+| Database | `INSERT ... ON CONFLICT DO NOTHING`, or a unique constraint |
+| Message/queue | a dedup id the broker or consumer deduplicates on |
+
+Reach for `skip_if_done` to save work; reach for `IdempotentOp` to protect an effect.
+
 ## The one rule behind all of these
 
 Do not mix "the work" and "the decision to continue" in one node. The work node writes an artifact; a gate or router reads state and decides. That separation is what makes each super-step atomic, each checkpoint meaningful, and each resume predictable — the properties a run needs to survive being left alone for an hour.
