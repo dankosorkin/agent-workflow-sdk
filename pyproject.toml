@@ -31,6 +31,7 @@ otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
 redis = ["redis>=5"]
 postgres = ["asyncpg>=0.29"]
 prometheus = ["prometheus-client>=0.20"]
+docs = ["mkdocs-material>=9.5", "mkdocstrings[python]>=0.26"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.23",

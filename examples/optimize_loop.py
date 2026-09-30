@@ -19,6 +19,11 @@ Run: python examples/optimize_loop.py
 Shows how the old baseline->iterate->stop loop is now just a compiled graph.
 The worker here climbs toward a perfect score; swap it for one that prompts a
 real backend (KiroBackend / OllamaBackend) and scores the result.
+
+Use this when you want a self-contained optimize loop with a single score to
+climb. When you instead need an explicit checkpoint that routes three ways
+(accept / revise / escalate to a human), reach for add_quality_gate — see
+examples/quality_gate.py.
 """
 
 from __future__ import annotations

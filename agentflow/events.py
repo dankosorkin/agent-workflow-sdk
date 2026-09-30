@@ -198,7 +198,32 @@ class ErrorEvent:
     detail: dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass(frozen=True, slots=True)
+class GateEvent:
+    """A quality-gate lifecycle event, surfaced via ``ctx.emit`` so telemetry
+    and the run stream show where a process gated on quality.
+
+    ``phase`` is one of ``"started"``, ``"passed"``, ``"failed"``, or
+    ``"escalated"``. ``gate`` names the gate; ``attempt`` is the 1-based try
+    count; ``score`` and ``reasons`` mirror the evaluator's
+    :class:`~agentflow.prebuilt.GateResult`. This is an observability event —
+    it is emitted, never returned as a node update. See the
+    :doc:`quality gates guide </durability/quality-gates>`.
+    """
+
+    gate: str
+    phase: str  # "started" | "passed" | "failed" | "escalated"
+    attempt: int = 0
+    score: float | None = None
+    reasons: tuple[str, ...] = ()
+
+
 BackendEvent = TextChunk | ToolCall | ToolResult | PermissionRequest | TurnEnd | ErrorEvent
+
+#: Everything a node may pass to ``ctx.emit``: the backend vocabulary plus the
+#: run-level :class:`GateEvent`. Kept as a separate alias so the backend event
+#: union stays exactly the set a backend produces.
+EmittableEvent = BackendEvent | GateEvent
 
 
 # ---------------------------------------------------------------------------

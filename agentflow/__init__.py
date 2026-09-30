@@ -61,6 +61,7 @@ from agentflow.events import (
     ChatRequest,
     Deny,
     ErrorEvent,
+    GateEvent,
     Message,
     PermissionOption,
     PermissionRequest,
@@ -73,6 +74,11 @@ from agentflow.events import (
     TurnEnd,
 )
 from agentflow.graph import END, START, Graph, Node, Router
+from agentflow.interrupts import (
+    ClarificationRequest,
+    QualityGateReview,
+    interrupt_type,
+)
 from agentflow.observability import Hooks, NodeStat, RunMetrics
 from agentflow.redaction import RedactKeys, Redactor, redact_none
 from agentflow.runtime import Context, StreamEvent
@@ -133,8 +139,13 @@ __all__ = [
     "PermissionOption",
     "TurnEnd",
     "ErrorEvent",
+    "GateEvent",
     "Allow",
     "Deny",
+    # human-in-the-loop interrupt payloads
+    "QualityGateReview",
+    "ClarificationRequest",
+    "interrupt_type",
     # checkpointing
     "Checkpoint",
     "Checkpointer",

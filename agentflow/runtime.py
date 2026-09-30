@@ -39,7 +39,7 @@ from typing import Any
 
 from agentflow.checkpoint.base import Checkpoint
 from agentflow.errors import InterruptError, NodeError
-from agentflow.events import BackendEvent
+from agentflow.events import EmittableEvent
 from agentflow.graph import END, START, _ConditionalEdge
 from agentflow.observability import _NOOP, Hooks, _safe
 from agentflow.state import Channel, apply_updates
@@ -99,8 +99,12 @@ class Context:
     _resume: _Resume | None = field(default=None, repr=False)
     _hooks: Hooks | None = field(default=None, repr=False)
 
-    def emit(self, event: BackendEvent) -> None:
-        """Surface a backend event to the run's stream and telemetry hooks."""
+    def emit(self, event: EmittableEvent) -> None:
+        """Surface an event to the run's stream and telemetry hooks.
+
+        Accepts any backend event (``TextChunk``, ``ToolCall``, ...) or a
+        run-level :class:`~agentflow.events.GateEvent`.
+        """
         if self._emit_queue is not None:
             self._emit_queue.put_nowait(
                 StreamEvent(kind="backend", step=self.step, node=self.node, data=event)

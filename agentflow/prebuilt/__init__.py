@@ -14,6 +14,8 @@
 
 """Prebuilt graph patterns built entirely from core primitives."""
 
+from agentflow.prebuilt.gate import Evaluator, GateResult, GateState, add_quality_gate
+from agentflow.prebuilt.idempotent import artifact_key, skip_if_done
 from agentflow.prebuilt.loop import Candidate, iterate_until_converged
 from agentflow.prebuilt.resilience import with_retry, with_timeout
 from agentflow.prebuilt.tool_loop import Tool, ToolLoopState, tool_loop
@@ -21,6 +23,12 @@ from agentflow.prebuilt.tool_loop import Tool, ToolLoopState, tool_loop
 __all__ = [
     "Candidate",
     "iterate_until_converged",
+    "GateResult",
+    "GateState",
+    "Evaluator",
+    "add_quality_gate",
+    "artifact_key",
+    "skip_if_done",
     "Tool",
     "ToolLoopState",
     "tool_loop",
