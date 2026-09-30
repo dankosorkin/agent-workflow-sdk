@@ -40,25 +40,47 @@ does an effect plus other work) with a claim -> run -> commit marker in a
         return {"receipt": receipt}
 
 State machine per key, all in a single store entry so a plain ``get`` reads it
-atomically:
+in one shot:
 
 - absent   -> write ``in_flight``, run ``fn``, write ``done(result)``, return it.
 - ``done`` -> return the stored result without running ``fn`` again.
-- ``in_flight`` -> a previous attempt died between claim and commit. What to do
-  is a policy you must choose per effect (``on_incomplete``), because the SDK
-  cannot know whether the effect actually completed.
+- ``in_flight`` -> a previous attempt did not reach ``done``. What to do is a
+  policy you choose per effect (``on_incomplete``), because the SDK cannot know
+  whether the effect actually completed.
 
-## The window this does NOT close
+## Two windows this does NOT close
 
-There is an irreducible gap between "the effect happened" and "the marker says
-done". If the process dies *inside* ``fn`` — the POST left, the file is
-half-written — no ``done`` marker exists, and the next run sees ``in_flight``.
-``IdempotentOp`` cannot know if the effect landed; it can only hand you that
-fact (via ``on_incomplete``) so *you* decide. The real fix lives in the effect:
-pass the same key as an idempotency token to the API, write to a temp file and
-atomically ``rename``, use ``INSERT ... ON CONFLICT``. Use the key this
-primitive gives you as that token — that is what actually collapses duplicates
-downstream.
+First, the crash gap. There is an irreducible gap between "the effect happened"
+and "the marker says done". If the process dies *inside* ``fn`` — the POST left,
+the file is half-written — no ``done`` marker exists and the next run sees
+``in_flight``; the SDK cannot know if the effect landed.
+
+Second, the lost-response case, which happens even without a crash: ``fn``
+performs the effect and then raises (a `TimeoutError` reading the response of a
+`POST` that already succeeded). An exception does not prove the effect did not
+happen. ``on_error`` controls the marker here — ``"keep"`` (default) preserves
+``in_flight`` so the next attempt decides via ``on_incomplete``; ``"release"``
+drops it and the retry re-runs the effect, which duplicates it unless the effect
+is idempotent. So ``on_incomplete="error"`` protects the crash gap, but with
+``on_error="release"`` it does **not** protect the lost-response case — the
+marker is already gone.
+
+The real fix for both lives in the effect itself, keyed idempotency downstream:
+pass the same key as an idempotency token to the API, write to a temp file at a
+*stable* destination path with deterministic content and atomically ``rename``,
+use ``INSERT ... ON CONFLICT``. Use the key this primitive gives you as that
+token — that is what actually collapses duplicates.
+
+## Concurrency: a marker, not a lock
+
+The claim is a ``get`` then a ``put``, **not** an atomic compare-and-set. Two
+workers can both read ``absent`` for the same key and both run the effect —
+``IdempotentOp`` does not arbitrate concurrent writers. Its guarantee holds for
+a single writer per key (the common case: one run, retried sequentially over
+time). Under real concurrency, correctness must come from idempotency at the
+effect keyed by the same token, exactly as the lost-response case demands. The
+:class:`~agentflow.store.Store` protocol has no conditional write, so this is a
+documented boundary, not something the primitive silently papers over.
 
 ## IdempotentOp vs skip_if_done
 
@@ -85,6 +107,7 @@ __all__ = ["IdempotentOp", "IncompleteEffectError", "effect_key"]
 T = TypeVar("T")
 
 OnIncomplete = Literal["error", "rerun", "skip"]
+OnError = Literal["keep", "release"]
 
 _IN_FLIGHT = "in_flight"
 _DONE = "done"
@@ -149,18 +172,38 @@ class IdempotentOp:
         fn: Callable[[], Awaitable[T]],
         *,
         on_incomplete: OnIncomplete = "error",
+        on_error: OnError = "keep",
         ttl: float | None = None,
     ) -> T:
         """Run ``fn`` unless this ``key`` already completed; return its result.
 
         - Completed before: returns the stored result, ``fn`` is not called.
         - Never started: writes an ``in_flight`` marker, awaits ``fn``, stores
-          the result as ``done``, returns it. If ``fn`` raises, the marker is
-          removed so a later attempt starts clean, and the exception propagates.
-        - Left ``in_flight`` by a dead attempt: dispatch on ``on_incomplete`` —
+          the result as ``done``, returns it.
+        - Left ``in_flight`` by a prior attempt: dispatch on ``on_incomplete`` —
           ``"error"`` raises :class:`IncompleteEffectError` (safe default);
           ``"rerun"`` runs ``fn`` again (only when the effect is idempotent);
           ``"skip"`` assumes it completed and returns ``None``.
+
+        If ``fn`` raises, ``on_error`` decides what the marker is left as, and
+        this is a genuine choice you must make — an exception does **not** prove
+        the effect did not happen. A `TimeoutError` reading the response of a
+        `POST` that already succeeded is an exception *after* the effect landed.
+
+        - ``"keep"`` (default): leave the ``in_flight`` marker, so the next
+          attempt hits ``on_incomplete`` and decides deliberately. This is the
+          safe default for a non-idempotent effect, because it does not assume
+          the effect was skipped.
+        - ``"release"``: remove the marker so the next attempt starts from
+          ``absent`` and re-runs ``fn`` on the clean path. Correct **only** when
+          the exception reliably means the effect did not happen (e.g. a
+          connect error before any request was sent). With ``"release"``,
+          ``on_incomplete="error"`` cannot protect you from an
+          effect-with-a-lost-response — the marker is gone, so the retry just
+          runs the effect again. Use ``"release"`` only with downstream
+          idempotency (see the class docstring).
+
+        In both cases the exception propagates after the marker is handled.
 
         The stored result must be JSON-serializable (it round-trips through the
         store). Return an id or receipt, not a live object.
@@ -174,15 +217,18 @@ class IdempotentOp:
             if status == _DONE:
                 return record.get("result")  # type: ignore[no-any-return]
             if status == _IN_FLIGHT:
-                return await self._handle_incomplete(key, fn, on_incomplete, effective_ttl)
+                return await self._handle_incomplete(
+                    key, fn, on_incomplete, on_error, effective_ttl
+                )
 
-        return await self._claim_run_commit(key, fn, effective_ttl)
+        return await self._claim_run_commit(key, fn, on_error, effective_ttl)
 
     async def _handle_incomplete(
         self,
         key: str,
         fn: Callable[[], Awaitable[T]],
         on_incomplete: OnIncomplete,
+        on_error: OnError,
         ttl: float | None,
     ) -> T:
         if on_incomplete == "error":
@@ -190,26 +236,31 @@ class IdempotentOp:
         if on_incomplete == "skip":
             return None  # type: ignore[return-value]
         # "rerun": the effect is declared idempotent, so run it again and commit.
-        return await self._claim_run_commit(key, fn, ttl)
+        return await self._claim_run_commit(key, fn, on_error, ttl)
 
     async def _claim_run_commit(
         self,
         key: str,
         fn: Callable[[], Awaitable[T]],
+        on_error: OnError,
         ttl: float | None,
     ) -> T:
-        # Claim: mark in-flight before touching the outside world, so a crash
-        # inside fn is visible as an interrupted effect on the next attempt.
+        # Claim: mark in-flight before touching the outside world. NOTE this is
+        # a get-then-put, not an atomic compare-and-set — see the class
+        # docstring on concurrency. It exists so an interrupted attempt is
+        # visible as in_flight on the next try, not to arbitrate two writers.
         await self._store.put(self._namespace, key, {"status": _IN_FLIGHT}, ttl=ttl)
         try:
             result = await fn()
         except BaseException:
-            # fn raised in-process, so control returned to us: treat the effect
-            # as not committed and drop the claim, letting a later attempt start
-            # from 'absent'. (A hard crash mid-fn runs no handler, so the
-            # 'in_flight' marker survives and on_incomplete decides next time —
-            # that is the irreducible window this primitive surfaces.)
-            await self._store.delete(self._namespace, key)
+            # fn raised, but that does NOT prove the effect did not happen (the
+            # response may have been lost after the effect landed). on_error is
+            # the deliberate choice: "release" drops the marker (retry re-runs
+            # on the clean path — only safe if the exception means "not done");
+            # "keep" leaves in_flight so the next attempt's on_incomplete
+            # decides. Either way the exception propagates.
+            if on_error == "release":
+                await self._store.delete(self._namespace, key)
             raise
         # Commit: record the result so any later attempt short-circuits.
         await self._store.put(self._namespace, key, {"status": _DONE, "result": result}, ttl=ttl)

@@ -64,7 +64,7 @@ async def test_distinct_keys_run_independently():
 # --- failure inside fn drops the claim so a retry starts clean ---
 
 
-async def test_exception_in_fn_drops_claim_and_reraises():
+async def test_exception_with_release_drops_claim_and_reraises():
     store = MemoryStore()
     op = IdempotentOp(store, NS)
     attempts = {"n": 0}
@@ -75,13 +75,76 @@ async def test_exception_in_fn_drops_claim_and_reraises():
             raise RuntimeError("boom")
         return {"ok": True}
 
+    # on_error="release": the exception means "not done", so drop the claim.
     with pytest.raises(RuntimeError, match="boom"):
-        await op.run("k", flaky)
-    # claim was removed, so a later attempt runs fn again and can succeed
-    assert await store.get(NS, "k") is None
-    result = await op.run("k", flaky)
+        await op.run("k", flaky, on_error="release")
+    assert await store.get(NS, "k") is None  # claim removed
+    result = await op.run("k", flaky)  # starts from absent, runs again
     assert result == {"ok": True}
     assert attempts["n"] == 2
+
+
+async def test_exception_with_keep_default_leaves_in_flight():
+    # The default on_error="keep": an exception does NOT prove the effect was
+    # skipped, so the marker stays in_flight for the next attempt to decide.
+    store = MemoryStore()
+    op = IdempotentOp(store, NS)
+
+    async def raises():
+        raise TimeoutError("lost response after the effect landed")
+
+    with pytest.raises(TimeoutError):
+        await op.run("k", raises)  # default keep
+    marker = await store.get(NS, "k")
+    assert marker is not None and marker.value["status"] == "in_flight"
+
+
+async def test_lost_response_then_error_refuses_to_repeat():
+    # The scenario the primitive exists for: effect delivered, response lost,
+    # retry must not blindly re-deliver.
+    store = MemoryStore()
+    op = IdempotentOp(store, NS)
+    delivered = {"n": 0}
+
+    async def deliver_then_lose_response():
+        delivered["n"] += 1
+        raise TimeoutError("response lost")
+
+    with pytest.raises(TimeoutError):
+        await op.run("k", deliver_then_lose_response)  # keep leaves in_flight
+
+    async def deliver():
+        delivered["n"] += 1
+        return {"ok": True}
+
+    # The retry sees in_flight and refuses to repeat a non-idempotent effect.
+    with pytest.raises(IncompleteEffectError):
+        await op.run("k", deliver, on_incomplete="error")
+    assert delivered["n"] == 1  # no second delivery
+
+
+async def test_release_does_not_protect_lost_response():
+    # Documents the honest limit: with on_error="release", a lost-response
+    # exception drops the marker, so on_incomplete="error" cannot help — the
+    # retry re-runs the effect. Exactly-once then depends on downstream keying.
+    store = MemoryStore()
+    op = IdempotentOp(store, NS)
+    delivered = {"n": 0}
+
+    async def deliver_then_lose():
+        delivered["n"] += 1
+        raise TimeoutError("response lost")
+
+    with pytest.raises(TimeoutError):
+        await op.run("k", deliver_then_lose, on_error="release")
+    assert await store.get(NS, "k") is None  # marker gone
+
+    async def deliver():
+        delivered["n"] += 1
+        return {"ok": True}
+
+    await op.run("k", deliver, on_incomplete="error")  # absent -> runs again
+    assert delivered["n"] == 2  # duplicate, as documented
 
 
 # --- interrupted in-flight: each policy ---

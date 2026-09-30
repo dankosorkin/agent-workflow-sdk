@@ -133,13 +133,13 @@ async def notify(state, ctx):
     return {"receipt": receipt}
 ```
 
-The state machine per key, held in one store entry so a plain `get` reads it atomically:
+The state machine per key is held in one store entry so a plain `get` reads it in one shot:
 
 | Prior state | `op.run` does |
 | --- | --- |
 | absent | write `in_flight`, run the effect, write `done(result)`, return it |
 | `done` | return the stored result — the effect does not run again |
-| `in_flight` | a prior attempt died mid-effect; dispatch on `on_incomplete` |
+| `in_flight` | a prior attempt did not reach `done`; dispatch on `on_incomplete` |
 
 `on_incomplete` is the honest part: the SDK cannot know whether an interrupted effect actually landed, so you choose per effect.
 
@@ -149,16 +149,29 @@ The state machine per key, held in one store entry so a plain `get` reads it ato
 | `"rerun"` | run the effect again | the effect is genuinely idempotent |
 | `"skip"` | assume it completed, return `None` | a duplicate is worse than a miss |
 
-`IdempotentOp` does not close the crash-mid-effect window — nothing at the orchestrator layer can. What actually collapses duplicates is idempotency at the effect itself; use the key `IdempotentOp` gives you as the token that carries it there:
+A `done` marker only appears when the effect returned cleanly, so this reliably catches a hard crash mid-effect. But an exception is trickier — and it is a second, separate window.
+
+When `fn` raises, the effect may still have happened: a `TimeoutError` reading the response of a `POST` that already went through is an exception *after* delivery. `on_error` decides what the marker is left as:
+
+| `on_error` | Meaning | Use when |
+| --- | --- | --- |
+| `"keep"` (default) | leave `in_flight` so the next attempt hits `on_incomplete` | the exception does not prove the effect was skipped (the safe default) |
+| `"release"` | drop the marker; the retry re-runs the effect | the exception reliably means "not done" (e.g. a connect error before any request left) |
+
+The consequence to internalize: `on_incomplete="error"` protects the crash window, but with `on_error="release"` it does **not** protect the lost-response window — the marker is already gone, so the retry simply runs the effect again.
+
+One more boundary: the claim is a `get` then a `put`, **not** an atomic compare-and-set. Two workers can both read `absent` for the same key and both run the effect. `IdempotentOp`'s guarantee holds for a single writer per key (one run, retried sequentially over time); under real concurrency, correctness must come from idempotency at the effect.
+
+So `IdempotentOp` narrows the duplicate window and makes every ambiguous case an explicit decision — but it does not, and cannot, close it at the orchestrator layer. What actually collapses duplicates is idempotency at the effect itself; use the key `IdempotentOp` gives you as the token that carries it there:
 
 | Effect | Idempotency technique |
 | --- | --- |
 | HTTP API | send an idempotency key / dedup token the server honors |
-| File write | write a temp file, then atomic `rename` into place |
+| File write | write a temp file, then atomic `rename` to a *stable* destination path; the retry must produce the same path and the same content for the replace to be idempotent |
 | Database | `INSERT ... ON CONFLICT DO NOTHING`, or a unique constraint |
 | Message/queue | a dedup id the broker or consumer deduplicates on |
 
-Reach for `skip_if_done` to save work; reach for `IdempotentOp` to protect an effect.
+Reach for `skip_if_done` to save work; reach for `IdempotentOp` to protect an effect. `examples/idempotent_effect.py` is a runnable walk-through: an effect whose response is lost, the retry that `IdempotentOp` stops, and a downstream store that deduplicates on the same key.
 
 ## The one rule behind all of these
 

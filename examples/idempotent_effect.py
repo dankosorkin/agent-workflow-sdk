@@ -12,93 +12,88 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Protecting a side effect with IdempotentOp so a re-run does not duplicate it.
+"""IdempotentOp under a realistic failure: a delivered effect whose response is lost.
 
 Run: python examples/idempotent_effect.py
 
-A node "sends" a notification — a stand-in for any real external effect (an
-HTTP POST, an email, a file write). Because a super-step is atomic only over
-state, a crash or a resume can run the node again, and without protection the
-notification would go out twice. IdempotentOp records a claim -> done marker in
-a Store keyed by the message, so the effect fires exactly once even though the
-node body runs in two separate graph invocations.
+A super-step is atomic only over state, so a resume can run a node again and
+repeat its side effect. This example models the hard case honestly:
 
-The last part shows the honest edge: an attempt that died mid-effect leaves an
-"in_flight" marker, and the on_incomplete policy decides what happens next.
-Everything here is in-memory so it runs offline.
+1. The effect (a stand-in "delivery") succeeds, but reading its response fails
+   with a TimeoutError — so the node raises *after* the effect already landed.
+2. IdempotentOp with the default ``on_error="keep"`` leaves an ``in_flight``
+   marker (an exception does not prove the effect was skipped).
+3. The retry sees ``in_flight`` and, with ``on_incomplete="error"``, refuses to
+   blindly repeat — it surfaces the ambiguity instead of double-delivering.
+4. Finally we show what actually collapses a duplicate end-to-end: the
+   downstream system deduplicates on the effect key, so even a re-run is safe.
+
+Everything is in-memory, so it runs offline. The "network" is a function that
+delivers to a keyed outbox and then loses its response the first time.
 """
 
 from __future__ import annotations
 
 import asyncio
-from typing import Annotated
 
-from agentflow import END, START, Graph, MemoryStore, State, last
+from agentflow import MemoryStore
 from agentflow.prebuilt import IdempotentOp, IncompleteEffectError, effect_key
 
-# A stand-in "outbox" for a real external system. Every entry here is one
-# notification actually delivered to the outside world.
-SENT: list[str] = []
+# The downstream system. It deduplicates on the idempotency key: a delivery
+# with a key it has already seen is recorded once. This is the real
+# exactly-once mechanism — the orchestrator cannot provide it.
+DELIVERED: dict[str, str] = {}
 
 
-class NotifyState(State):
-    user: Annotated[str, last]
-    message_id: Annotated[str, last]
-    receipt: Annotated[str, last]
+async def deliver(idempotency_key: str, payload: str) -> str:
+    """Deliver to the keyed outbox. Idempotent: a repeat key is a no-op."""
+    if idempotency_key not in DELIVERED:
+        DELIVERED[idempotency_key] = payload
+    return f"receipt:{idempotency_key[:8]}"
 
 
 async def main() -> None:
     store = MemoryStore()
-    op = IdempotentOp(store, ("effects", "notify"))
+    op = IdempotentOp(store, ("effects", "deliver"))
+    key = effect_key("deliver", "msg-42")
+    payload = "hello ada"
 
-    async def notify(state, ctx):
-        # The key identifies the effect. Pass it to the real API as its
-        # idempotency token too, so duplicates also collapse downstream.
-        key = effect_key("notify", state["message_id"])
+    # --- Attempt 1: the effect lands, but the response is lost ---
+    print("Attempt 1: effect succeeds, then the response is lost")
 
-        async def send():
-            # The real effect. Runs at most once per key.
-            line = f"-> {state['user']}: hello (msg {state['message_id']})"
-            SENT.append(line)
-            return {"delivered_to": state["user"], "token": key[:8]}
-
-        receipt = await op.run(key, send, on_incomplete="error")
-        return {"receipt": receipt["token"]}
-
-    g = Graph(NotifyState)
-    g.add_node("notify", notify)
-    g.add_edge(START, "notify")
-    g.add_edge("notify", END)
-    app = g.compile()
-
-    payload = {"user": "ada", "message_id": "m-42"}
-
-    print("First run:")
-    out1 = await app.invoke(payload, thread="run-1")
-    print(f"  receipt={out1['receipt']}  outbox size={len(SENT)}")
-
-    print("Second run (a resume / retry with the same message):")
-    out2 = await app.invoke(payload, thread="run-2")
-    print(f"  receipt={out2['receipt']}  outbox size={len(SENT)}")
-
-    print(f"\nDelivered exactly once despite two runs: {SENT}")
-    assert len(SENT) == 1, "effect should have fired exactly once"
-
-    # --- the interrupted-in-flight case ---
-    print("\nNow simulate an attempt that died mid-effect (an in_flight marker):")
-    stuck_key = effect_key("notify", "m-99")
-    await store.put(("effects", "notify"), stuck_key, {"status": "in_flight"})
-
-    async def send_stuck():
-        SENT.append("-> bob: hello (msg m-99)")
-        return {"delivered_to": "bob"}
+    async def send_but_lose_response():
+        await deliver(key, payload)  # <- actually delivered
+        raise TimeoutError("connection dropped before the receipt came back")
 
     try:
-        await op.run(stuck_key, send_stuck, on_incomplete="error")
-    except IncompleteEffectError as exc:
-        print(f"  on_incomplete='error' refused to guess: {type(exc).__name__}")
-        print("  -> a human or a higher-level gate now decides whether it landed.")
-    print(f"  outbox unchanged: {len(SENT)} delivered")
+        await op.run(key, send_but_lose_response, on_incomplete="error", on_error="keep")
+    except TimeoutError as exc:
+        print(f"  node raised: {exc}")
+    marker = await store.get(("effects", "deliver"), key)
+    print(f"  marker left as: {marker.value['status']!r}  (delivered so far: {len(DELIVERED)})")
+
+    # --- Attempt 2 (the resume): IdempotentOp refuses to guess ---
+    print("\nAttempt 2 (resume): on_incomplete='error' will not blindly repeat")
+
+    async def send_again():
+        await deliver(key, payload)
+        return "receipt"
+
+    try:
+        await op.run(key, send_again, on_incomplete="error")
+        print("  ERROR: should not have run")
+    except IncompleteEffectError:
+        print(f"  refused — a human/gate decides. deliveries still: {len(DELIVERED)}")
+
+    # --- What makes a retry safe: downstream dedup on the same key ---
+    print("\nSuppose the operator judges it safe to retry (effect is keyed):")
+    receipt = await op.run(key, send_again, on_incomplete="rerun")
+    print(f"  reran with on_incomplete='rerun' -> {receipt}")
+    print(f"  downstream deduplicated on the key: deliveries = {len(DELIVERED)}")
+    assert len(DELIVERED) == 1, "the keyed outbox must hold exactly one delivery"
+
+    print("\nExactly-once held because the effect itself is keyed;")
+    print("IdempotentOp narrowed the window and forced the decision to be explicit.")
 
 
 if __name__ == "__main__":

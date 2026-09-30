@@ -34,12 +34,17 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - Effect-level idempotency (`agentflow.prebuilt`): `IdempotentOp(store,
   namespace)` protects one side effect inside a node with a claim → run →
   commit marker in a `Store`, so a resume or retry does not repeat it. Its
-  `on_incomplete` policy (`"error"` default, `"rerun"`, `"skip"`) makes the
-  interrupted-mid-effect case an explicit choice rather than a silent repeat,
-  and `effect_key(*parts)` builds a stable token to pass downstream as the
-  provider's idempotency key. New `IncompleteEffectError`. This gives
-  exactly-once *effects* on top of the engine's at-least-once execution;
-  checkpoints alone cannot, since a super-step is atomic over state only.
+  `on_incomplete` policy (`"error"` default, `"rerun"`, `"skip"`) handles a
+  prior attempt left `in_flight`, and `on_error` (`"keep"` default,
+  `"release"`) controls the marker when `fn` raises — because an exception does
+  not prove the effect was skipped (a lost response after a successful `POST`).
+  `effect_key(*parts)` builds a stable token to pass downstream as the
+  provider's idempotency key. New `IncompleteEffectError`. This narrows the
+  duplicate window and makes every ambiguous case explicit, but does not close
+  it: exactly-once ultimately needs idempotency at the effect (the claim is a
+  marker, not an atomic lock; concurrent writers must rely on downstream
+  keying). Checkpoints alone give only at-least-once, since a super-step is
+  atomic over state only.
 
 ### Fixed
 
