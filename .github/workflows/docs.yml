@@ -1,0 +1,48 @@
+name: Docs
+
+# Build the mkdocs site and deploy it to GitHub Pages on a version tag, or on
+# demand from the Actions tab. Enable Pages once (Settings -> Pages -> Source:
+# GitHub Actions) for the deploy step to publish.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+# Allow one concurrent deploy; a newer run supersedes an in-flight one.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install docs extra
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e '.[docs]'
+      - name: Build the site (strict)
+        run: mkdocs build --strict
+      - name: Upload the Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
