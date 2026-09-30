@@ -242,9 +242,7 @@ class IdempotentOp:
         # conditional write raises StoreConflict; re-read and dispatch on what
         # they left (in_flight or done) instead of running the effect too.
         try:
-            return await self._claim_run_commit(
-                key, fn, on_error, effective_ttl, conditional=True
-            )
+            return await self._claim_run_commit(key, fn, on_error, effective_ttl, conditional=True)
         except StoreConflict:
             current = await self._store.get(self._namespace, key)
             if current is None:

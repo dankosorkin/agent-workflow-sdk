@@ -149,9 +149,7 @@ async def test_duplicate_gate_name_rejected():
     g = Graph(S)
     g.add_node("review", _publish)
     with pytest.raises(ValueError, match="already exists"):
-        add_quality_gate(
-            g, "review", _fake_eval, on_pass=END, on_fail=END, on_escalate=END
-        )
+        add_quality_gate(g, "review", _fake_eval, on_pass=END, on_fail=END, on_escalate=END)
 
 
 async def test_max_attempts_must_be_positive():

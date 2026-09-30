@@ -72,9 +72,7 @@ async def test_distinct_keys_run_separately():
         calls["n"] += 1
         return {"result": state["seed"]}
 
-    node = skip_if_done(
-        work, store, namespace=("c",), key_from=lambda s: artifact_key(s["seed"])
-    )
+    node = skip_if_done(work, store, namespace=("c",), key_from=lambda s: artifact_key(s["seed"]))
     await node({"seed": 1}, None)
     await node({"seed": 2}, None)
     await node({"seed": 1}, None)  # cached
@@ -136,9 +134,7 @@ async def test_ttl_is_passed_through():
         calls["n"] += 1
         return {"x": 1}
 
-    node = skip_if_done(
-        work, store, namespace=("c",), key_from=lambda s: "k", ttl=-1.0
-    )
+    node = skip_if_done(work, store, namespace=("c",), key_from=lambda s: "k", ttl=-1.0)
     await node({}, None)
     await node({}, None)
     assert calls["n"] == 2

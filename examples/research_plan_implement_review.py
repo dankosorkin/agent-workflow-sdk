@@ -74,8 +74,9 @@ async def replan(state, ctx) -> dict:
 
 async def evaluate_plan(state, ctx) -> GateResult:
     ok = state.get("plan_detail", 0) >= 2
-    return GateResult(passed=ok, score=float(state.get("plan_detail", 0)),
-                      reasons=[] if ok else ["plan too thin"])
+    return GateResult(
+        passed=ok, score=float(state.get("plan_detail", 0)), reasons=[] if ok else ["plan too thin"]
+    )
 
 
 async def _implement(state, ctx) -> dict:
@@ -120,12 +121,22 @@ def build_graph(store) -> Graph:
     g.add_node("escalate", escalate)
 
     add_quality_gate(
-        g, "plan_gate", evaluate_plan,
-        on_pass="implement", on_fail="replan", on_escalate="escalate", max_attempts=4,
+        g,
+        "plan_gate",
+        evaluate_plan,
+        on_pass="implement",
+        on_fail="replan",
+        on_escalate="escalate",
+        max_attempts=4,
     )
     add_quality_gate(
-        g, "review_gate", evaluate_review,
-        on_pass="done", on_fail="revise", on_escalate="escalate", max_attempts=3,
+        g,
+        "review_gate",
+        evaluate_review,
+        on_pass="done",
+        on_fail="revise",
+        on_escalate="escalate",
+        max_attempts=3,
     )
 
     g.add_edge(START, "research")
