@@ -31,6 +31,14 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   reference (mkdocstrings), and the `examples/quality_gate.py` and
   `examples/research_plan_implement_review.py` examples.
 
+### Fixed
+
+- `import agentflow.prebuilt` no longer requires the `ollama`/`httpx` extra.
+  `httpx` is now imported lazily inside `open_stream`, so the `backends`
+  package (and `RetryPolicy`) and the prebuilt patterns load dependency-free;
+  `httpx` is pulled in only when an HTTP stream is actually opened by a
+  concrete LLM backend.
+
 ## [0.1.1] - 2026-09-29
 
 ### Added

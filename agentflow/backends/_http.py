@@ -41,11 +41,12 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any
-
-import httpx
+from typing import TYPE_CHECKING, Any
 
 from agentflow.errors import BackendRateLimitError, BackendTransportError
+
+if TYPE_CHECKING:
+    import httpx
 
 __all__ = ["RetryPolicy", "open_stream"]
 
@@ -117,6 +118,8 @@ async def open_stream(
     """
     pol = policy or RetryPolicy(max_retries=0)
     # Resolve the sleeper at call time so tests can monkeypatch asyncio.sleep.
+    import httpx  # local: keep RetryPolicy importable without the http extra
+
     if sleep is None:
         sleep = asyncio.sleep
     attempt = 0
