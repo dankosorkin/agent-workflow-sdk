@@ -4,6 +4,33 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Quality gates (`agentflow.prebuilt`): `add_quality_gate(g, name, evaluator,
+  *, on_pass, on_fail, on_escalate, max_attempts=3)` adds a checked
+  accept/revise/escalate checkpoint built from a conditional edge and a
+  per-gate attempt counter. An evaluator returns a `GateResult(passed, score,
+  reasons, feedback)`; mix `GateState` into a schema for the `gate_attempts`
+  and `gate_results` channels. All three routes are required so a gate never
+  silently ships a failing artifact once attempts run out.
+- `GateEvent` (`agentflow.events`): a gate emits `started` / `passed` /
+  `failed` / `escalated` via `ctx.emit`, so `RunMetrics`, `JsonlTelemetry`, and
+  the run stream show every gate decision. `Context.emit` now accepts a
+  backend event or a `GateEvent`.
+- Idempotency helpers (`agentflow.prebuilt`): `skip_if_done(node, store, *,
+  namespace, key_from, ttl=None)` runs a node once per distinct key and serves
+  the cached update from a `Store` thereafter; `artifact_key(value)` is a
+  stable content hash to key it by.
+- Structured interrupt-payload convention (`agentflow.interrupts`):
+  `QualityGateReview` and `ClarificationRequest` (each with `.to_payload()`
+  carrying a `type` discriminator) plus `interrupt_type(payload)`, generalizing
+  the `PermissionRequest` shape so a UI or control plane can render any pause.
+- Docs: "Quality gates" and "Long-running loops" chapters, a generated API
+  reference (mkdocstrings), and the `examples/quality_gate.py` and
+  `examples/research_plan_implement_review.py` examples.
+
 ## [0.1.1] - 2026-09-29
 
 ### Added
