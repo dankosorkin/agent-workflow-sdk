@@ -110,3 +110,51 @@ async def test_empty_namespace_rejected():
         await s.put(("",), "k", 1)
     with pytest.raises(ValueError):
         await s.put((), "k", 1)  # empty namespace is not addressable
+
+
+# --- conditional write: put(if_absent=True) ---
+
+
+async def test_if_absent_first_write_succeeds():
+    s = _store()
+    item = await s.put(("claims",), "k", {"status": "in_flight"}, if_absent=True)
+    assert item.value == {"status": "in_flight"}
+
+
+async def test_if_absent_second_write_conflicts():
+    from agentflow import StoreConflict
+
+    s = _store()
+    await s.put(("claims",), "k", 1, if_absent=True)
+    with pytest.raises(StoreConflict) as ei:
+        await s.put(("claims",), "k", 2, if_absent=True)
+    assert ei.value.namespace == ("claims",)
+    assert ei.value.key == "k"
+    # the live value is unchanged by the failed conditional write
+    assert (await s.get(("claims",), "k")).value == 1
+
+
+async def test_if_absent_ignores_unconditional_write():
+    # A normal put still overwrites; if_absent only guards when set.
+    s = _store()
+    await s.put(("ns",), "k", 1, if_absent=True)
+    await s.put(("ns",), "k", 2)  # unconditional, no conflict
+    assert (await s.get(("ns",), "k")).value == 2
+
+
+async def test_if_absent_reclaims_expired_key():
+    # An expired item counts as absent, so its key can be claimed again.
+    s = _store()
+    await s.put(("ns",), "k", "old", ttl=0.05, if_absent=True)
+    await asyncio.sleep(0.08)
+    item = await s.put(("ns",), "k", "new", if_absent=True)  # no conflict
+    assert item.value == "new"
+
+
+async def test_if_absent_resets_created_at_on_reclaim():
+    # Reclaiming an expired key is a fresh insert, not an upsert.
+    s = _store()
+    first = await s.put(("ns",), "k", 1, ttl=0.05, if_absent=True)
+    await asyncio.sleep(0.08)
+    second = await s.put(("ns",), "k", 2, if_absent=True)
+    assert second.created_at >= first.created_at

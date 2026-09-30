@@ -29,6 +29,7 @@ import json
 from datetime import datetime
 from typing import Any
 
+from agentflow.errors import StoreConflict
 from agentflow.store._util import validate_namespace
 from agentflow.store.base import Item, Namespace
 
@@ -138,11 +139,39 @@ class PostgresStore:
         value: Any,
         *,
         ttl: float | None = None,
+        if_absent: bool = False,
     ) -> Item:
         validate_namespace(namespace)
         pool = await self._get_pool()
         blob = json.dumps(value, ensure_ascii=False)
         expires = f"NOW() + make_interval(secs => {float(ttl)})" if ttl is not None else "NULL"
+
+        if if_absent:
+            # Atomic claim: insert if the key is free, or overwrite only if the
+            # existing row is expired (an expired row counts as absent, so its
+            # created_at is reset). A LIVE row makes the DO UPDATE ... WHERE
+            # no-op, so no row is RETURNED — that is the lost claim.
+            row = await pool.fetchrow(
+                f"""
+                INSERT INTO {self.table} (namespace, key, value, expires_at)
+                VALUES ($1, $2, $3::jsonb, {expires})
+                ON CONFLICT (namespace, key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    created_at = NOW(),
+                    updated_at = NOW(),
+                    expires_at = EXCLUDED.expires_at
+                WHERE {self.table}.expires_at IS NOT NULL
+                  AND {self.table}.expires_at <= NOW()
+                RETURNING namespace, key, value, created_at, updated_at, expires_at
+                """,
+                list(namespace),
+                key,
+                blob,
+            )
+            if row is None:
+                raise StoreConflict(namespace, key)
+            return self._row_to_item(row)
+
         row = await pool.fetchrow(
             f"""
             INSERT INTO {self.table} (namespace, key, value, expires_at)

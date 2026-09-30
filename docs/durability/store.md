@@ -61,6 +61,23 @@ await store.put(("cache",), "doc-42", payload, ttl=3600)   # gone after an hour
 
 This makes a `Store` a natural cache as well as a memory: durable where you want permanence, self-expiring where you want freshness.
 
+## Atomic claim with `if_absent`
+
+`put(..., if_absent=True)` is a conditional create: it writes only if no live item exists at the key, and raises `StoreConflict` if one does. An expired item counts as absent, so its key can be reclaimed. Two writers racing the same key produce exactly one winner and one conflict — an atomic single-flight, within a process for `MemoryStore` and across processes for `PostgresStore` (a single conditional `INSERT`).
+
+```python
+from agentflow import StoreConflict
+
+try:
+    await store.put(("claims",), job_id, {"status": "running"}, if_absent=True)
+    # we won the claim — do the work
+except StoreConflict:
+    # someone else claimed it first — back off or read their result
+    ...
+```
+
+This is the primitive behind [`IdempotentOp`](../patterns/long-running-loops.md#side-effects-and-delivery-semantics), which uses it to run a side effect at most once per key.
+
 ## Listing and paginating
 
 `search` and `list_namespaces` both paginate with `limit` and `offset`.

@@ -31,6 +31,8 @@ __all__ = [
     "BackendRateLimitError",
     "CheckpointError",
     "CheckpointConflict",
+    "StoreError",
+    "StoreConflict",
     "ControlPlaneError",
     "RunNotFound",
     "InterruptError",
@@ -136,6 +138,22 @@ class CheckpointConflict(CheckpointError):
             f"checkpoint conflict on {thread!r} step {step}: "
             f"expected revision {expected}, found {actual}"
         )
+
+
+class StoreError(AgentFlowError):
+    """A store operation could not be completed."""
+
+
+class StoreConflict(StoreError):
+    """A conditional store write (``put(..., if_absent=True)``) failed because a
+    live item already exists at ``(namespace, key)`` — another writer claimed it
+    first. The loser re-reads and reacts (e.g. treats the effect as already
+    in-flight or done). This is what makes a claim an atomic single-flight."""
+
+    def __init__(self, namespace: tuple[str, ...], key: str):
+        self.namespace = namespace
+        self.key = key
+        super().__init__(f"store conflict: {key!r} under {namespace} already exists")
 
 
 class RunTimeout(GraphError):

@@ -70,12 +70,23 @@ class Store(Protocol):
         value: Any,
         *,
         ttl: float | None = None,
+        if_absent: bool = False,
     ) -> Item:
         """Upsert ``value`` at ``(namespace, key)`` and return the stored item.
 
         ``ttl`` is a lifetime in seconds from now; ``None`` means no expiry. An
         upsert preserves the original ``created_at`` and refreshes
         ``updated_at``.
+
+        When ``if_absent`` is True the write is conditional: it succeeds only if
+        no live item exists at ``(namespace, key)``, otherwise it raises
+        :class:`~agentflow.errors.StoreConflict`. An expired item counts as
+        absent, so its key can be reclaimed. This is an atomic create — two
+        writers racing the same key give exactly one winner and one conflict —
+        which is how a single-flight claim is built (see
+        :class:`~agentflow.prebuilt.IdempotentOp`). ``if_absent`` ignores no
+        other semantics: a successful conditional write behaves like a first
+        insert (fresh ``created_at``).
         """
         ...
 

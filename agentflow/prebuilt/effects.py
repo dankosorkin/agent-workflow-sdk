@@ -71,16 +71,19 @@ pass the same key as an idempotency token to the API, write to a temp file at a
 use ``INSERT ... ON CONFLICT``. Use the key this primitive gives you as that
 token — that is what actually collapses duplicates.
 
-## Concurrency: a marker, not a lock
+## Concurrency: an atomic claim
 
-The claim is a ``get`` then a ``put``, **not** an atomic compare-and-set. Two
-workers can both read ``absent`` for the same key and both run the effect —
-``IdempotentOp`` does not arbitrate concurrent writers. Its guarantee holds for
-a single writer per key (the common case: one run, retried sequentially over
-time). Under real concurrency, correctness must come from idempotency at the
-effect keyed by the same token, exactly as the lost-response case demands. The
-:class:`~agentflow.store.Store` protocol has no conditional write, so this is a
-documented boundary, not something the primitive silently papers over.
+The claim is an atomic conditional write — :meth:`Store.put(..., if_absent=True)
+<agentflow.store.Store.put>` — not a plain get-then-put. Two workers racing the
+same key give exactly one winner (who runs the effect) and one
+:class:`~agentflow.errors.StoreConflict` (who re-reads and defers to the
+winner's marker). So the "both saw absent and both ran" race is closed, as far
+as the store can see it: `MemoryStore` is atomic within a process, and
+`PostgresStore` is atomic across processes via a single conditional `INSERT`.
+
+That still does not make the *effect* exactly-once — the winner can crash or
+lose its response inside ``fn`` (the windows above). The atomic claim removes
+the duplicate-*starter* race; keyed idempotency downstream removes the rest.
 
 ## IdempotentOp vs skip_if_done
 
@@ -99,7 +102,7 @@ import json
 from collections.abc import Awaitable, Callable
 from typing import Any, Literal, TypeVar
 
-from agentflow.errors import AgentFlowError
+from agentflow.errors import AgentFlowError, StoreConflict
 from agentflow.store.base import Namespace, Store
 
 __all__ = ["IdempotentOp", "IncompleteEffectError", "effect_key"]
@@ -111,6 +114,9 @@ OnError = Literal["keep", "release"]
 
 _IN_FLIGHT = "in_flight"
 _DONE = "done"
+
+#: Sentinel returned by _resolve to mean "no stored result — run the effect".
+_RUN = object()
 
 
 class IncompleteEffectError(AgentFlowError):
@@ -212,16 +218,40 @@ class IdempotentOp:
         existing = await self._store.get(self._namespace, key)
 
         if existing is not None:
-            record = existing.value
-            status = record.get("status") if isinstance(record, dict) else None
-            if status == _DONE:
-                return record.get("result")  # type: ignore[no-any-return]
-            if status == _IN_FLIGHT:
-                return await self._handle_incomplete(
-                    key, fn, on_incomplete, on_error, effective_ttl
-                )
+            resolved = self._resolve(existing, key, on_incomplete)
+            if resolved is not _RUN:
+                return resolved  # type: ignore[return-value]
+            return await self._handle_incomplete(key, fn, on_incomplete, on_error, effective_ttl)
 
-        return await self._claim_run_commit(key, fn, on_error, effective_ttl)
+        # Absent: attempt an atomic claim. If a racing writer claimed first, the
+        # conditional write raises StoreConflict; re-read and dispatch on what
+        # they left (in_flight or done) instead of running the effect too.
+        try:
+            return await self._claim_run_commit(
+                key, fn, on_error, effective_ttl, conditional=True
+            )
+        except StoreConflict:
+            current = await self._store.get(self._namespace, key)
+            if current is None:
+                # The winner released/expired between our conflict and re-read;
+                # treat as a fresh interrupted claim for the policy to decide.
+                raise IncompleteEffectError(self._namespace, key) from None
+            resolved = self._resolve(current, key, on_incomplete)
+            if resolved is not _RUN:
+                return resolved  # type: ignore[return-value]
+            return await self._handle_incomplete(key, fn, on_incomplete, on_error, effective_ttl)
+
+    def _resolve(self, item: Any, key: str, on_incomplete: OnIncomplete) -> Any:
+        """Map a stored marker to a return value, or _RUN to signal 'act'.
+
+        ``done`` -> the stored result; ``in_flight`` -> _RUN so the caller runs
+        the ``on_incomplete`` path; anything else -> _RUN (treat as absent).
+        """
+        record = item.value
+        status = record.get("status") if isinstance(record, dict) else None
+        if status == _DONE:
+            return record.get("result")
+        return _RUN
 
     async def _handle_incomplete(
         self,
@@ -235,8 +265,10 @@ class IdempotentOp:
             raise IncompleteEffectError(self._namespace, key)
         if on_incomplete == "skip":
             return None  # type: ignore[return-value]
-        # "rerun": the effect is declared idempotent, so run it again and commit.
-        return await self._claim_run_commit(key, fn, on_error, ttl)
+        # "rerun": the effect is declared idempotent. We already hold an
+        # in_flight marker for this key, so overwrite it unconditionally rather
+        # than trying to claim again (which would conflict with ourselves).
+        return await self._claim_run_commit(key, fn, on_error, ttl, conditional=False)
 
     async def _claim_run_commit(
         self,
@@ -244,12 +276,17 @@ class IdempotentOp:
         fn: Callable[[], Awaitable[T]],
         on_error: OnError,
         ttl: float | None,
+        *,
+        conditional: bool,
     ) -> T:
-        # Claim: mark in-flight before touching the outside world. NOTE this is
-        # a get-then-put, not an atomic compare-and-set — see the class
-        # docstring on concurrency. It exists so an interrupted attempt is
-        # visible as in_flight on the next try, not to arbitrate two writers.
-        await self._store.put(self._namespace, key, {"status": _IN_FLIGHT}, ttl=ttl)
+        # Claim: mark in-flight before touching the outside world. When
+        # conditional, this is an ATOMIC create (put if_absent) — two writers
+        # racing the same key give one winner and one StoreConflict, so only one
+        # runs the effect. The marker also makes an interrupted attempt visible
+        # as in_flight on the next try.
+        await self._store.put(
+            self._namespace, key, {"status": _IN_FLIGHT}, ttl=ttl, if_absent=conditional
+        )
         try:
             result = await fn()
         except BaseException:

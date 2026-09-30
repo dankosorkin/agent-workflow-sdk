@@ -16,6 +16,8 @@ The exception hierarchy. See individual guides for where each is raised.
         - BackendRateLimitError
         - CheckpointError
         - CheckpointConflict
+        - StoreError
+        - StoreConflict
         - ControlPlaneError
         - RunNotFound
 

@@ -55,6 +55,8 @@ from agentflow.errors import (
     NodeError,
     RunNotFound,
     RunTimeout,
+    StoreConflict,
+    StoreError,
 )
 from agentflow.events import (
     Allow,
@@ -182,6 +184,8 @@ __all__ = [
     "BackendRateLimitError",
     "CheckpointError",
     "CheckpointConflict",
+    "StoreError",
+    "StoreConflict",
     "ControlPlaneError",
     "RunNotFound",
     "InterruptError",

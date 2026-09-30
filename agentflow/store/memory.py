@@ -18,6 +18,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agentflow.errors import StoreConflict
 from agentflow.store._util import expiry_iso, is_expired, now_iso, validate_namespace
 from agentflow.store.base import Item, Namespace
 
@@ -53,11 +54,18 @@ class MemoryStore:
         value: Any,
         *,
         ttl: float | None = None,
+        if_absent: bool = False,
     ) -> Item:
         validate_namespace(namespace)
         bucket = self._items.setdefault(namespace, {})
         existing = bucket.get(key)
-        created = existing.created_at if existing and not is_expired(existing.expires_at) else ""
+        live = existing is not None and not is_expired(existing.expires_at)
+        # Atomic by construction: this method never awaits between the check and
+        # the write, and the event loop is single-threaded, so no other task can
+        # interleave. A live item under if_absent is a lost claim.
+        if if_absent and live:
+            raise StoreConflict(namespace, key)
+        created = existing.created_at if (live and existing is not None) else ""
         ts = now_iso()
         item = Item(
             namespace=namespace,

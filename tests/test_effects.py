@@ -252,3 +252,56 @@ async def test_default_ttl_and_per_call_ttl_are_accepted():
     await op.run("k", fn)
     await op.run("k", fn)
     assert calls["n"] == 2
+
+
+# --- concurrency: the atomic claim closes the duplicate-starter race ---
+
+
+async def test_concurrent_runs_fire_effect_once():
+    import asyncio
+
+    store = MemoryStore()
+    op = IdempotentOp(store, NS)
+    effect = {"n": 0}
+
+    async def slow_effect():
+        effect["n"] += 1
+        await asyncio.sleep(0.05)  # hold the claim so the sibling races in
+        return {"ok": True}
+
+    async def attempt():
+        return await op.run("k", slow_effect, on_incomplete="error")
+
+    results = await asyncio.gather(attempt(), attempt(), return_exceptions=True)
+
+    # Exactly one attempt ran the effect; the other lost the atomic claim and,
+    # seeing an in_flight marker, refused to double-run under on_incomplete="error".
+    assert effect["n"] == 1
+    oks = [r for r in results if r == {"ok": True}]
+    conflicts = [r for r in results if isinstance(r, IncompleteEffectError)]
+    assert len(oks) == 1
+    assert len(conflicts) == 1
+
+
+async def test_concurrent_loser_can_rerun_idempotent_effect():
+    import asyncio
+
+    store = MemoryStore()
+    op = IdempotentOp(store, NS)
+    effect = {"n": 0}
+
+    async def slow_effect():
+        effect["n"] += 1
+        await asyncio.sleep(0.05)
+        return {"ok": True}
+
+    # The winner commits; a loser that re-runs (idempotent effect) may run again,
+    # but both observe a consistent committed result in the end.
+    async def attempt():
+        return await op.run("k", slow_effect, on_incomplete="rerun")
+
+    results = await asyncio.gather(attempt(), attempt())
+    assert all(r == {"ok": True} for r in results)
+    # Final stored state is committed done.
+    item = await store.get(NS, "k")
+    assert item.value["status"] == "done"

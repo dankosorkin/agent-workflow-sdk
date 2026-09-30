@@ -160,9 +160,9 @@ When `fn` raises, the effect may still have happened: a `TimeoutError` reading t
 
 The consequence to internalize: `on_incomplete="error"` protects the crash window, but with `on_error="release"` it does **not** protect the lost-response window — the marker is already gone, so the retry simply runs the effect again.
 
-One more boundary: the claim is a `get` then a `put`, **not** an atomic compare-and-set. Two workers can both read `absent` for the same key and both run the effect. `IdempotentOp`'s guarantee holds for a single writer per key (one run, retried sequentially over time); under real concurrency, correctness must come from idempotency at the effect.
+The claim itself is atomic: it uses `Store.put(..., if_absent=True)`, an atomic conditional create. Two workers racing the same key give exactly one winner (who runs the effect) and one `StoreConflict` (who re-reads and defers to the winner's marker), so the "both saw absent and both ran" race is closed — within a process for `MemoryStore`, and across processes for `PostgresStore` via a single conditional `INSERT`.
 
-So `IdempotentOp` narrows the duplicate window and makes every ambiguous case an explicit decision — but it does not, and cannot, close it at the orchestrator layer. What actually collapses duplicates is idempotency at the effect itself; use the key `IdempotentOp` gives you as the token that carries it there:
+That closes the duplicate-*starter* race, but not the two windows above: the winner can still crash or lose its response inside the effect. So `IdempotentOp` narrows the duplicate window and makes every ambiguous case an explicit decision — it does not, and cannot, guarantee exactly-once at the orchestrator layer alone. What finally collapses duplicates is idempotency at the effect itself; use the key `IdempotentOp` gives you as the token that carries it there:
 
 | Effect | Idempotency technique |
 | --- | --- |

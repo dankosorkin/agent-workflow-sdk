@@ -31,20 +31,28 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   reference (mkdocstrings), and the `examples/quality_gate.py` and
   `examples/research_plan_implement_review.py` examples.
 
+- Atomic conditional write on `Store`: `put(..., if_absent=True)` creates only
+  if no live item exists at the key, else raises the new `StoreConflict` (an
+  expired item counts as absent and can be reclaimed). Implemented for
+  `MemoryStore` (atomic within a process) and `PostgresStore` (atomic across
+  processes via a single conditional `INSERT`). This is the store-level
+  primitive for a single-flight claim.
 - Effect-level idempotency (`agentflow.prebuilt`): `IdempotentOp(store,
-  namespace)` protects one side effect inside a node with a claim → run →
-  commit marker in a `Store`, so a resume or retry does not repeat it. Its
-  `on_incomplete` policy (`"error"` default, `"rerun"`, `"skip"`) handles a
-  prior attempt left `in_flight`, and `on_error` (`"keep"` default,
-  `"release"`) controls the marker when `fn` raises — because an exception does
-  not prove the effect was skipped (a lost response after a successful `POST`).
-  `effect_key(*parts)` builds a stable token to pass downstream as the
-  provider's idempotency key. New `IncompleteEffectError`. This narrows the
-  duplicate window and makes every ambiguous case explicit, but does not close
-  it: exactly-once ultimately needs idempotency at the effect (the claim is a
-  marker, not an atomic lock; concurrent writers must rely on downstream
-  keying). Checkpoints alone give only at-least-once, since a super-step is
-  atomic over state only.
+  namespace)` protects one side effect inside a node with an atomic claim → run
+  → commit in a `Store`, so a resume or retry does not repeat it, and two
+  workers racing the same key give one winner and one conflict (the
+  duplicate-starter race is closed within a backend). Its `on_incomplete` policy
+  (`"error"` default, `"rerun"`, `"skip"`) handles a prior attempt left
+  `in_flight`, and `on_error` (`"keep"` default, `"release"`) controls the
+  marker when `fn` raises — because an exception does not prove the effect was
+  skipped (a lost response after a successful `POST`). `effect_key(*parts)`
+  builds a stable token to pass downstream as the provider's idempotency key.
+  New `IncompleteEffectError`. This narrows the duplicate window and makes every
+  ambiguous case explicit, but does not by itself guarantee exactly-once at the
+  orchestrator layer — the winner can still crash or lose its response inside
+  the effect, so exactly-once ultimately needs idempotency at the effect.
+  Checkpoints alone give only at-least-once, since a super-step is atomic over
+  state only.
 
 ### Fixed
 
