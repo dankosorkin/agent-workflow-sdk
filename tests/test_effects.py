@@ -305,3 +305,38 @@ async def test_concurrent_loser_can_rerun_idempotent_effect():
     # Final stored state is committed done.
     item = await store.get(NS, "k")
     assert item.value["status"] == "done"
+
+
+async def test_rerun_can_run_concurrently_with_a_live_winner():
+    # Documents the boundary: the atomic claim guarantees a single runner only
+    # for the FIRST attempt. on_incomplete="rerun" overwrites the in_flight
+    # marker unconditionally, so a rerun issued while the winner is still
+    # running executes the effect a SECOND time, concurrently. Safety for such
+    # an effect must come from downstream dedup, not this primitive.
+    import asyncio
+
+    store = MemoryStore()
+    op = IdempotentOp(store, NS)
+    runs = {"n": 0}
+    winner_running = asyncio.Event()
+    let_winner_finish = asyncio.Event()
+
+    async def winner_effect():
+        runs["n"] += 1
+        winner_running.set()
+        await let_winner_finish.wait()  # hold in_flight open
+        return {"who": "winner"}
+
+    winner = asyncio.create_task(op.run("k", winner_effect, on_incomplete="error"))
+    await winner_running.wait()  # the claim is now in_flight, winner mid-run
+
+    async def rerun_effect():
+        runs["n"] += 1
+        return {"who": "rerun"}
+
+    # The winner still holds in_flight; rerun overwrites and runs concurrently.
+    await op.run("k", rerun_effect, on_incomplete="rerun")
+    assert runs["n"] == 2  # the effect executed twice, concurrently
+
+    let_winner_finish.set()
+    await winner

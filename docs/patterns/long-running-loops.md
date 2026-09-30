@@ -149,6 +149,8 @@ The state machine per key is held in one store entry so a plain `get` reads it i
 | `"rerun"` | run the effect again | the effect is genuinely idempotent |
 | `"skip"` | assume it completed, return `None` | a duplicate is worse than a miss |
 
+`"rerun"` carries a concurrency caveat: it overwrites the `in_flight` marker unconditionally, so if that marker belongs to a winner that is *still running* (not a dead attempt), the rerun executes concurrently with it — two simultaneous runs. The atomic claim guarantees a single runner only for the *first* attempt; `"rerun"`'s safety rests entirely on the effect being idempotent and deduplicated downstream by the key, not on the claim.
+
 A `done` marker only appears when the effect returned cleanly, so this reliably catches a hard crash mid-effect. But an exception is trickier — and it is a second, separate window.
 
 When `fn` raises, the effect may still have happened: a `TimeoutError` reading the response of a `POST` that already went through is an exception *after* delivery. `on_error` decides what the marker is left as:

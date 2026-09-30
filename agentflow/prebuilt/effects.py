@@ -85,6 +85,12 @@ That still does not make the *effect* exactly-once — the winner can crash or
 lose its response inside ``fn`` (the windows above). The atomic claim removes
 the duplicate-*starter* race; keyed idempotency downstream removes the rest.
 
+The claim's single-runner guarantee also applies only to that first attempt.
+``on_incomplete="rerun"`` (see :meth:`IdempotentOp.run`) overwrites the marker
+unconditionally, so a rerun can execute ``fn`` concurrently with a winner that
+is still running. Reserve ``"rerun"`` for idempotent effects that deduplicate
+downstream by the key.
+
 ## IdempotentOp vs skip_if_done
 
 :func:`~agentflow.prebuilt.skip_if_done` wraps a whole *node* and caches its
@@ -190,6 +196,15 @@ class IdempotentOp:
           ``"error"`` raises :class:`IncompleteEffectError` (safe default);
           ``"rerun"`` runs ``fn`` again (only when the effect is idempotent);
           ``"skip"`` assumes it completed and returns ``None``.
+
+        Note on ``"rerun"`` and concurrency: the atomic claim (see the class
+        docstring) only guarantees a single runner for the *first* attempt.
+        ``"rerun"`` overwrites the existing ``in_flight`` marker
+        unconditionally, so if the marker belongs to a winner that is *still
+        running* (not a dead attempt), the rerun runs ``fn`` concurrently with
+        it. Two simultaneous executions are the result. That is why ``"rerun"``
+        is only for a genuinely idempotent effect whose safety rests on
+        downstream deduplication by the key, not on this primitive's claim.
 
         If ``fn`` raises, ``on_error`` decides what the marker is left as, and
         this is a genuine choice you must make — an exception does **not** prove
