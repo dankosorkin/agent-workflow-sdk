@@ -1,68 +1,130 @@
 # agent-workflow-sdk
 
-An async-first, LangGraph-style SDK for building agent workflows from
-composable pieces. You describe a workflow as a graph of nodes over a typed,
-reducer-based state, and run it against a pluggable backend — a coding agent
-(Kiro, Codex, or Claude Code) or a plain LLM (Ollama, any OpenAI-compatible
-endpoint, or Anthropic).
+An async-first SDK for building agent workflows from composable pieces. You
+describe a workflow as a graph of nodes over a typed, reducer-based state, and
+run it against a pluggable backend — a local coding agent (Claude Code, Codex,
+or Kiro) or a plain LLM (Ollama, any OpenAI-compatible endpoint, or Anthropic).
 
-The import root is `agentflow`. The distribution name is
-`agent-workflow-sdk`.
+The import root is `agentflow`. The distribution name is `agent-workflow-sdk`.
 
-## Why
+## Who it's for
 
-- Build any workflow from primitives: nodes, edges, conditional routing, and
-  a shared state. Not a fixed loop, not a linear chain.
+You drive a **local coding-agent CLI** — Claude Code, Codex, or Kiro — and you
+want to orchestrate it with real control flow: branches, loops, retries, a
+human approving a step, a run that survives a crash and resumes. You get that
+without wiring up an API key, because the agent runs through its own CLI and
+its own auth. (An API key path exists too — point a node at `OpenAIBackend` or
+`AnthropicBackend` when you want one — but it's an option, not a requirement.)
+
+It is a library, not a coding agent out of the box. If a ready-made agent CLI
+already does what you need, use that. Reach for this when you need to build the
+workflow *around* the agent and keep that logic independent of which backend
+runs underneath.
+
+- Build any workflow from primitives: nodes, edges, conditional routing, and a
+  shared state. Not a fixed loop, not a linear chain.
 - Swap the backend without touching workflow code. Agents and LLMs share one
   event vocabulary.
 - Async everywhere: the engine, backends, checkpointing, and streaming.
 - Durable by default: every super-step is checkpointed, runs resume after a
   crash, and human-in-the-loop interrupts suspend and resume a run.
 
-
 ## Install
 
-The core is dependency-free. Backends that need extra libraries are optional
-extras.
-
 ```bash
-pip install -e .            # core only
-pip install -e '.[ollama]'  # + httpx, for the Ollama LLM backend
-pip install -e '.[dev]'     # + pytest, pytest-asyncio
+pip install agent-workflow-sdk
 ```
 
-Python 3.11+ is required. The Kiro backend needs `kiro-cli` on PATH.
+The core is dependency-free. Backends that need extra libraries are optional
+extras — e.g. `pip install 'agent-workflow-sdk[ollama]'` for the HTTP LLM
+backends. Python 3.11+ is required.
 
-## Quickstart
+The local-agent backends need their CLI on PATH: `claude` for Claude Code,
+`codex` for Codex, `kiro-cli` for Kiro. No API key is needed — each CLI uses
+its own login.
 
-A graph that loops until a counter reaches a target, then stops.
+To work on the SDK itself, clone and install editable:
+
+```bash
+git clone https://github.com/dankosorkin/agent-workflow-sdk
+cd agent-workflow-sdk
+pip install -e '.[dev]'
+```
+
+## Quickstart: a local agent, gated by a human
+
+A two-step workflow that puts the SDK's point on one screen. A **Claude Code**
+node does the work in its own session; then the run **pauses for a human** to
+approve before anything proceeds. Because every step is checkpointed, the
+pause survives a process restart — you can approve now, tomorrow, or from a
+different process, and the run resumes exactly where it stopped. No API key:
+Claude Code runs through its own CLI login.
 
 ```python
 import asyncio
 from typing import Annotated
-from agentflow import Graph, START, END, State, add, append
+from agentflow import Graph, START, END, State, FileCheckpointer, last, append
+from agentflow.backends.claude_code import ClaudeCodeBackend
+from agentflow.backends.base import DenyAll
+from agentflow.events import TextChunk, TurnEnd
 
-class CountState(State):
-    n: Annotated[int, add]        # updates are summed
-    log: Annotated[list, append]  # updates are concatenated
+class ReviewState(State):
+    target: Annotated[str, last]
+    proposal: Annotated[str, last]
+    approved: Annotated[bool, last]
+    log: Annotated[list, append]
 
-async def tick(state, ctx):
-    return {"n": 1, "log": f"tick {state.get('n', 0) + 1}"}
+claude = ClaudeCodeBackend(model="sonnet", permission=DenyAll())  # read-only
 
-def route(state):
-    return "again" if state["n"] < 5 else "done"
+async def propose(state, ctx):
+    text = []
+    async for ev in claude.prompt(
+        f"Review this repo and propose ONE concrete improvement to {state['target']}. "
+        "Describe the change; do not apply it."
+    ):
+        if isinstance(ev, TextChunk):
+            ctx.emit(ev)              # stream tokens to the caller as they arrive
+            text.append(ev.text)
+        elif isinstance(ev, TurnEnd):
+            text = [ev.text] if ev.text else text
+    return {"proposal": "".join(text)}
 
-g = Graph(CountState)
-g.add_node("tick", tick)
-g.add_edge(START, "tick")
-g.add_conditional_edges("tick", route, {"again": "tick", "done": END})
-app = g.compile()
+async def gate(state, ctx):
+    # Suspend the whole run until a human answers. On a fresh run this stops
+    # here and checkpoints; on resume, interrupt() returns the human's value.
+    decision = await ctx.interrupt({"review": state["proposal"]})
+    return {"approved": decision == "approve", "log": f"human said: {decision}"}
 
-print(asyncio.run(app.invoke({"n": 0, "log": []})))
+g = Graph(ReviewState)
+g.add_node("propose", propose)
+g.add_node("gate", gate)
+g.add_edge(START, "propose")
+g.add_edge("propose", "gate")
+g.add_edge("gate", END)
+
+async def main():
+    app = g.compile(checkpointer=FileCheckpointer(".runs"))  # durable
+    async with claude:
+        state = await app.invoke({"target": "the README"}, thread="demo")
+        # The run is now parked at the gate. Show the proposal, get a decision:
+        cp = await app.get_state("demo")
+        print(cp.interrupt_payload["review"])          # Claude's proposal
+        final = await app.resume("demo", value="approve")
+        print(final["approved"], final["log"])
+
+asyncio.run(main())
 ```
 
-See `examples/hello_graph.py` and `examples/optimize_loop.py` for runnable
-versions.
+That is the whole value in one example: a real local agent does the work, the
+graph owns the control flow, a human gates the result, and durability means
+the pause is not tied to this process staying alive. Swap `ClaudeCodeBackend`
+for `CodexBackend`, `KiroBackend`, or an LLM backend and the workflow code
+above does not change.
+
+Prefer to learn the engine first, with no backend and nothing to install
+beyond the core? `examples/hello_graph.py` is a minimal counter graph that
+shows state, reducers, and edges on their own; `examples/optimize_loop.py`
+shows the iterate-until-converged loop.
 
 ## Core concepts
 

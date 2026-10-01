@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""AgentFlow — async-first, LangGraph-style agent workflow SDK.
+"""AgentFlow — async-first agent workflow SDK.
 
 Importing this package pulls in only the dependency-free core (state, graph,
 runtime, checkpointing). Backends live under :mod:`agentflow.backends` and are

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-workflow-sdk"
 version = "0.2.0"
-description = "Async-first, LangGraph-style SDK for building agent workflows with pluggable agent and LLM backends."
+description = "Async-first SDK for orchestrating local coding-agent CLIs (Claude Code, Codex, Kiro) and LLMs as durable, graph-based workflows."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
