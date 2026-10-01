@@ -153,7 +153,7 @@ def _extract_reducer(annotation: Any) -> Reducer:
 
     A bare type (no ``Annotated`` metadata, or metadata without a callable)
     resolves to :func:`last`. The first callable in the metadata is used as
-    the reducer, matching the LangGraph convention.
+    the reducer.
     """
     if get_origin(annotation) is Annotated:
         for meta in get_args(annotation)[1:]:

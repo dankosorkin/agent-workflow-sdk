@@ -99,8 +99,8 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [0.1.0] - 2026-09-29
 
-First public release: an async-first, LangGraph-style SDK for agent workflows
-with pluggable agent and LLM backends.
+First public release: an async-first SDK for agent workflows with pluggable
+agent and LLM backends.
 
 ### Added
 
