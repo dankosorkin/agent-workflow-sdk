@@ -141,8 +141,13 @@ async def test_if_absent_reclaims_expired_key(store):
 
 
 async def test_concurrent_if_absent_gives_one_winner(store):
-    # Two conditional creates race the same key on a real server; exactly one
-    # wins and the other raises StoreConflict (atomic INSERT ... ON CONFLICT).
+    # Several conditional creates race the same key on a real server; exactly
+    # one wins and the rest raise StoreConflict (atomic INSERT ... ON CONFLICT).
+    # Warm up first so the schema (CREATE TABLE IF NOT EXISTS) is already in
+    # place — concurrent DDL bootstrap is a separate concern from the claim race
+    # being tested here.
+    await store.put(("warmup",), "k", 1)
+
     async def claim():
         try:
             await store.put(("race",), "k", "mine", if_absent=True)
