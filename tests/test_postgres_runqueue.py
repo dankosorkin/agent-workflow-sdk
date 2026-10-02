@@ -273,7 +273,7 @@ async def test_worker_drives_watch_loop_via_waiting(queue):
             await asyncio.sleep(0.6)
 
         final = await queue.get(rec.run_id)
-        assert final.status == RunStatus.SUCCEEDED
+        assert final.status == RunStatus.SUCCEEDED, f"run failed: {final.error}"
         assert (await cp.get(rec.thread)).state["seen"] == ["event"]
     finally:
         await cp.close()
