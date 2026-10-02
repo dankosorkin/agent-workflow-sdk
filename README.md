@@ -1,5 +1,11 @@
 # agent-workflow-sdk
 
+[![PyPI](https://img.shields.io/pypi/v/agent-workflow-sdk)](https://pypi.org/project/agent-workflow-sdk/)
+[![Python](https://img.shields.io/pypi/pyversions/agent-workflow-sdk)](https://pypi.org/project/agent-workflow-sdk/)
+[![CI](https://github.com/dankosorkin/agent-workflow-sdk/actions/workflows/ci.yml/badge.svg)](https://github.com/dankosorkin/agent-workflow-sdk/actions/workflows/ci.yml)
+[![License](https://img.shields.io/pypi/l/agent-workflow-sdk)](LICENSE)
+[![Docs](https://img.shields.io/badge/docs-live-brightgreen)](https://dankosorkin.github.io/agent-workflow-sdk/)
+
 An async-first SDK for building agent workflows from composable pieces. You
 describe a workflow as a graph of nodes over a typed, reducer-based state, and
 run it against a pluggable backend — a local coding agent (Claude Code, Codex,
