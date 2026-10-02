@@ -242,7 +242,7 @@ async def test_worker_drives_watch_loop_via_waiting(queue):
         g = Graph(WatchFlow)
 
         async def respond(state, ctx):
-            return {"seen": state["watch_result"].payload}
+            return {"seen": state["watch_result"]["payload"]}
 
         g.add_node("wait", watch_node(poll, poll_interval=0.5))
         g.add_node("respond", respond)

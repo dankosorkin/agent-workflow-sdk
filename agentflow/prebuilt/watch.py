@@ -33,7 +33,7 @@ writes activity/terminal to state, then a conditional edge that routes activity
 to a responder (and back to the watch) and terminal to the exit.
 
     g.add_node("wait", watch_node(CommandWatcher("./poll.sh"), poll_interval=60))
-    g.add_node("respond", respond)
+    g.add_node("respond", respond)   # reads state["watch_result"]["payload"]
     g.add_conditional_edges("wait", route_watch, {"activity": "respond", "terminal": END})
     g.add_edge("respond", "wait")
 
@@ -210,7 +210,13 @@ def watch_node(
             result = await poll(cursor)
             cursor = result.cursor
             if result.outcome != "idle":
-                return {_WATCH_RESULT: result, _WATCH_CURSOR: cursor}
+                # Write a plain dict, not the WatchResult dataclass: state must
+                # be JSON-serializable to survive a durable checkpointer. The
+                # payload is the caller's and must itself be JSON-safe.
+                return {
+                    _WATCH_RESULT: {"outcome": result.outcome, "payload": result.payload},
+                    _WATCH_CURSOR: cursor,
+                }
             wake_at = (datetime.now(UTC) + timedelta(seconds=poll_interval)).isoformat()
             await ctx.wait(wake_at, payload={"cursor": cursor})
 
@@ -221,11 +227,12 @@ def watch_node(
 def route_watch(state: Any) -> str:
     """Route out of a watch node: ``"activity"`` or ``"terminal"``.
 
-    Reads the ``watch_result`` channel the node wrote. Map these keys to your
-    responder and your exit, e.g.
-    ``{"activity": "respond", "terminal": END}``.
+    Reads the ``watch_result`` channel the node wrote — a dict
+    ``{"outcome", "payload"}``. Map these keys to your responder and your exit,
+    e.g. ``{"activity": "respond", "terminal": END}``. A responder reads the
+    event via ``state["watch_result"]["payload"]``.
     """
-    result: WatchResult | None = state.get(_WATCH_RESULT)
-    if result is not None and result.outcome == "terminal":
+    result = state.get(_WATCH_RESULT)
+    if result is not None and result.get("outcome") == "terminal":
         return "terminal"
     return "activity"

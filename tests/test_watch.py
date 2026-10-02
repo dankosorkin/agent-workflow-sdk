@@ -129,7 +129,7 @@ async def test_watch_loop_parks_then_reacts_then_exits():
     )
 
     async def respond(state, ctx):
-        return {"responses": state["watch_result"].payload}
+        return {"responses": state["watch_result"]["payload"]}
 
     g = Graph(WatchState)
     g.add_node("wait", watch_node(poll, poll_interval=0.02))
@@ -157,7 +157,7 @@ async def test_watch_node_requires_no_idle_to_route():
 
     out = await app.run_until_done({"responses": []}, thread="w", max_sleep=0.02)
     assert calls["n"] == 1
-    assert out["watch_result"].outcome == "terminal"
+    assert out["watch_result"]["outcome"] == "terminal"
 
 
 async def test_run_until_done_requires_checkpointer():
