@@ -175,6 +175,45 @@ That closes the duplicate-*starter* race, but not the two windows above: the win
 
 Reach for `skip_if_done` to save work; reach for `IdempotentOp` to protect an effect. `examples/idempotent_effect.py` is a runnable walk-through: an effect whose response is lost, the retry that `IdempotentOp` stops, and a downstream store that deduplicates on the same key.
 
+## Recipe: watch and respond
+
+Some loops wait on something outside the graph — a pull request, a CI build, a deployment, a ticket. You don't want to burn model turns (or hold a worker) while nothing is happening. A **watch** node polls the external system and parks between polls: it calls `ctx.wait(wake_at)`, which suspends the run until the time passes, then polls again.
+
+```mermaid
+flowchart LR
+    START --> wait{watch}
+    wait -- idle --> wait
+    wait -- activity --> respond
+    respond --> wait
+    wait -- terminal --> END
+```
+
+Build it from [`watch_node`](../reference/api/watch.md) and a conditional edge. The watcher reports one of three outcomes per poll — idle (park and poll again), activity (something to react to), terminal (final state, exit):
+
+```python
+from agentflow.prebuilt import CommandWatcher, watch_node, route_watch
+
+g.add_node("wait", watch_node(CommandWatcher("gh pr view $PR --json state -q .state"),
+                              poll_interval=60))
+g.add_node("respond", respond)   # reads state["watch_result"]["payload"]
+g.add_conditional_edges("wait", route_watch, {"activity": "respond", "terminal": END})
+g.add_edge("respond", "wait")
+```
+
+`CommandWatcher` runs any program that prints the small contract JSON
+(`{"outcome", "payload", "cursor"}`), so GitHub, CI, or a ticket system is just
+your script — no provider code lives in the SDK. `examples/watch_until_done.py`
+is a runnable, offline version.
+
+### Parked vs sleeping — the honest difference
+
+`ctx.wait` is a timer-based sibling of the human-in-the-loop interrupt: it suspends the run and records when to wake. What that costs depends on how you run the graph:
+
+- Through the [control plane](../durability/control-plane.md): a parked run is `WAITING` in the queue with a `wake_at`. The worker is **released** — zero cost while parked — and the run is re-claimed only once `wake_at` passes. It survives a process restart. This is the real "parked without cost".
+- Inline, via `app.run_until_done(...)`: there is no worker to release, so the method simply sleeps until `wake_at` and resumes. It works and is handy for development, but the **process must stay alive** for the whole wait. It is not free the way the control plane is.
+
+Two limits to keep honest: polling is not push — an event is seen at the next poll, so `poll_interval` trades freshness for cost — and in the control plane the wake granularity is bounded by how often workers claim. A watcher's cursor is persisted across the park (it rides the wait checkpoint), so a watcher must resume from its cursor, not from in-memory state.
+
 ## The one rule behind all of these
 
 Do not mix "the work" and "the decision to continue" in one node. The work node writes an artifact; a gate or router reads state and decides. That separation is what makes each super-step atomic, each checkpoint meaningful, and each resume predictable — the properties a run needs to survive being left alone for an hour.

@@ -4,7 +4,37 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0] - 2026-10-02
+
+### Added
+
+- Watch nodes: park a run on an external system without burning turns while
+  nothing changes. `ctx.wait(wake_at, payload)` is a timer-based sibling of the
+  human interrupt — it suspends the run until a time, then re-runs the node.
+  `Checkpoint` gains `wake_at` and a derived `suspend_kind` (`"human"` |
+  `"timer"`); the human-interrupt path is unchanged.
+- Durable parked execution: `RunStatus.WAITING` + `RunRecord.wake_at`. A run
+  parked on `ctx.wait` is `WAITING` in the queue and does not hold a worker;
+  `claim` re-takes it once `wake_at` passes (symmetric to lease expiry), in both
+  `MemoryRunQueue` and `PostgresRunQueue`. The worker frees itself on a timer
+  suspend and resumes on re-claim.
+- `CompiledGraph.run_until_done(...)` drives timer waits inline (sleeps until
+  `wake_at` and resumes), for running a watch loop without the control plane —
+  the process must stay alive for the wait, unlike the parked control-plane
+  path.
+- `agentflow.prebuilt.watch`: `WatchResult` (idle/activity/terminal), the
+  `Watcher` protocol, `CommandWatcher` (poll any command that prints the
+  contract JSON), `watch_node` (polls, parks on idle, loops until non-idle), and
+  `route_watch`. GitHub/CI/etc. are examples over `CommandWatcher`, not core.
+  See `examples/watch_until_done.py`.
+
+### Fixed
+
+- First-use schema creation on PostgreSQL is now concurrency-safe. `CREATE TABLE
+  IF NOT EXISTS` can collide on `pg_type` when two sessions bootstrap the same
+  table at once; the Postgres backends now run that DDL under a
+  `pg_advisory_xact_lock` (plus an in-process lock), so a pool of workers
+  starting together no longer races.
 
 ### Changed
 

@@ -97,7 +97,7 @@ from agentflow.state import (
 from agentflow.store import Item, MemoryStore, Store
 from agentflow.telemetry import JsonlTelemetry, MultiHooks
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "__version__",
