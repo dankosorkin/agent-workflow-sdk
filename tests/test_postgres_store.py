@@ -141,13 +141,10 @@ async def test_if_absent_reclaims_expired_key(store):
 
 
 async def test_concurrent_if_absent_gives_one_winner(store):
-    # Several conditional creates race the same key on a real server; exactly
-    # one wins and the rest raise StoreConflict (atomic INSERT ... ON CONFLICT).
-    # Warm up first so the schema (CREATE TABLE IF NOT EXISTS) is already in
-    # place — concurrent DDL bootstrap is a separate concern from the claim race
-    # being tested here.
-    await store.put(("warmup",), "k", 1)
-
+    # Several conditional creates race the same key on a real server as the
+    # FIRST operations on a fresh store — so this also exercises concurrent
+    # schema bootstrap (ensure_schema's advisory lock). Exactly one wins and
+    # the rest raise StoreConflict (atomic INSERT ... ON CONFLICT).
     async def claim():
         try:
             await store.put(("race",), "k", "mine", if_absent=True)
@@ -158,3 +155,15 @@ async def test_concurrent_if_absent_gives_one_winner(store):
     results = await asyncio.gather(claim(), claim(), claim())
     assert results.count("won") == 1
     assert results.count("lost") == 2
+
+
+async def test_concurrent_first_use_creates_schema_once(store):
+    # Many concurrent writes as the very first operations must not collide on
+    # schema creation — ensure_schema serializes the CREATE TABLE under a
+    # Postgres advisory lock. Each write is to a distinct key, so all succeed.
+    async def write(i: int):
+        await store.put(("boot",), f"k{i}", i)
+
+    await asyncio.gather(*[write(i) for i in range(10)])
+    got = await store.search(("boot",))
+    assert len(got) == 10

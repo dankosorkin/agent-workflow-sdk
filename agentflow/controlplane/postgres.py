@@ -27,12 +27,14 @@ Uses asyncpg. Requires the ``postgres`` extra:
 
 from __future__ import annotations
 
+import asyncio
 import json
 import uuid
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
 
+from agentflow._pg import ensure_schema
 from agentflow.controlplane.records import QueueStats, RunRecord, RunStatus
 from agentflow.errors import RunNotFound
 
@@ -68,12 +70,16 @@ class PostgresRunQueue:
         self._owns_pool = pool is None
         self.table = table
         self._init_done = False
+        self._schema_lock = asyncio.Lock()
+        self._pool_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
 
     async def _get_pool(self) -> asyncpg.Pool:
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._dsn)
+            async with self._pool_lock:
+                if self._pool is None:
+                    self._pool = await asyncpg.create_pool(self._dsn)
         await self._ensure_schema()
         return self._pool
 
@@ -81,29 +87,36 @@ class PostgresRunQueue:
         if self._init_done:
             return
         assert self._pool is not None
-        await self._pool.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.table} (
-                run_id           TEXT        PRIMARY KEY,
-                graph            TEXT        NOT NULL,
-                thread           TEXT        NOT NULL,
-                status           TEXT        NOT NULL,
-                input            JSONB       NOT NULL DEFAULT '{{}}'::jsonb,
-                resume_value     JSONB,
-                error            TEXT,
-                attempt          INTEGER     NOT NULL DEFAULT 0,
-                created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                lease_until      TIMESTAMPTZ,
-                cancel_requested BOOLEAN     NOT NULL DEFAULT FALSE
-            )
-            """
-        )
-        await self._pool.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_status "
-            f"ON {self.table} (status, created_at)"
-        )
-        self._init_done = True
+        async with self._schema_lock:
+            if self._init_done:
+                return
+
+            async def create(conn: asyncpg.Connection) -> None:
+                await conn.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {self.table} (
+                        run_id           TEXT        PRIMARY KEY,
+                        graph            TEXT        NOT NULL,
+                        thread           TEXT        NOT NULL,
+                        status           TEXT        NOT NULL,
+                        input            JSONB       NOT NULL DEFAULT '{{}}'::jsonb,
+                        resume_value     JSONB,
+                        error            TEXT,
+                        attempt          INTEGER     NOT NULL DEFAULT 0,
+                        created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        lease_until      TIMESTAMPTZ,
+                        cancel_requested BOOLEAN     NOT NULL DEFAULT FALSE
+                    )
+                    """
+                )
+                await conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{self.table}_status "
+                    f"ON {self.table} (status, created_at)"
+                )
+
+            await ensure_schema(self._pool, self.table, create)
+            self._init_done = True
 
     async def close(self) -> None:
         """Close the connection pool (only if this queue created it)."""

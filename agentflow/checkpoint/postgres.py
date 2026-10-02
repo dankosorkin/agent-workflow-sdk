@@ -30,10 +30,12 @@ Uses asyncpg. Requires the ``postgres`` extra:
 
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import json
 from collections.abc import AsyncIterator
 
+from agentflow._pg import ensure_schema
 from agentflow.checkpoint._serde import from_payload, to_payload
 from agentflow.checkpoint.base import Checkpoint, ThreadInfo
 from agentflow.errors import CheckpointConflict, CheckpointError
@@ -76,12 +78,16 @@ class PostgresCheckpointer:
         self.table = table
         self._redact = redact or redact_none
         self._init_done = False
+        self._schema_lock = asyncio.Lock()
+        self._pool_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
 
     async def _get_pool(self) -> asyncpg.Pool:
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._dsn)
+            async with self._pool_lock:
+                if self._pool is None:
+                    self._pool = await asyncpg.create_pool(self._dsn)
         await self._ensure_schema()
         return self._pool
 
@@ -89,19 +95,26 @@ class PostgresCheckpointer:
         if self._init_done:
             return
         assert self._pool is not None
-        await self._pool.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.table} (
-                thread   TEXT    NOT NULL,
-                step     INTEGER NOT NULL,
-                revision INTEGER NOT NULL DEFAULT 1,
-                payload  JSONB   NOT NULL,
-                ts       TEXT    NOT NULL DEFAULT '',
-                PRIMARY KEY (thread, step)
-            )
-            """
-        )
-        self._init_done = True
+        async with self._schema_lock:
+            if self._init_done:
+                return
+
+            async def create(conn: asyncpg.Connection) -> None:
+                await conn.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {self.table} (
+                        thread   TEXT    NOT NULL,
+                        step     INTEGER NOT NULL,
+                        revision INTEGER NOT NULL DEFAULT 1,
+                        payload  JSONB   NOT NULL,
+                        ts       TEXT    NOT NULL DEFAULT '',
+                        PRIMARY KEY (thread, step)
+                    )
+                    """
+                )
+
+            await ensure_schema(self._pool, self.table, create)
+            self._init_done = True
 
     async def close(self) -> None:
         """Close the connection pool (only if this checkpointer created it)."""

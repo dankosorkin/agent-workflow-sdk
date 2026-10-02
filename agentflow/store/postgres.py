@@ -25,10 +25,12 @@ Uses asyncpg. Requires the ``postgres`` extra:
 
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from typing import Any
 
+from agentflow._pg import ensure_schema
 from agentflow.errors import StoreConflict
 from agentflow.store._util import validate_namespace
 from agentflow.store.base import Item, Namespace
@@ -65,12 +67,16 @@ class PostgresStore:
         self._owns_pool = pool is None
         self.table = table
         self._init_done = False
+        self._schema_lock = asyncio.Lock()
+        self._pool_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
 
     async def _get_pool(self) -> asyncpg.Pool:
         if self._pool is None:
-            self._pool = await asyncpg.create_pool(self._dsn)
+            async with self._pool_lock:
+                if self._pool is None:
+                    self._pool = await asyncpg.create_pool(self._dsn)
         await self._ensure_schema()
         return self._pool
 
@@ -78,23 +84,30 @@ class PostgresStore:
         if self._init_done:
             return
         assert self._pool is not None
-        await self._pool.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {self.table} (
-                namespace  TEXT[]      NOT NULL,
-                key        TEXT        NOT NULL,
-                value      JSONB       NOT NULL,
-                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-                expires_at TIMESTAMPTZ,
-                PRIMARY KEY (namespace, key)
-            )
-            """
-        )
-        await self._pool.execute(
-            f"CREATE INDEX IF NOT EXISTS idx_{self.table}_ns ON {self.table} (namespace)"
-        )
-        self._init_done = True
+        async with self._schema_lock:
+            if self._init_done:  # another coroutine created it while we waited
+                return
+
+            async def create(conn: asyncpg.Connection) -> None:
+                await conn.execute(
+                    f"""
+                    CREATE TABLE IF NOT EXISTS {self.table} (
+                        namespace  TEXT[]      NOT NULL,
+                        key        TEXT        NOT NULL,
+                        value      JSONB       NOT NULL,
+                        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                        expires_at TIMESTAMPTZ,
+                        PRIMARY KEY (namespace, key)
+                    )
+                    """
+                )
+                await conn.execute(
+                    f"CREATE INDEX IF NOT EXISTS idx_{self.table}_ns ON {self.table} (namespace)"
+                )
+
+            await ensure_schema(self._pool, self.table, create)
+            self._init_done = True
 
     async def close(self) -> None:
         """Close the connection pool (only if this store created it)."""
