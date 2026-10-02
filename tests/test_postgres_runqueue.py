@@ -224,16 +224,19 @@ async def test_worker_drives_watch_loop_via_waiting(queue):
     ckpt_table = unique_table("runs_ckpt")
     cp = PostgresCheckpointer(POSTGRES_TEST_DSN, table=ckpt_table)
 
-    results = iter(
-        [
-            WatchResult.idle(cursor={"n": 1}),
-            WatchResult.activity(payload="event", cursor={"n": 2}),
-            WatchResult.terminal(payload="done"),
-        ]
-    )
+    # idle (park) -> activity (respond) -> terminal (exit). Clamp at terminal
+    # so an extra poll across resumes is harmless rather than StopIteration.
+    script = [
+        WatchResult.idle(cursor={"n": 1}),
+        WatchResult.activity(payload="event", cursor={"n": 2}),
+        WatchResult.terminal(payload="done"),
+    ]
+    calls = {"n": 0}
 
     async def poll(cursor):
-        return next(results)
+        r = script[min(calls["n"], len(script) - 1)]
+        calls["n"] += 1
+        return r
 
     def build():
         g = Graph(WatchFlow)
