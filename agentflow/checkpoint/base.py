@@ -55,6 +55,13 @@ class Checkpoint:
     ``interrupted`` is True the run is suspended: ``interrupt_node`` requested
     it and ``interrupt_payload`` is what a human must resolve; ``next`` still
     holds the frontier to resume once an answer is supplied.
+
+    A suspend has a *kind* (:attr:`suspend_kind`). ``"human"`` waits for an
+    external :meth:`resume` with a value (human-in-the-loop). ``"timer"`` waits
+    only for the clock: :attr:`wake_at` is the earliest ISO time the run should
+    be resumed, and resuming re-runs the suspending node (which polls again).
+    Both share the interrupt machinery — a timer wait is an interrupt whose
+    resolver is the clock, not a person.
     """
 
     thread: str
@@ -66,6 +73,9 @@ class Checkpoint:
     interrupted: bool = False
     interrupt_node: str | None = None
     interrupt_payload: Any = None
+    #: ISO-8601 UTC time the run should wake, for a ``"timer"`` suspend; None
+    #: for a ``"human"`` suspend (which waits for an explicit resume value).
+    wake_at: str | None = None
     extra: dict[str, Any] = field(default_factory=dict)
     #: Monotonic write count for this (thread, step). Set by the store on read;
     #: pass the value you read back as ``put(..., if_revision=)`` to guard a
@@ -76,6 +86,17 @@ class Checkpoint:
     @property
     def done(self) -> bool:
         return not self.next and not self.interrupted
+
+    @property
+    def suspend_kind(self) -> str | None:
+        """``"human"`` or ``"timer"`` while suspended, else None.
+
+        Derived so the on-disk shape stays compatible: a suspend with
+        ``wake_at`` set is a timer wait; a suspend without it waits for a human.
+        """
+        if not self.interrupted:
+            return None
+        return "timer" if self.wake_at is not None else "human"
 
 
 @runtime_checkable

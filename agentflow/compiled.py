@@ -150,6 +150,52 @@ class CompiledGraph:
         ):
             yield ev
 
+    async def run_until_done(
+        self,
+        input: Mapping[str, Any] | None = None,
+        *,
+        thread: str = "default",
+        max_sleep: float | None = None,
+    ) -> dict[str, Any]:
+        """Run inline, driving ``ctx.wait`` timer suspends to completion.
+
+        Unlike :meth:`invoke`, which returns as soon as the run suspends, this
+        keeps the process alive across timer waits: when the run parks on a
+        ``ctx.wait``, it sleeps until the checkpoint's ``wake_at`` and resumes,
+        looping until the run finishes. A *human* interrupt (``ctx.interrupt``)
+        still returns control — a person must resolve that, not the clock.
+
+        This is the inline counterpart to the control plane's parked execution.
+        It is honest about its one limit: the process must stay alive for the
+        whole wait. For true parked, cross-restart waiting, drive the graph
+        through the control plane instead. Requires a checkpointer.
+
+        ``max_sleep`` caps each individual sleep (useful in tests) — the wait
+        still resolves only once the real ``wake_at`` has passed.
+        """
+        if self.checkpointer is None:
+            raise CheckpointError("run_until_done requires a checkpointer")
+        state = await self.invoke(input, thread=thread)
+        while True:
+            cp = await self.checkpointer.get(thread)
+            if cp is None or cp.suspend_kind != "timer":
+                return state  # finished, or parked on a human interrupt
+            await self._sleep_until(cp.wake_at, max_sleep)
+            state = await self.resume(thread)
+
+    @staticmethod
+    async def _sleep_until(wake_at: str | None, max_sleep: float | None) -> None:
+        if not wake_at:
+            return
+        from datetime import UTC, datetime
+
+        delay = (datetime.fromisoformat(wake_at) - datetime.now(UTC)).total_seconds()
+        if delay <= 0:
+            return
+        if max_sleep is not None:
+            delay = min(delay, max_sleep)
+        await asyncio.sleep(delay)
+
     # ------------------------------------------------------------------
     # Synchronous facade (convenience for non-async callers)
     # ------------------------------------------------------------------

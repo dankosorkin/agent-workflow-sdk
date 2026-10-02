@@ -38,6 +38,7 @@ def to_payload(cp: Checkpoint) -> dict[str, Any]:
         "interrupted": cp.interrupted,
         "interrupt_node": cp.interrupt_node,
         "interrupt_payload": cp.interrupt_payload,
+        "wake_at": cp.wake_at,
         "extra": dict(cp.extra),
     }
 
@@ -53,5 +54,6 @@ def from_payload(d: dict[str, Any]) -> Checkpoint:
         interrupted=d.get("interrupted", False),
         interrupt_node=d.get("interrupt_node"),
         interrupt_payload=d.get("interrupt_payload"),
+        wake_at=d.get("wake_at"),
         extra=d.get("extra", {}),
     )

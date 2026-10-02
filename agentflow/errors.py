@@ -191,14 +191,19 @@ class RunNotFound(ControlPlaneError):
 
 
 class InterruptError(AgentFlowError):
-    """Internal control-flow signal that a node requested a human interrupt.
+    """Internal control-flow signal that a node requested a suspend.
 
     The runtime catches this to suspend the run and persist an interrupted
     checkpoint; it is not meant to escape to user code. Callers observe the
-    interrupt through the run's stream / return value, not this exception.
+    suspend through the run's stream / return value, not this exception.
+
+    ``wake_at`` distinguishes the two kinds of suspend: ``None`` is a human
+    interrupt (waits for an explicit resume value), while an ISO-8601 time is a
+    timer wait (``ctx.wait``) that the clock resolves.
     """
 
-    def __init__(self, node: str, payload: object):
+    def __init__(self, node: str, payload: object, *, wake_at: str | None = None):
         self.node = node
         self.payload = payload
+        self.wake_at = wake_at
         super().__init__(f"interrupt requested by node {node!r}")

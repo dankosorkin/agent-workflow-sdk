@@ -67,7 +67,7 @@ current_context: contextvars.ContextVar[Context | None] = contextvars.ContextVar
 class StreamEvent:
     """One observable moment in a run, yielded by ``CompiledGraph.stream``."""
 
-    kind: str  # "node_start" | "node_end" | "backend" | "step" | "interrupt" | "done"
+    kind: str  # "node_start"|"node_end"|"backend"|"step"|"interrupt"|"wait"|"done"
     step: int
     node: str | None = None
     data: Any = None
@@ -130,6 +130,26 @@ class Context:
             self._resume.used = True
             return self._resume.value
         raise InterruptError(self.node, payload)
+
+    async def wait(self, wake_at: str, payload: Any = None) -> Any:
+        """Suspend the run until ``wake_at`` (an ISO-8601 time), then re-run.
+
+        This is a timer-based sibling of :meth:`interrupt`: a fresh call
+        suspends the run with a checkpoint marked to wake no earlier than
+        ``wake_at``, and no human answer is needed — the clock resolves it.
+        When the run resumes (the control plane re-claims it once the time
+        passes, or an inline runner sleeps until then), this call returns and
+        the node runs again, typically to poll an external system once more.
+
+        ``payload`` is persisted on the checkpoint (e.g. a watcher cursor) so
+        the node can pick up where it left off. On resume the seeded value is
+        returned, mirroring :meth:`interrupt`; a watcher usually ignores it and
+        reads its cursor from state instead.
+        """
+        if self._resume is not None and not self._resume.used:
+            self._resume.used = True
+            return self._resume.value
+        raise InterruptError(self.node, payload, wake_at=wake_at)
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +323,11 @@ async def run(
         # frontier is preserved so resume re-runs the same super-step.
         for name, res in zip(frontier, results, strict=True):
             if isinstance(res, InterruptError):
-                await _emit(StreamEvent("interrupt", step, node=name, data=res.payload))
+                # wake_at set -> a timer wait (ctx.wait); None -> a human
+                # interrupt (ctx.interrupt). Same suspend machinery, different
+                # resolver (the clock vs a person).
+                kind = "wait" if res.wake_at is not None else "interrupt"
+                await _emit(StreamEvent(kind, step, node=name, data=res.payload))
                 await _safe(hooks.on_run_end(thread, step, completed=False))
                 cp = Checkpoint(
                     thread=thread,
@@ -315,6 +339,7 @@ async def run(
                     interrupted=True,
                     interrupt_node=name,
                     interrupt_payload=res.payload,
+                    wake_at=res.wake_at,
                 )
                 if checkpointer is not None:
                     parent_id = await checkpointer.put(cp)

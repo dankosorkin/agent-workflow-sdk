@@ -20,6 +20,13 @@ from agentflow.prebuilt.idempotent import artifact_key, skip_if_done
 from agentflow.prebuilt.loop import Candidate, iterate_until_converged
 from agentflow.prebuilt.resilience import with_retry, with_timeout
 from agentflow.prebuilt.tool_loop import Tool, ToolLoopState, tool_loop
+from agentflow.prebuilt.watch import (
+    CommandWatcher,
+    Watcher,
+    WatchResult,
+    route_watch,
+    watch_node,
+)
 
 __all__ = [
     "Candidate",
@@ -38,4 +45,9 @@ __all__ = [
     "tool_loop",
     "with_retry",
     "with_timeout",
+    "WatchResult",
+    "Watcher",
+    "CommandWatcher",
+    "watch_node",
+    "route_watch",
 ]
