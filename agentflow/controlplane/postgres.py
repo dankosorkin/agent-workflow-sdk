@@ -248,11 +248,14 @@ class PostgresRunQueue:
         pool = await self._get_pool()
         # wake_at applies only to a parked (waiting) run; any other completion
         # clears it so a terminal/queued row never carries a stale wake time.
-        wake = wake_at if status == RunStatus.WAITING else None
+        wake_iso = wake_at if status == RunStatus.WAITING else None
+        # asyncpg binds a timestamptz parameter from a datetime, not a str, so
+        # parse the ISO wake time before binding.
+        wake = datetime.fromisoformat(wake_iso) if wake_iso else None
         result = await pool.execute(
             f"UPDATE {self.table} SET "
             "status = $2, error = $3, lease_until = NULL, "
-            "wake_at = $4::timestamptz, updated_at = NOW() "
+            "wake_at = $4, updated_at = NOW() "
             "WHERE run_id = $1",
             run_id,
             status,
