@@ -4,6 +4,18 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Changed
+
+- Internal: the Postgres backends (`PostgresStore`, `PostgresCheckpointer`,
+  `PostgresRunQueue`) now have a real-server contract test suite, run in CI
+  against a `postgres` service container. The tests are marked `pg` and skipped
+  by the default hermetic run (they need `POSTGRES_TEST_DSN`); they cover the
+  SQL-only paths the in-memory suites can't — the `if_absent` conditional write
+  and `StoreConflict`, the `if_revision` compare-and-set and `CheckpointConflict`,
+  and concurrent `claim` under `FOR UPDATE SKIP LOCKED`.
+
 ## [0.2.0] - 2026-10-01
 
 ### Added

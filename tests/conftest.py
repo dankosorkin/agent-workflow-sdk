@@ -23,6 +23,7 @@ key is present.
 from __future__ import annotations
 
 import os
+import uuid
 from pathlib import Path
 
 _PLACEHOLDERS = {"", "REPLACE_ME", "sk-...", "sk-ant-..."}
@@ -46,3 +47,32 @@ def _load_dotenv() -> None:
 
 
 _load_dotenv()
+
+
+# ---------------------------------------------------------------------------
+# Postgres test support (opt-in, marker `pg`)
+# ---------------------------------------------------------------------------
+#
+# The pg-marked tests exercise the real SQL paths of PostgresStore,
+# PostgresCheckpointer, and PostgresRunQueue against a live server. They are
+# skipped unless POSTGRES_TEST_DSN points at one (CI starts a `postgres`
+# service and sets it). Each test gets a unique table name so runs never
+# collide and cleanup is a single DROP TABLE.
+
+POSTGRES_TEST_DSN = os.environ.get("POSTGRES_TEST_DSN")
+
+
+def unique_table(prefix: str) -> str:
+    """A collision-free, identifier-safe table name for one test."""
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+async def drop_table(dsn: str, table: str) -> None:
+    """Best-effort teardown: drop a test table (asyncpg must be importable)."""
+    import asyncpg
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        await conn.execute(f"DROP TABLE IF EXISTS {table}")
+    finally:
+        await conn.close()

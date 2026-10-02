@@ -55,11 +55,13 @@ packages = ["agentflow"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
-# Live tests spawn real agent CLIs / hit a real Ollama server. They are opt-in:
-# the default run skips them so CI stays hermetic. Run them with `pytest -m live`.
-addopts = "-m 'not live'"
+# Live tests spawn real agent CLIs / hit a real Ollama server; pg tests need a
+# real PostgreSQL server. Both are opt-in so the default run stays hermetic.
+# Run them with `pytest -m live` / `pytest -m pg`.
+addopts = "-m 'not live and not pg'"
 markers = [
     "live: end-to-end test against a real backend (agent CLI or Ollama server); opt-in, skipped by default",
+    "pg: test against a real PostgreSQL server (needs POSTGRES_TEST_DSN); opt-in, skipped by default",
 ]
 
 # Coverage is opt-in to keep the default `pytest` fast. Run:
