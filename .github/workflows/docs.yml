@@ -1,12 +1,18 @@
 name: Docs
 
-# Build the mkdocs site and deploy it to GitHub Pages on a version tag, or on
-# demand from the Actions tab. Enable Pages once (Settings -> Pages -> Source:
-# GitHub Actions) for the deploy step to publish.
+# Build the mkdocs site and deploy it to GitHub Pages when docs change on main,
+# or on demand from the Actions tab. Triggering on main (not a tag) matches the
+# github-pages environment's branch protection, which allows the default branch
+# — a tag push is rejected by that rule. Enable Pages once
+# (Settings -> Pages -> Source: GitHub Actions) for the deploy step to publish.
 on:
   push:
-    tags:
-      - "v*"
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "mkdocs.yml"
+      - "agentflow/**"
+      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 # Allow one concurrent deploy; a newer run supersedes an in-flight one.
