@@ -30,21 +30,26 @@ __all__ = ["RunStatus", "RunRecord", "QueueStats", "PoolHealth"]
 class RunStatus:
     """The lifecycle states of a run (string constants, JSON-friendly).
 
-    ``queued`` -> ``running`` -> ``succeeded`` | ``interrupted`` | ``failed`` |
-    ``cancelled``. An ``interrupted`` run returns to ``queued`` via
-    ``enqueue_resume``; a ``queued``/``running`` run can be cancelled.
+    ``queued`` -> ``running`` -> ``succeeded`` | ``interrupted`` | ``waiting``
+    | ``failed`` | ``cancelled``. An ``interrupted`` run returns to ``queued``
+    via ``enqueue_resume``; a ``waiting`` run (parked on ``ctx.wait``) becomes
+    claimable again on its own once ``wake_at`` passes; a ``queued``/``running``
+    run can be cancelled.
     """
 
     QUEUED: Final = "queued"
     RUNNING: Final = "running"
     SUCCEEDED: Final = "succeeded"
     INTERRUPTED: Final = "interrupted"
+    WAITING: Final = "waiting"
     FAILED: Final = "failed"
     CANCELLED: Final = "cancelled"
 
     #: Terminal states — a run in one of these will not run again on its own.
     TERMINAL: Final = frozenset({SUCCEEDED, FAILED, CANCELLED})
     #: States a worker may claim (queued, or running with an expired lease).
+    #: ``waiting`` is claimable too, but only once ``wake_at`` passes, so the
+    #: time gate lives in the queue's claim logic, not this static set.
     CLAIMABLE: Final = frozenset({QUEUED, RUNNING})
 
 
@@ -72,6 +77,9 @@ class RunRecord:
     created_at: str = ""
     updated_at: str = ""
     lease_until: str | None = None
+    #: For a ``waiting`` run (parked on ``ctx.wait``): the earliest ISO time it
+    #: should be re-claimed. None otherwise.
+    wake_at: str | None = None
     cancel_requested: bool = False
     extra: dict[str, Any] = field(default_factory=dict)
 

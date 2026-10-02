@@ -58,18 +58,23 @@ class RunQueue(Protocol):
         ...
 
     async def claim(self, *, lease_seconds: float = 60.0) -> RunRecord | None:
-        """Atomically take one runnable request (queued, or running with an
-        expired lease), mark it running under a fresh lease, and return it.
-        Returns None if nothing is available. Safe for concurrent workers."""
+        """Atomically take one runnable request and mark it running under a
+        fresh lease. Runnable means: queued, running with an expired lease, or
+        waiting (parked on ``ctx.wait``) with its ``wake_at`` now past. Returns
+        None if nothing is available. Safe for concurrent workers."""
         ...
 
     async def heartbeat(self, run_id: str, *, lease_seconds: float = 60.0) -> None:
         """Extend the lease on a claimed run (call periodically while working)."""
         ...
 
-    async def complete(self, run_id: str, *, status: str, error: str | None = None) -> None:
+    async def complete(
+        self, run_id: str, *, status: str, error: str | None = None, wake_at: str | None = None
+    ) -> None:
         """Move a claimed run to a terminal-ish status (succeeded / failed /
-        interrupted / cancelled), clearing its lease."""
+        interrupted / cancelled), clearing its lease. For a ``waiting`` status
+        (parked on ``ctx.wait``), pass ``wake_at`` so the run becomes claimable
+        again once that time passes."""
         ...
 
     async def request_cancel(self, run_id: str) -> bool:

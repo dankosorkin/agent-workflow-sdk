@@ -106,6 +106,7 @@ class PostgresRunQueue:
                         created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                         lease_until      TIMESTAMPTZ,
+                        wake_at          TIMESTAMPTZ,
                         cancel_requested BOOLEAN     NOT NULL DEFAULT FALSE
                     )
                     """
@@ -146,12 +147,13 @@ class PostgresRunQueue:
             created_at=self._iso(row["created_at"]) or "",
             updated_at=self._iso(row["updated_at"]) or "",
             lease_until=self._iso(row["lease_until"]),
+            wake_at=self._iso(row["wake_at"]),
             cancel_requested=row["cancel_requested"],
         )
 
     _COLS = (
         "run_id, graph, thread, status, input, resume_value, error, attempt, "
-        "created_at, updated_at, lease_until, cancel_requested"
+        "created_at, updated_at, lease_until, wake_at, cancel_requested"
     )
 
     async def enqueue(
@@ -211,11 +213,13 @@ class PostgresRunQueue:
                 status = '{RunStatus.RUNNING}',
                 attempt = attempt + 1,
                 lease_until = NOW() + make_interval(secs => $1),
+                wake_at = NULL,
                 updated_at = NOW()
             WHERE run_id = (
                 SELECT run_id FROM {self.table}
                 WHERE status = '{RunStatus.QUEUED}'
                    OR (status = '{RunStatus.RUNNING}' AND lease_until < NOW())
+                   OR (status = '{RunStatus.WAITING}' AND wake_at <= NOW())
                 ORDER BY created_at
                 FOR UPDATE SKIP LOCKED
                 LIMIT 1
@@ -238,15 +242,22 @@ class PostgresRunQueue:
         if result.split()[-1] == "0":
             raise RunNotFound(run_id)
 
-    async def complete(self, run_id: str, *, status: str, error: str | None = None) -> None:
+    async def complete(
+        self, run_id: str, *, status: str, error: str | None = None, wake_at: str | None = None
+    ) -> None:
         pool = await self._get_pool()
+        # wake_at applies only to a parked (waiting) run; any other completion
+        # clears it so a terminal/queued row never carries a stale wake time.
+        wake = wake_at if status == RunStatus.WAITING else None
         result = await pool.execute(
             f"UPDATE {self.table} SET "
-            "status = $2, error = $3, lease_until = NULL, updated_at = NOW() "
+            "status = $2, error = $3, lease_until = NULL, "
+            "wake_at = $4::timestamptz, updated_at = NOW() "
             "WHERE run_id = $1",
             run_id,
             status,
             error,
+            wake,
         )
         if result.split()[-1] == "0":
             raise RunNotFound(run_id)

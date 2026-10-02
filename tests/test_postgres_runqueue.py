@@ -107,6 +107,43 @@ async def test_stats_snapshot(queue):
     assert stats.running == 1
 
 
+# --- parked (ctx.wait) runs: WAITING status + wake_at gating ---------------
+
+
+async def test_waiting_run_not_claimable_before_wake(queue):
+    from datetime import UTC, datetime, timedelta
+
+    from agentflow import RunStatus
+
+    rec = await queue.enqueue("g", {})
+    await queue.claim()
+    future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+    await queue.complete(rec.run_id, status=RunStatus.WAITING, wake_at=future)
+
+    assert (await queue.get(rec.run_id)).status == RunStatus.WAITING
+    # wake_at is an hour out, so nothing is runnable yet.
+    assert await queue.claim() is None
+
+
+async def test_waiting_run_reclaimed_after_wake(queue):
+    import asyncio
+    from datetime import UTC, datetime, timedelta
+
+    from agentflow import RunStatus
+
+    rec = await queue.enqueue("g", {})
+    await queue.claim()
+    soon = (datetime.now(UTC) + timedelta(seconds=0.5)).isoformat()
+    await queue.complete(rec.run_id, status=RunStatus.WAITING, wake_at=soon)
+
+    assert await queue.claim() is None  # not yet
+    await asyncio.sleep(0.7)
+    again = await queue.claim()
+    assert again is not None and again.run_id == rec.run_id
+    assert again.status == RunStatus.RUNNING
+    assert again.wake_at is None  # cleared on claim
+
+
 # --- the real-server concurrency guarantee ---------------------------------
 
 
@@ -164,6 +201,77 @@ async def test_worker_runs_to_success(queue):
         assert await worker.run_once() is True
         assert (await queue.get(rec.run_id)).status == RunStatus.SUCCEEDED
         assert (await cp.get(rec.run_id)).state["n"] == 42
+    finally:
+        await cp.close()
+        await drop_table(POSTGRES_TEST_DSN, ckpt_table)
+
+
+class WatchFlow(State):
+    watch_result: Annotated[object, last]
+    watch_cursor: Annotated[object, last]
+    seen: Annotated[list, append]
+
+
+async def test_worker_drives_watch_loop_via_waiting(queue):
+    # A watch loop parked on ctx.wait becomes a WAITING run; the worker frees
+    # itself, then re-claims and resumes once wake_at passes, until terminal.
+    import asyncio
+
+    from agentflow import RunStatus
+    from agentflow.checkpoint import PostgresCheckpointer
+    from agentflow.prebuilt import WatchResult, route_watch, watch_node
+
+    ckpt_table = unique_table("runs_ckpt")
+    cp = PostgresCheckpointer(POSTGRES_TEST_DSN, table=ckpt_table)
+
+    results = iter(
+        [
+            WatchResult.idle(cursor={"n": 1}),
+            WatchResult.activity(payload="event", cursor={"n": 2}),
+            WatchResult.terminal(payload="done"),
+        ]
+    )
+
+    async def poll(cursor):
+        return next(results)
+
+    def build():
+        g = Graph(WatchFlow)
+
+        async def respond(state, ctx):
+            return {"seen": state["watch_result"].payload}
+
+        g.add_node("wait", watch_node(poll, poll_interval=0.5))
+        g.add_node("respond", respond)
+        g.add_edge(START, "wait")
+        g.add_conditional_edges("wait", route_watch, {"activity": "respond", "terminal": END})
+        g.add_edge("respond", "wait")
+        return g.compile(checkpointer=cp)
+
+    reg = GraphRegistry()
+    reg.register("watch", build)
+    worker = Worker(queue, reg, poll_interval=0.05)
+    try:
+        rec = await queue.enqueue("watch", {"seen": []})
+
+        # 1st execution: first poll is idle -> run parks as WAITING.
+        await worker.run_once()
+        assert (await queue.get(rec.run_id)).status == RunStatus.WAITING
+
+        # Wait out wake_at, then the worker re-claims and resumes. The second
+        # poll is activity (respond), the third terminal (exit) — may take a
+        # couple of claim cycles, so drive until terminal.
+        await asyncio.sleep(0.6)
+        for _ in range(5):
+            if await worker.run_once():
+                rec_now = await queue.get(rec.run_id)
+                if rec_now.status in RunStatus.TERMINAL:
+                    break
+            await asyncio.sleep(0.6)
+
+        final = await queue.get(rec.run_id)
+        assert final.status == RunStatus.SUCCEEDED
+        assert (await cp.get(rec.thread)).state["seen"] == ["event"]
     finally:
         await cp.close()
         await drop_table(POSTGRES_TEST_DSN, ckpt_table)

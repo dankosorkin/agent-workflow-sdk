@@ -124,10 +124,10 @@ class Worker:
             with contextlib.suppress(asyncio.CancelledError):
                 await heartbeat
 
-        # Distinguish a finished run from one suspended on an interrupt by
-        # reading the checkpoint the run just wrote.
-        status = await self._final_status(graph, rec.thread)
-        await self.queue.complete(rec.run_id, status=status)
+        # Read the checkpoint the run just wrote to tell finished from
+        # suspended, and a human interrupt from a timer wait (ctx.wait).
+        status, wake_at = await self._final_status(graph, rec.thread)
+        await self.queue.complete(rec.run_id, status=status, wake_at=wake_at)
 
     def _start_work(self, graph, rec: RunRecord, is_resume: bool):
         if is_resume:
@@ -143,13 +143,16 @@ class Worker:
         cp = await graph.get_state(rec.thread)
         return cp is not None and cp.interrupted and not cp.done
 
-    async def _final_status(self, graph, thread: str) -> str:
+    async def _final_status(self, graph, thread: str) -> tuple[str, str | None]:
         cp = await graph.get_state(thread) if graph.checkpointer is not None else None
-        if cp is None:
-            return RunStatus.SUCCEEDED
-        if cp.interrupted:
-            return RunStatus.INTERRUPTED
-        return RunStatus.SUCCEEDED
+        if cp is None or not cp.interrupted:
+            return RunStatus.SUCCEEDED, None
+        # A timer wait (ctx.wait) parks the run until wake_at; a human interrupt
+        # waits for an explicit resume. Same checkpoint flag, different queue
+        # state and resolver.
+        if cp.suspend_kind == "timer":
+            return RunStatus.WAITING, cp.wake_at
+        return RunStatus.INTERRUPTED, None
 
     async def _heartbeat_loop(self, run_id: str) -> None:
         while True:

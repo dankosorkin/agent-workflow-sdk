@@ -93,6 +93,13 @@ class MemoryRunQueue:
                     and r.lease_until is not None
                     and datetime.fromisoformat(r.lease_until) <= now
                 )
+                or (
+                    # A parked (ctx.wait) run becomes claimable once its wake
+                    # time passes — the timer-based sibling of lease expiry.
+                    r.status == RunStatus.WAITING
+                    and r.wake_at is not None
+                    and datetime.fromisoformat(r.wake_at) <= now
+                )
             ]
             if not candidates:
                 return None
@@ -102,6 +109,7 @@ class MemoryRunQueue:
                 chosen,
                 status=RunStatus.RUNNING,
                 lease_until=_iso(now + timedelta(seconds=lease_seconds)),
+                wake_at=None,
                 attempt=chosen.attempt + 1,
                 updated_at=_iso(now),
             )
@@ -117,7 +125,9 @@ class MemoryRunQueue:
                 updated_at=_iso(_now()),
             )
 
-    async def complete(self, run_id: str, *, status: str, error: str | None = None) -> None:
+    async def complete(
+        self, run_id: str, *, status: str, error: str | None = None, wake_at: str | None = None
+    ) -> None:
         async with self._lock:
             rec = self._require(run_id)
             self._runs[run_id] = dataclasses.replace(
@@ -125,6 +135,9 @@ class MemoryRunQueue:
                 status=status,
                 error=error,
                 lease_until=None,
+                # wake_at is meaningful only for a parked (waiting) run; any
+                # other completion clears it.
+                wake_at=wake_at if status == RunStatus.WAITING else None,
                 updated_at=_iso(_now()),
             )
 
