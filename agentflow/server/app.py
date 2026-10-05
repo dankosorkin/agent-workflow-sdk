@@ -180,9 +180,7 @@ def create_app(
         return RunResponse.of(rec)
 
     @app.post("/runs/{run_id}/cancel", response_model=CancelResponse, tags=["runs"])
-    async def cancel_run(
-        run_id: str, q: Annotated[RunQueue, Depends(get_queue)]
-    ) -> CancelResponse:
+    async def cancel_run(run_id: str, q: Annotated[RunQueue, Depends(get_queue)]) -> CancelResponse:
         cancelled = await q.request_cancel(run_id)
         return CancelResponse(cancelled=cancelled)
 
