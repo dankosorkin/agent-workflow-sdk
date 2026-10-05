@@ -152,9 +152,11 @@ execution state; a store is cross-thread application data.
 
 ## Control plane
 
-The control plane manages runs from outside the process that created them. It
-is a library layer, not a service — there is no HTTP server (that is planned as
-a thin adapter over these methods).
+The control plane manages runs from outside the process that created them. The
+core is a library layer, not a service. An optional HTTP layer — the `server`
+extra, `agentflow.server.create_app` — is a thin FastAPI adapter mapping 1:1
+over the queue methods below; it adds no behavior of its own, and auth and
+multi-tenancy remain out of scope (see below).
 
 - `GraphRegistry` maps a graph name to a compiled-graph factory. Graphs are
   code and cannot be serialized, so a run request references a graph by name;
@@ -172,6 +174,13 @@ a thin adapter over these methods).
   concurrency.
 - Monitoring: `RunQueue.stats()` and `WorkerPool.health()` return plain values
   a caller can expose through its own `/healthz` and `/metrics`.
+- HTTP (optional, `server` extra): `agentflow.server.create_app(queue)` returns
+  a FastAPI ASGI app exposing the enqueue-and-observe plane — `POST /runs`,
+  `GET /runs/{id}`, `GET /runs`, `POST /runs/{id}/resume`,
+  `POST /runs/{id}/cancel`, `GET /stats`, `GET /healthz`. The worker protocol
+  (`claim` / `heartbeat` / `complete`) is deliberately not exposed; workers
+  talk to the queue directly. Each route forwards to one queue method, so the
+  HTTP layer carries no state of its own.
 
 ## Observability
 
@@ -197,10 +206,11 @@ See `SECURITY.md` for the reporting process and the operator-facing summary.
 
 ## What is intentionally out of scope
 
-- An HTTP/gRPC API over the control plane, and the auth/multi-tenancy that a
-  service layer implies. These are properties of a service, not this SDK, and
-  are deferred to a future `server` layer that adapts the existing queue
-  methods.
+- Authentication, authorization, and multi-tenancy over the HTTP layer. The
+  optional `server` extra adapts the queue to HTTP, but it ships no auth and no
+  per-tenant isolation — those are properties of a service, not this SDK. Run
+  it inside your own trust boundary, or behind a reverse proxy that supplies
+  them. A gRPC API is not provided.
 - Rate limiting and per-tenant quotas. `max_concurrency` /
   `max_node_concurrency` bound pressure within one process; per-tenant
   isolation is the caller's responsibility until the service layer exists.

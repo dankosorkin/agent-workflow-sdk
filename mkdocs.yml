@@ -144,6 +144,7 @@ nav:
           - Checkpointing: reference/api/checkpoint.md
           - Store: reference/api/store.md
           - Control plane: reference/api/controlplane.md
+          - HTTP server: reference/api/server.md
           - Observability: reference/api/observability.md
           - Prebuilt patterns: reference/api/prebuilt.md
           - Quality gates: reference/api/gate.md
