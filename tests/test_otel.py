@@ -21,8 +21,10 @@ from typing import Annotated
 import pytest
 from agentflow import END, START, Graph, State, add
 
-# Skip the whole module if the otel extra isn't installed.
-otel = pytest.importorskip("opentelemetry")
+# Skip the whole module if the otel extra isn't installed. Guard on
+# opentelemetry.sdk, not the bare opentelemetry namespace: the API package can
+# be present transitively while the SDK (the otel extra) is not.
+otel = pytest.importorskip("opentelemetry.sdk")
 
 from agentflow.otel import OtelHooks  # noqa: E402
 from opentelemetry.sdk.trace import TracerProvider  # noqa: E402
