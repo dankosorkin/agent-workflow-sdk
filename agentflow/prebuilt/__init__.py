@@ -18,6 +18,15 @@ from agentflow.prebuilt.effects import IdempotentOp, IncompleteEffectError, effe
 from agentflow.prebuilt.gate import Evaluator, GateResult, GateState, add_quality_gate
 from agentflow.prebuilt.idempotent import artifact_key, skip_if_done
 from agentflow.prebuilt.loop import Candidate, iterate_until_converged
+from agentflow.prebuilt.plan_executor import (
+    Handler,
+    PlanState,
+    Task,
+    TaskResult,
+    add_plan_executor,
+    plan_complete,
+    plan_stalled,
+)
 from agentflow.prebuilt.resilience import with_retry, with_timeout
 from agentflow.prebuilt.tool_loop import Tool, ToolLoopState, tool_loop
 from agentflow.prebuilt.watch import (
@@ -31,6 +40,13 @@ from agentflow.prebuilt.watch import (
 __all__ = [
     "Candidate",
     "iterate_until_converged",
+    "Task",
+    "TaskResult",
+    "PlanState",
+    "Handler",
+    "add_plan_executor",
+    "plan_complete",
+    "plan_stalled",
     "GateResult",
     "GateState",
     "Evaluator",

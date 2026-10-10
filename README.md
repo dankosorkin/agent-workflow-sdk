@@ -492,6 +492,35 @@ app = iterate_until_converged(work, perfect_score=100.0, patience=4)
 result = await app.invoke({})
 ```
 
+`agentflow.prebuilt.add_plan_executor(g, handlers=..., on_idle=...)` runs a
+dependency graph of tasks that a planner emits as data. The planner writes
+`Task`s (each with an `id`, a `kind`, and `prerequisites`) into a `by_key`
+`plan` channel; the executor runs each task once its prerequisites are done,
+fans independent ones out concurrently up to `max_fanout`, and loops until
+nothing is runnable. The graph stays static — a new task is new data, not a new
+node — so the plan is checkpointed and a resume recomputes what is runnable.
+This is how a workflow builds and re-optimizes its own execution plan as it
+goes. See `examples/plan_executor_demo.py`.
+
+```python
+from agentflow.prebuilt import PlanState, Task, TaskResult, add_plan_executor
+
+async def run_step(task, state, ctx) -> TaskResult:
+    return TaskResult(task.id, output=await do_work(task))
+
+async def planner(state, ctx):
+    return {"plan": {"tasks": [
+        Task("fetch", "step"),
+        Task("build", "step", prerequisites=("fetch",)),
+    ]}}
+
+g = Graph(PlanState)
+g.add_node("planner", planner)
+add_plan_executor(g, handlers={"step": run_step}, on_idle="planner")
+g.add_edge(START, "planner")
+g.add_edge("planner", "dispatch")
+```
+
 `agentflow.prebuilt.tool_loop(llm, tools)` compiles the function-calling agent
 loop as a two-node graph: an `agent` node calls the `LLMBackend`, a `tools`
 node runs any tool the model requested and appends the result to the
@@ -546,7 +575,7 @@ agentflow/
   checkpoint/         Checkpointer protocol + memory/file/sqlite/redis/postgres
   store/              Store protocol (cross-thread memory) + memory/postgres
   controlplane/       RunQueue + GraphRegistry + Worker (memory/postgres)
-  prebuilt/           iterate_until_converged, tool_loop, with_retry/with_timeout
+  prebuilt/           iterate_until_converged, tool_loop, plan_executor, gates
 examples/             runnable examples
 tests/                pytest suite (async; offline by default, `-m live` for real backends)
 DESIGN.md             architecture and contracts

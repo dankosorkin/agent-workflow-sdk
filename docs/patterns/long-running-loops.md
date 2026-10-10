@@ -86,6 +86,60 @@ Two subtleties this recipe makes you confront, both consequences of reducers, no
 
 `examples/dual_state_search.py` is a runnable, offline version — a planner proposing strategies, workers scoring them concurrently, and a verifier promoting the best. The domain types (intents, candidates, verified, incumbent) live in the consumer; the core provides only the `by_key` channel they fold through.
 
+## Recipe: plan-as-data, the planner emits a task DAG
+
+The previous recipe fans out a flat set of independent experiments. The next step up is work with dependencies — a task that cannot start until others finish. The engine graph is static, so you cannot add a node per task at runtime. Instead the planner emits the dependency graph as data, and [`add_plan_executor`](../reference/api/plan-executor.md) runs it by readiness: a task runs once all its prerequisites are done, independent tasks fan out concurrently, and the loop continues until nothing is runnable.
+
+```mermaid
+flowchart LR
+    planner --> dispatch{runnable?}
+    dispatch -- fan out --> slots
+    slots --> collect{more?}
+    collect -- yes --> dispatch
+    collect -- no --> planner
+    dispatch -- none --> planner
+```
+
+The plan is data in a `by_key` channel, so it is checkpointed and a resume recomputes which tasks are runnable from durable state — no node is added to the graph at runtime, and a new task is new data, not new structure.
+
+```python
+from agentflow.prebuilt import PlanState, Task, TaskResult, add_plan_executor, plan_complete
+
+class BuildState(PlanState):          # the plan channel comes from the mixin
+    seeded: Annotated[bool, last]
+
+async def run_step(task, state, ctx) -> TaskResult:
+    return TaskResult(task.id, output=await do_work(task))
+
+async def planner(state, ctx):
+    if state.get("seeded"):
+        return {}
+    tasks = [
+        Task("fetch", "step"),
+        Task("compile", "step", prerequisites=("fetch",)),
+        Task("test", "step", prerequisites=("compile",)),
+        Task("lint", "step", prerequisites=("compile",)),   # runs with test
+        Task("package", "step", prerequisites=("test", "lint")),
+    ]
+    return {"plan": {"tasks": tasks}, "seeded": True}
+
+g = Graph(BuildState)
+g.add_node("planner", planner)
+add_plan_executor(g, handlers={"step": run_step}, on_idle="report", max_fanout=4)
+g.add_edge(START, "planner")
+g.add_edge("planner", "dispatch")
+```
+
+A handler is `async (task, state, ctx) -> TaskResult`, chosen by the task's `kind` from the `handlers` pool. The executor creates a `dispatch` node, a fixed pool of `max_fanout` run slots (so at most that many tasks run concurrently per super-step), and a `collect` node, wired to loop until the plan has no runnable task. `on_idle` is where control goes then — typically back to the planner to observe results and propose more, or to a node that ends the run.
+
+Three properties worth stating plainly:
+
+- The runnable frontier is derived from state every super-step, never stored. That is what makes a resume need no special path: a task mid-flight at a crash is simply re-dispatched, since its id is not yet in `done_ids`.
+- A failed task counts as finished but blocks its dependents — they never become runnable. Use `plan_stalled(state)` at `on_idle` to tell "nothing left to do" from "stuck on a failed prerequisite or a cycle", and `plan_complete(state)` for the clean-finish case.
+- Execution is at-least-once, like the rest of the SDK. `task.id` is the stable key across a resume, so pass it to [`IdempotentOp`](#side-effects-and-delivery-semantics) or a downstream dedup token to make an effect exactly-once.
+
+`examples/plan_executor_demo.py` is a runnable, offline version — the five-task build DAG above, with `test` and `lint` running concurrently. This is the primitive the [optimization tutorial](tutorial-qa-agent.md) builds toward: a planner that emits a plan and re-optimizes it as results come in, with the engine running it durably as it goes.
+
 ## Recipe: budget-aware stopping
 
 An autonomous run needs a ceiling — a router that stops not only on quality but on cost. Keep the budget where it belongs: `attempts` is a decision input that must survive a resume, so it lives in state; wall-clock time and token counts are non-deterministic, so keep them in [`RunMetrics`](../durability/observability.md) or your own hook rather than in the checkpoint. Putting a timestamp in state means a resume would "replay" a time from the past and mislead the router.

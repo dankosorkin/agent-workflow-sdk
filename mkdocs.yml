@@ -148,6 +148,7 @@ nav:
           - Observability: reference/api/observability.md
           - Prebuilt patterns: reference/api/prebuilt.md
           - Quality gates: reference/api/gate.md
+          - Plan executor: reference/api/plan-executor.md
           - Watch: reference/api/watch.md
           - Interrupt payloads: reference/api/interrupts.md
           - Errors: reference/api/errors.md
