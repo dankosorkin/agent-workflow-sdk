@@ -107,4 +107,4 @@ node = skip_if_done(expensive, store,
                     key_from=lambda s: artifact_key(s["input"]))
 ```
 
-Next: [long-running loops](long-running-loops.md) for how these compose, or the [tutorial](tutorial-qa-agent.md) for an end-to-end agent.
+Next: [long-running loops](long-running-loops.md) for how these compose, or the [Q&A agent tutorial](../tutorials/qa-agent.md) for an end-to-end agent.

@@ -138,7 +138,7 @@ Three properties worth stating plainly:
 - A failed task counts as finished but blocks its dependents — they never become runnable. Use `plan_stalled(state)` at `on_idle` to tell "nothing left to do" from "stuck on a failed prerequisite or a cycle", and `plan_complete(state)` for the clean-finish case.
 - Execution is at-least-once, like the rest of the SDK. `task.id` is the stable key across a resume, so pass it to [`IdempotentOp`](#side-effects-and-delivery-semantics) or a downstream dedup token to make an effect exactly-once.
 
-`examples/plan_executor_demo.py` is a runnable, offline version — the five-task build DAG above, with `test` and `lint` running concurrently. This is the primitive the [optimization tutorial](tutorial-qa-agent.md) builds toward: a planner that emits a plan and re-optimizes it as results come in, with the engine running it durably as it goes.
+`examples/plan_executor_demo.py` is a runnable, offline version — the five-task build DAG above, with `test` and `lint` running concurrently. This is the primitive the [optimizer tutorial](../tutorials/optimizer/10-plan-executor.md) builds toward: a planner that emits a plan and re-optimizes it as results come in, with the engine running it durably as it goes.
 
 ## Recipe: budget-aware stopping
 
@@ -294,4 +294,4 @@ Two limits to keep honest: polling is not push — an event is seen at the next 
 
 Do not mix "the work" and "the decision to continue" in one node. The work node writes an artifact; a gate or router reads state and decides. That separation is what makes each super-step atomic, each checkpoint meaningful, and each resume predictable — the properties a run needs to survive being left alone for an hour.
 
-Next: the [quality gates](../durability/quality-gates.md) chapter for the gate contract in full, or the [tutorial](tutorial-qa-agent.md) for an end-to-end agent.
+Next: the [quality gates](../durability/quality-gates.md) chapter for the gate contract in full, or the [Q&A agent tutorial](../tutorials/qa-agent.md) for an end-to-end agent.

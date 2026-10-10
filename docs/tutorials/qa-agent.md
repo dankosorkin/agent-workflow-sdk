@@ -2,7 +2,7 @@
 
 This is the payoff chapter. We'll build a small but complete agent that answers questions about a body of documentation: it searches the docs, reads the hits, and writes a grounded answer — calling tools in a loop until it's done. Along the way we'll wire in streaming, durability, and a human approval step, so the pieces from earlier chapters come together in one program.
 
-Nothing here is new machinery. It's the [`tool_loop`](prebuilt.md) pattern with real tools, plus a checkpointer and an interrupt.
+Nothing here is new machinery. It's the [`tool_loop`](../patterns/prebuilt.md) pattern with real tools, plus a checkpointer and an interrupt.
 
 ## What we're building
 
