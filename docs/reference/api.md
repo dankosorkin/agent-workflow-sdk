@@ -175,6 +175,7 @@ from agentflow.prebuilt import (
     tool_loop, Tool, ToolLoopState,
     iterate_until_converged, Candidate,
     Task, TaskResult, PlanState, add_plan_executor, plan_complete, plan_stalled,
+    Score, Scorer, score_candidates, best_of, ScoreCache,
     with_retry, with_timeout,
     GateResult, GateState, Evaluator, add_quality_gate,
     artifact_key, skip_if_done,
@@ -184,6 +185,8 @@ tool_loop(llm, tools, max_turns=10, stream_text=False, checkpointer=None)
 iterate_until_converged(work, perfect_score=100.0, patience=4, max_iterations=20, checkpointer=None)
 add_plan_executor(g, *, handlers, on_idle, dispatch="dispatch", collect="collect", max_fanout=8)
 plan_complete(state) -> bool; plan_stalled(state) -> bool
+score_candidates(candidates, problem, scorer, *, max_concurrency=None) -> [(candidate, Score)]
+best_of(scored, *, incumbent=None); ScoreCache(scorer, *, namespace, store=None, ttl=None)
 with_retry(node, retries=2, backoff=0.1, backoff_factor=2.0, max_backoff=30.0, on=(Exception,), jitter=0.0)
 with_timeout(node, seconds)
 add_quality_gate(g, name, evaluator, *, on_pass, on_fail, on_escalate, max_attempts=3)

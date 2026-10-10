@@ -132,7 +132,7 @@ nav:
   - Tutorials:
       - Overview: tutorials/index.md
       - "Q&A agent (quick start)": tutorials/qa-agent.md
-      - "Building an optimizer":
+      - "Mechanics: building an optimizer":
           - Overview: tutorials/optimizer/index.md
           - "1. Your first graph": tutorials/optimizer/01-first-graph.md
           - "2. Branching and loops": tutorials/optimizer/02-branching.md
@@ -144,6 +144,8 @@ nav:
           - "8. Surviving restarts": tutorials/optimizer/08-durability.md
           - "9. Waiting on a benchmark": tutorials/optimizer/09-watch.md
           - "10. Plan-as-data at scale": tutorials/optimizer/10-plan-executor.md
+      - "Applied: a query optimizer with agents":
+          - Overview: tutorials/query-optimizer/index.md
   - Reference:
       - API cheatsheet: reference/api.md
       - Glossary: reference/glossary.md
@@ -163,6 +165,7 @@ nav:
           - Prebuilt patterns: reference/api/prebuilt.md
           - Quality gates: reference/api/gate.md
           - Plan executor: reference/api/plan-executor.md
+          - Scoring: reference/api/scoring.md
           - Watch: reference/api/watch.md
           - Interrupt payloads: reference/api/interrupts.md
           - Errors: reference/api/errors.md

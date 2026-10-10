@@ -28,6 +28,13 @@ from agentflow.prebuilt.plan_executor import (
     plan_stalled,
 )
 from agentflow.prebuilt.resilience import with_retry, with_timeout
+from agentflow.prebuilt.scoring import (
+    Score,
+    ScoreCache,
+    Scorer,
+    best_of,
+    score_candidates,
+)
 from agentflow.prebuilt.tool_loop import Tool, ToolLoopState, tool_loop
 from agentflow.prebuilt.watch import (
     CommandWatcher,
@@ -61,6 +68,11 @@ __all__ = [
     "tool_loop",
     "with_retry",
     "with_timeout",
+    "Score",
+    "Scorer",
+    "ScoreCache",
+    "score_candidates",
+    "best_of",
     "WatchResult",
     "Watcher",
     "CommandWatcher",
