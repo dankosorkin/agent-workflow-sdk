@@ -42,7 +42,7 @@ STRATEGY_FACTORS = {
 }
 
 
-def cost_of(plan: frozenset[str]) -> float:
+def cost_of(plan: tuple[str, ...]) -> float:
     """Modeled cost of a plan (lower is better). Pure and deterministic."""
     cost = BASE_COST
     for strategy in plan:
@@ -50,11 +50,21 @@ def cost_of(plan: frozenset[str]) -> float:
     return round(cost, 2)
 
 
+# A plan is a sorted tuple of strategy names. We use a tuple, not a set,
+# because later chapters checkpoint the state to disk and JSON has no set type
+# — a tuple round-trips as a list. `with_strategy` keeps it sorted so the same
+# set of strategies always has the same representation.
+
+
+def with_strategy(plan: tuple[str, ...], strategy: str) -> tuple[str, ...]:
+    return tuple(sorted(set(plan) | {strategy}))
+
+
 # --- the graph -------------------------------------------------------------
 
 
 class OptState(State):
-    plan: Annotated[frozenset, last]  # the applied strategies
+    plan: Annotated[tuple, last]  # the applied strategies, sorted
     cost: Annotated[float, last]  # the modeled cost of that plan
 
 
@@ -74,11 +84,11 @@ def build() -> Graph:
 async def main() -> None:
     app = build().compile()
     # score a plan that applies one strategy
-    out = await app.invoke({"plan": frozenset({"add_index"})})
-    print(f"plan {set(out['plan'])} -> cost {out['cost']}")
+    out = await app.invoke({"plan": ("add_index",)})
+    print(f"plan {list(out['plan'])} -> cost {out['cost']}")
     # the empty plan is the baseline
-    base = await app.invoke({"plan": frozenset()})
-    print(f"plan {set(base['plan'])} -> cost {base['cost']}")
+    base = await app.invoke({"plan": ()})
+    print(f"plan {list(base['plan'])} -> cost {base['cost']}")
 
 
 if __name__ == "__main__":

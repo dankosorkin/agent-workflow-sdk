@@ -38,15 +38,20 @@ STRATEGY_FACTORS = {
 }
 
 
-def cost_of(plan: frozenset[str]) -> float:
+def cost_of(plan: tuple[str, ...]) -> float:
     cost = BASE_COST
     for strategy in plan:
         cost *= STRATEGY_FACTORS.get(strategy, 1.0)
     return round(cost, 2)
 
 
+def with_strategy(plan: tuple[str, ...], strategy: str) -> tuple[str, ...]:
+    """A plan is a sorted tuple (JSON-serializable, so it survives chapter 8)."""
+    return tuple(sorted(set(plan) | {strategy}))
+
+
 class OptState(State):
-    plan: Annotated[frozenset, last]
+    plan: Annotated[tuple, last]
     cost: Annotated[float, last]
     steps: Annotated[int, add]  # how many improvement rounds we ran
 
@@ -61,14 +66,14 @@ async def improve(state: OptState, ctx) -> dict:
     for strategy in STRATEGY_FACTORS:
         if strategy in plan:
             continue
-        trial = cost_of(plan | {strategy})
+        trial = cost_of(with_strategy(plan, strategy))
         if trial < best_cost:
             best_cost, best_strategy = trial, strategy
 
     if best_strategy is None:
         return {"steps": 1}  # nothing improved; cost/plan unchanged
 
-    new_plan = plan | {best_strategy}
+    new_plan = with_strategy(plan, best_strategy)
     print(f"  + {best_strategy}: {current} -> {best_cost}")
     return {"plan": new_plan, "cost": best_cost, "steps": 1}
 
@@ -77,7 +82,9 @@ def route(state: OptState) -> str:
     """Loop while the last round still has an improving move available."""
     plan = state["plan"]
     current = cost_of(plan)
-    improvable = any(s not in plan and cost_of(plan | {s}) < current for s in STRATEGY_FACTORS)
+    improvable = any(
+        s not in plan and cost_of(with_strategy(plan, s)) < current for s in STRATEGY_FACTORS
+    )
     return "again" if improvable else "done"
 
 
@@ -92,8 +99,8 @@ def build() -> Graph:
 async def main() -> None:
     app = build().compile()
     print("optimizing from the empty plan:")
-    out = await app.invoke({"plan": frozenset(), "cost": BASE_COST})
-    print(f"final plan {set(out['plan'])} -> cost {out['cost']} in {out['steps']} steps")
+    out = await app.invoke({"plan": (), "cost": BASE_COST})
+    print(f"final plan {list(out['plan'])} -> cost {out['cost']} in {out['steps']} steps")
 
 
 if __name__ == "__main__":

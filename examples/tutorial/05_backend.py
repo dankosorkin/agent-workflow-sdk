@@ -39,12 +39,17 @@ STRATEGY_FACTORS = {
 }
 
 
-def cost_of(plan: frozenset[str]) -> float:
+def cost_of(plan) -> float:
     """The verifier. Deterministic, pure code — the model never scores a plan."""
     cost = BASE_COST
     for strategy in plan:
         cost *= STRATEGY_FACTORS.get(strategy, 1.0)
     return round(cost, 2)
+
+
+def with_strategy(plan, strategy: str) -> tuple[str, ...]:
+    """A plan is a sorted tuple (JSON-serializable, so it survives chapter 8)."""
+    return tuple(sorted(set(plan) | {strategy}))
 
 
 # --- the proposer boundary -------------------------------------------------
@@ -107,7 +112,9 @@ def make_graph(proposer: Proposer) -> Graph:
         suggestions = await proposer.propose(state["problem"], incumbent)
         plan = incumbent["plan"]
         cands = [
-            {"plan": plan | {s}, "cost": cost_of(plan | {s})} for s in suggestions if s not in plan
+            {"plan": with_strategy(plan, s), "cost": cost_of(with_strategy(plan, s))}
+            for s in suggestions
+            if s not in plan
         ]
         return {"search": {"candidates": cands}}
 
@@ -117,20 +124,21 @@ def make_graph(proposer: Proposer) -> Graph:
         this_round = [
             c
             for c in state["search"].get("candidates", [])
-            if plan.issubset(c["plan"]) and len(c["plan"]) == len(plan) + 1
+            if set(plan).issubset(c["plan"]) and len(c["plan"]) == len(plan) + 1
         ]
         better = [c for c in this_round if c["cost"] < incumbent["cost"]]
         if not better:
             return {}
         best = min(better, key=lambda c: c["cost"])
-        print(f"  promote {set(best['plan'])} cost {best['cost']}")
+        print(f"  promote {list(best['plan'])} cost {best['cost']}")
         return {"search": {"incumbent": best}}
 
     def route(state: OptState) -> str:
         incumbent = state["search"]["incumbent"]
         plan = incumbent["plan"]
         improvable = any(
-            s not in plan and cost_of(plan | {s}) < incumbent["cost"] for s in STRATEGY_FACTORS
+            s not in plan and cost_of(with_strategy(plan, s)) < incumbent["cost"]
+            for s in STRATEGY_FACTORS
         )
         return "again" if improvable else "done"
 
@@ -158,10 +166,10 @@ async def main(proposer: Proposer | None = None) -> None:
     }
     print(f"optimizing with a {type(proposer).__name__}:")
     out = await app.invoke(
-        {"problem": problem, "search": {"incumbent": {"plan": frozenset(), "cost": BASE_COST}}}
+        {"problem": problem, "search": {"incumbent": {"plan": (), "cost": BASE_COST}}}
     )
     incumbent = out["search"]["incumbent"]
-    print(f"final plan {set(incumbent['plan'])} -> cost {incumbent['cost']}")
+    print(f"final plan {list(incumbent['plan'])} -> cost {incumbent['cost']}")
 
 
 if __name__ == "__main__":

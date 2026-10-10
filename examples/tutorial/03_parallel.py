@@ -39,15 +39,20 @@ STRATEGY_FACTORS = {
 }
 
 
-def cost_of(plan: frozenset[str]) -> float:
+def cost_of(plan: tuple[str, ...]) -> float:
     cost = BASE_COST
     for strategy in plan:
         cost *= STRATEGY_FACTORS.get(strategy, 1.0)
     return round(cost, 2)
 
 
+def with_strategy(plan: tuple[str, ...], strategy: str) -> tuple[str, ...]:
+    """A plan is a sorted tuple (JSON-serializable, so it survives chapter 8)."""
+    return tuple(sorted(set(plan) | {strategy}))
+
+
 class OptState(State):
-    plan: Annotated[frozenset, last]
+    plan: Annotated[tuple, last]
     cost: Annotated[float, last]
     # each trial node appends its (strategy, cost) here; the picker drains it
     trials: Annotated[list, append]
@@ -68,7 +73,7 @@ def _trial_node(strategy: str):
         plan = state["plan"]
         if strategy in plan:
             return {}  # already applied; nothing to try
-        return {"trials": [(plan, strategy, cost_of(plan | {strategy}))]}
+        return {"trials": [(plan, strategy, cost_of(with_strategy(plan, strategy)))]}
 
     trial.__name__ = f"trial_{strategy}"
     return trial
@@ -84,7 +89,7 @@ async def pick(state: OptState, ctx) -> dict:
         return {}  # no improvement; leave plan as-is, router will stop
     strategy, new_cost = min(improving, key=lambda t: t[1])
     print(f"  best this round: + {strategy}: {current} -> {new_cost}")
-    return {"plan": plan | {strategy}, "cost": new_cost}
+    return {"plan": with_strategy(plan, strategy), "cost": new_cost}
 
 
 def fan_out(state: OptState) -> list[str]:
@@ -97,7 +102,9 @@ def fan_out(state: OptState) -> list[str]:
 def after_pick(state: OptState) -> str:
     plan = state["plan"]
     current = cost_of(plan)
-    improvable = any(s not in plan and cost_of(plan | {s}) < current for s in STRATEGY_FACTORS)
+    improvable = any(
+        s not in plan and cost_of(with_strategy(plan, s)) < current for s in STRATEGY_FACTORS
+    )
     return "again" if improvable else "done"
 
 
@@ -128,8 +135,8 @@ def build() -> Graph:
 async def main() -> None:
     app = build().compile()
     print("optimizing with parallel trials each round:")
-    out = await app.invoke({"plan": frozenset(), "cost": BASE_COST})
-    print(f"final plan {set(out['plan'])} -> cost {out['cost']}")
+    out = await app.invoke({"plan": (), "cost": BASE_COST})
+    print(f"final plan {list(out['plan'])} -> cost {out['cost']}")
 
 
 if __name__ == "__main__":

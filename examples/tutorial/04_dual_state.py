@@ -40,11 +40,16 @@ STRATEGY_FACTORS = {
 }
 
 
-def cost_of(plan: frozenset[str]) -> float:
+def cost_of(plan) -> float:
     cost = BASE_COST
     for strategy in plan:
         cost *= STRATEGY_FACTORS.get(strategy, 1.0)
     return round(cost, 2)
+
+
+def with_strategy(plan, strategy: str) -> tuple[str, ...]:
+    """A plan is a sorted tuple (JSON-serializable, so it survives chapter 8)."""
+    return tuple(sorted(set(plan) | {strategy}))
 
 
 class OptState(State):
@@ -64,11 +69,12 @@ class OptState(State):
 
 def _trial_node(strategy: str):
     async def trial(state: OptState, ctx) -> dict:
-        incumbent = state["search"].get("incumbent") or {"plan": frozenset(), "cost": BASE_COST}
+        incumbent = state["search"].get("incumbent") or {"plan": (), "cost": BASE_COST}
         plan = incumbent["plan"]
         if strategy in plan:
             return {}
-        cand = {"plan": plan | {strategy}, "cost": cost_of(plan | {strategy})}
+        new_plan = with_strategy(plan, strategy)
+        cand = {"plan": new_plan, "cost": cost_of(new_plan)}
         return {"search": {"candidates": [cand]}}
 
     trial.__name__ = f"trial_{strategy}"
@@ -77,33 +83,34 @@ def _trial_node(strategy: str):
 
 async def promote(state: OptState, ctx) -> dict:
     """Promotion boundary: pick the best candidate that beats the incumbent."""
-    incumbent = state["search"].get("incumbent") or {"plan": frozenset(), "cost": BASE_COST}
+    incumbent = state["search"].get("incumbent") or {"plan": (), "cost": BASE_COST}
     candidates = state["search"].get("candidates", [])
     plan = incumbent["plan"]
     # only this round's candidates: the incumbent plan plus exactly one strategy
     this_round = [
-        c for c in candidates if plan.issubset(c["plan"]) and len(c["plan"]) == len(plan) + 1
+        c for c in candidates if set(plan).issubset(c["plan"]) and len(c["plan"]) == len(plan) + 1
     ]
     better = [c for c in this_round if c["cost"] < incumbent["cost"]]
     if not better:
         return {}
     best = min(better, key=lambda c: c["cost"])
-    print(f"  promote {set(best['plan'])} cost {best['cost']}")
+    print(f"  promote {list(best['plan'])} cost {best['cost']}")
     return {"search": {"incumbent": best}}
 
 
 def fan_out(state: OptState) -> list[str]:
-    incumbent = state["search"].get("incumbent") or {"plan": frozenset()}
+    incumbent = state["search"].get("incumbent") or {"plan": ()}
     plan = incumbent["plan"]
     remaining = [s for s in STRATEGY_FACTORS if s not in plan]
     return remaining or ["none"]
 
 
 def after_promote(state: OptState) -> str:
-    incumbent = state["search"].get("incumbent") or {"plan": frozenset(), "cost": BASE_COST}
+    incumbent = state["search"].get("incumbent") or {"plan": (), "cost": BASE_COST}
     plan = incumbent["plan"]
     improvable = any(
-        s not in plan and cost_of(plan | {s}) < incumbent["cost"] for s in STRATEGY_FACTORS
+        s not in plan and cost_of(with_strategy(plan, s)) < incumbent["cost"]
+        for s in STRATEGY_FACTORS
     )
     return "again" if improvable else "done"
 
@@ -137,11 +144,11 @@ async def main() -> None:
     out = await app.invoke(
         {
             "problem": {"base_cost": BASE_COST, "strategies": list(STRATEGY_FACTORS)},
-            "search": {"incumbent": {"plan": frozenset(), "cost": BASE_COST}},
+            "search": {"incumbent": {"plan": (), "cost": BASE_COST}},
         }
     )
     incumbent = out["search"]["incumbent"]
-    print(f"final plan {set(incumbent['plan'])} -> cost {incumbent['cost']}")
+    print(f"final plan {list(incumbent['plan'])} -> cost {incumbent['cost']}")
     print(f"candidates evaluated across the run: {len(out['search']['candidates'])}")
 
 
