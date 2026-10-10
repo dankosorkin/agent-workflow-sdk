@@ -64,7 +64,7 @@ flowchart TD
     gate -- out of tries --> human[on_escalate]
 ```
 
-The gate keeps its attempt count in the `gate_attempts` channel and its last verdict in `gate_results`, both provided by the `GateState` mixin. One pair of channels serves any number of gates in a graph — the gate name is the key — so you never declare per-gate fields.
+The gate keeps its attempt count in the `gate_attempts` channel and its last verdict in `gate_results`, both provided by the `GateState` mixin. One pair of channels serves any number of gates in a graph — the gate name is the key — so you never declare per-gate fields. The verdict is stored as a plain dict (`{"passed", "score", "reasons", "feedback"}`), not a `GateResult` object, so it is JSON-serializable and survives a durable checkpointer; read it as `state["gate_results"]["name"]["passed"]`.
 
 ## GateResult vs Candidate
 
@@ -104,12 +104,12 @@ When a gate escalates, the natural `on_escalate` target is a node that suspends 
 from agentflow.interrupts import QualityGateReview
 
 async def ask_human(state, ctx):
-    result = state["gate_results"]["review"]
+    result = state["gate_results"]["review"]   # a plain dict
     decision = await ctx.interrupt(QualityGateReview(
         artifact=state["artifact"],
         criteria=["tests green", "no secrets", "API stable"],
-        auto_score=result.score,
-        reasons=result.reasons,
+        auto_score=result["score"],
+        reasons=result["reasons"],
         gate="review",
     ).to_payload())
     return {"approved": decision == "accept"}

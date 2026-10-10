@@ -100,7 +100,8 @@ async def main() -> None:
     plan = out["plan"]
     print()
     print(f"done:    {sorted(plan['done_ids'])}")
-    print(f"outputs: {{{', '.join(f'{r.task_id}={r.output}' for r in plan['results'])}}}")
+    outs = ", ".join(f"{r['task_id']}={r['output']}" for r in plan["results"])
+    print(f"outputs: {{{outs}}}")
 
 
 if __name__ == "__main__":

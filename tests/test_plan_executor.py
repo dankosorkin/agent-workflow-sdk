@@ -95,7 +95,7 @@ async def test_independent_tasks_all_run():
     tasks = [Task(f"t{i}", "k", input=i) for i in range(5)]
     out = await _build(tasks, {"k": h}).invoke({})
     assert seen == {f"t{i}" for i in range(5)}
-    outputs = {r.task_id: r.output for r in out["plan"]["results"]}
+    outputs = {r["task_id"]: r["output"] for r in out["plan"]["results"]}
     assert outputs == {f"t{i}": i for i in range(5)}
 
 
@@ -192,8 +192,8 @@ async def test_missing_handler_fails_task_not_run():
     out = await _build(tasks, {"k": h}).invoke({})
     results = out["plan"]["results"]
     assert len(results) == 1
-    assert results[0].failed is True
-    assert "unknown_kind" in results[0].error
+    assert results[0]["failed"] is True
+    assert "unknown_kind" in results[0]["error"]
 
 
 async def test_cycle_is_stalled_not_spinning():
@@ -343,3 +343,37 @@ async def test_max_fanout_must_be_positive():
     g = Graph(S)
     with pytest.raises(ValueError, match="max_fanout"):
         add_plan_executor(g, handlers={}, on_idle="x", max_fanout=0)
+
+
+# --- durable checkpointer composition --------------------------------------
+
+
+async def test_plan_is_json_serializable_in_state():
+    """Tasks and results are stored as plain dicts, so a durable (JSON)
+    checkpointer can persist the plan. Regression: they used to be stored as
+    dataclasses and broke file/sqlite/postgres/redis checkpointers."""
+    import json
+
+    async def h(task, state, ctx):
+        return TaskResult(task.id, output={"ok": True})
+
+    tasks = [Task("a", "k"), Task("b", "k", prerequisites=("a",))]
+    out = await _build(tasks, {"k": h}).invoke({})
+    plan = out["plan"]
+    assert all(isinstance(t, dict) for t in plan["tasks"])
+    assert all(isinstance(r, dict) for r in plan["results"])
+    json.dumps(out["plan"])  # the plan channel must round-trip through JSON
+
+
+async def test_plan_executor_survives_a_sqlite_checkpointer(tmp_path):
+    from agentflow import SqliteCheckpointer
+
+    async def h(task, state, ctx):
+        return TaskResult(task.id, output=task.id.upper())
+
+    tasks = [Task("a", "k"), Task("b", "k", prerequisites=("a",))]
+    cp = SqliteCheckpointer(str(tmp_path / "plan.db"))
+    out = await _build(tasks, {"k": h}, checkpointer=cp).invoke({}, thread="p1")
+    assert sorted(out["plan"]["done_ids"]) == ["a", "b"]
+    reloaded = await _build(tasks, {"k": h}, checkpointer=cp).get_state("p1")
+    assert sorted(reloaded.state["plan"]["done_ids"]) == ["a", "b"]

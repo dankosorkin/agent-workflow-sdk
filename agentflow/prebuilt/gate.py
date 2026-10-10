@@ -81,12 +81,26 @@ class GateResult:
     ``passed`` is the only field the router requires. ``score`` and ``reasons``
     are for observability and human review; ``feedback`` is the actionable text
     a revise node can consume to improve the artifact on the next attempt.
+
+    The gate stores this verdict in state as a plain dict (via :meth:`to_dict`),
+    not as this object, so it is JSON-serializable and survives a durable
+    checkpointer. Read it from ``state["gate_results"][name]`` as a mapping:
+    ``result["passed"]``, ``result["feedback"]``, and so on.
     """
 
     passed: bool
     score: float | None = None
     reasons: list[str] = field(default_factory=list)
     feedback: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """A JSON-serializable view, as stored in the ``gate_results`` channel."""
+        return {
+            "passed": self.passed,
+            "score": self.score,
+            "reasons": list(self.reasons),
+            "feedback": self.feedback,
+        }
 
 
 class GateState(State):
@@ -99,7 +113,10 @@ class GateState(State):
 
     #: Attempt count per gate name.
     gate_attempts: Annotated[dict, merge]
-    #: The most recent :class:`GateResult` per gate name.
+    #: The most recent verdict per gate name, stored as a plain dict
+    #: (``{"passed", "score", "reasons", "feedback"}``) so it is
+    #: JSON-serializable and survives a durable checkpointer. Read it as a
+    #: mapping — ``state["gate_results"]["name"]["passed"]``.
     gate_results: Annotated[dict, last]
 
 
@@ -173,15 +190,15 @@ def add_quality_gate(
         )
 
         results = dict(state.get("gate_results") or {})
-        results[name] = result
+        results[name] = result.to_dict()  # store a plain dict, not the dataclass
         return {"gate_attempts": {name: attempt}, "gate_results": results}
 
     def route(state: Mapping[str, Any]) -> str:
         results = state.get("gate_results") or {}
-        result: GateResult | None = results.get(name)
+        result: dict[str, Any] | None = results.get(name)
         attempts = state.get("gate_attempts") or {}
         attempt = int(attempts.get(name, 0))
-        if result is not None and result.passed:
+        if result is not None and result["passed"]:
             return "pass"
         if attempt >= max_attempts:
             return "escalate"

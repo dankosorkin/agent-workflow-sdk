@@ -47,7 +47,7 @@ flowchart LR
     critic -- lgtm --> END
 ```
 
-Model the critic as an evaluator returning a `GateResult` whose `reasons` carry the findings and whose `feedback` tells the builder what to fix. The builder reads `state["gate_results"][...]` on the next pass. This keeps "judge" and "fix" in separate nodes — the same discipline as every other recipe here.
+Model the critic as an evaluator returning a `GateResult` whose `reasons` carry the findings and whose `feedback` tells the builder what to fix. The builder reads `state["gate_results"][...]["feedback"]` on the next pass (the gate stores each verdict as a plain dict). This keeps "judge" and "fix" in separate nodes — the same discipline as every other recipe here.
 
 ## Recipe: fan-out / map-reduce with a gate on the aggregate
 
@@ -137,6 +137,7 @@ Three properties worth stating plainly:
 - The runnable frontier is derived from state every super-step, never stored. That is what makes a resume need no special path: a task mid-flight at a crash is simply re-dispatched, since its id is not yet in `done_ids`.
 - A failed task counts as finished but blocks its dependents — they never become runnable. Use `plan_stalled(state)` at `on_idle` to tell "nothing left to do" from "stuck on a failed prerequisite or a cycle", and `plan_complete(state)` for the clean-finish case.
 - Execution is at-least-once, like the rest of the SDK. `task.id` is the stable key across a resume, so pass it to [`IdempotentOp`](#side-effects-and-delivery-semantics) or a downstream dedup token to make an effect exactly-once.
+- The plan is stored as plain dicts, not `Task`/`TaskResult` objects, so it is JSON-serializable and survives a durable checkpointer. A planner may append ergonomic `Task(...)` objects (the channel coerces them), but read results back as dicts: `state["plan"]["results"][i]["output"]`.
 
 `examples/plan_executor_demo.py` is a runnable, offline version — the five-task build DAG above, with `test` and `lint` running concurrently. This is the primitive the [optimizer tutorial](../tutorials/optimizer/10-plan-executor.md) builds toward: a planner that emits a plan and re-optimizes it as results come in, with the engine running it durably as it goes.
 
@@ -153,7 +154,7 @@ class BudgetState(GateState):
 
 def route(state):
     result = state["gate_results"].get("review")
-    if result and result.passed:
+    if result and result["passed"]:
         return "done"
     if state.get("attempts", 0) >= 10:   # hard budget ceiling
         return "escalate"

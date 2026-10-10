@@ -57,7 +57,7 @@ from dataclasses import dataclass
 from typing import Annotated, Any
 
 from agentflow.graph import Graph
-from agentflow.state import State, append, by_key, last, union
+from agentflow.state import State, by_key, last
 
 __all__ = [
     "Task",
@@ -87,6 +87,24 @@ class Task:
     input: Any = None
     prerequisites: tuple[str, ...] = ()
 
+    def to_dict(self) -> dict[str, Any]:
+        """A JSON-serializable view, as stored in the ``plan.tasks`` channel."""
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "input": self.input,
+            "prerequisites": list(self.prerequisites),
+        }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> Task:
+        return cls(
+            id=d["id"],
+            kind=d["kind"],
+            input=d.get("input"),
+            prerequisites=tuple(d.get("prerequisites") or ()),
+        )
+
 
 @dataclass(frozen=True)
 class TaskResult:
@@ -102,11 +120,58 @@ class TaskResult:
     failed: bool = False
     error: str | None = None
 
+    def to_dict(self) -> dict[str, Any]:
+        """A JSON-serializable view, as stored in the ``plan.results`` channel."""
+        return {
+            "task_id": self.task_id,
+            "output": self.output,
+            "failed": self.failed,
+            "error": self.error,
+        }
+
+    @classmethod
+    def from_dict(cls, d: Mapping[str, Any]) -> TaskResult:
+        return cls(
+            task_id=d["task_id"],
+            output=d.get("output"),
+            failed=bool(d.get("failed", False)),
+            error=d.get("error"),
+        )
+
 
 # A handler runs one task: async (task, state, ctx) -> TaskResult. It receives
 # the whole state so it can read problem facts without threading them through
 # every task input.
 Handler = Callable[[Task, Mapping[str, Any], Any], Awaitable[TaskResult]]
+
+
+def _append_tasks(current: Any, update: Any) -> list:
+    """append, but coerce any Task objects to plain dicts (JSON-serializable)."""
+    base = list(current) if current is not None else []
+    items = update if isinstance(update, (list, tuple)) else [update]
+    base.extend(t.to_dict() if isinstance(t, Task) else dict(t) for t in items)
+    return base
+
+
+def _append_results(current: Any, update: Any) -> list:
+    """append, but coerce any TaskResult objects to plain dicts."""
+    base = list(current) if current is not None else []
+    items = update if isinstance(update, (list, tuple)) else [update]
+    base.extend(r.to_dict() if isinstance(r, TaskResult) else dict(r) for r in items)
+    return base
+
+
+def _union_ids(current: Any, update: Any) -> list:
+    """Set-union of task ids, kept as a sorted list so it is JSON-serializable.
+
+    ``done_ids`` is a membership set conceptually, but a durable checkpointer
+    stores state as JSON and JSON has no set type — so we hold it as a sorted,
+    de-duplicated list and union new ids in.
+    """
+    seen = set(current) if current is not None else set()
+    items = update if isinstance(update, (set, frozenset, list, tuple)) else {update}
+    seen.update(items)
+    return sorted(seen)
 
 
 class PlanState(State):
@@ -116,9 +181,15 @@ class PlanState(State):
     folded by its own reducer via :func:`~agentflow.state.by_key`:
 
     - ``tasks`` (append): the planner's proposals accumulate — the backlog.
-    - ``results`` (append): one :class:`TaskResult` per completed task.
-    - ``done_ids`` (union): the set of finished task ids, for a fast readiness
-      check without scanning ``results``.
+      Stored as plain dicts; a planner may append ergonomic :class:`Task`
+      objects and the reducer coerces them, so the plan stays
+      JSON-serializable for a durable checkpointer.
+    - ``results`` (append): one result per completed task, stored as a plain
+      dict (a :class:`TaskResult` is coerced on write). Read back as dicts, or
+      via :meth:`TaskResult.from_dict`.
+    - ``done_ids``: the finished task ids, unioned in and kept as a sorted
+      list (JSON-serializable), for a fast readiness check without scanning
+      ``results``.
     - ``assigned`` (last): transient slot -> task-id map for the current
       dispatch; overwritten each round and never trusted across a resume.
 
@@ -130,9 +201,13 @@ class PlanState(State):
         dict,
         by_key(
             {
-                "tasks": append,
-                "results": append,
-                "done_ids": union,
+                # Tasks and results are stored as plain dicts so the plan is
+                # JSON-serializable and survives a durable checkpointer. The
+                # reducers coerce Task/TaskResult objects to dicts on write, so
+                # a planner can still append ergonomic Task(...) objects.
+                "tasks": _append_tasks,
+                "results": _append_results,
+                "done_ids": _union_ids,
                 "assigned": last,
             }
         ),
@@ -149,11 +224,12 @@ def _plan(state: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _tasks_by_id(plan: Mapping[str, Any]) -> dict[str, Task]:
-    return {t.id: t for t in plan.get("tasks") or ()}
+    # tasks are stored as plain dicts (JSON-serializable); rebuild Task objects
+    return {t["id"]: Task.from_dict(t) for t in plan.get("tasks") or ()}
 
 
 def _failed_ids(plan: Mapping[str, Any]) -> set[str]:
-    return {r.task_id for r in plan.get("results") or () if r.failed}
+    return {r["task_id"] for r in plan.get("results") or () if r.get("failed")}
 
 
 def _runnable(plan: Mapping[str, Any]) -> list[Task]:

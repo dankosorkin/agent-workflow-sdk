@@ -91,7 +91,7 @@ async def test_gate_passes_on_first_attempt():
     out = await app.invoke({"artifact": "abcd"})
     assert out.get("revisions", 0) == 0  # never revised
     assert out["gate_attempts"] == {"review": 1}
-    assert out["gate_results"]["review"].passed is True
+    assert out["gate_results"]["review"]["passed"] is True
 
 
 async def test_gate_fails_then_passes_via_revise():
@@ -100,7 +100,7 @@ async def test_gate_fails_then_passes_via_revise():
     # empty -> "x","xx","xxx"; passes when length reaches 3 on the 4th visit
     assert out["artifact"] == "xxx"
     assert out["gate_attempts"] == {"review": 4}
-    assert out["gate_results"]["review"].passed is True
+    assert out["gate_results"]["review"]["passed"] is True
     assert not out.get("escalated")
 
 
@@ -109,7 +109,7 @@ async def test_gate_escalates_at_max_attempts():
     out = await app.invoke({"artifact": ""})
     assert out["escalated"] is True
     assert out["gate_attempts"] == {"review": 2}
-    assert out["gate_results"]["review"].passed is False
+    assert out["gate_results"]["review"]["passed"] is False
 
 
 # --- events ---
@@ -198,5 +198,35 @@ async def test_two_gates_share_state_without_collision():
     out = await g.compile().invoke({})
     assert out["gate_attempts"] == {"plan_gate": 1, "review_gate": 1}
     assert set(out["gate_results"]) == {"plan_gate", "review_gate"}
-    assert out["gate_results"]["plan_gate"].score == 1.0
-    assert out["gate_results"]["review_gate"].score == 2.0
+    assert out["gate_results"]["plan_gate"]["score"] == 1.0
+    assert out["gate_results"]["review_gate"]["score"] == 2.0
+
+
+# --- durable checkpointer composition --------------------------------------
+
+
+async def test_gate_result_is_json_serializable_in_state():
+    """A gate stores its verdict as a plain dict, so a durable (JSON) checkpointer
+    can persist the state. Regression: GateResult used to be stored as a dataclass
+    and broke file/sqlite/postgres/redis checkpointers."""
+    import json
+
+    app = _build(threshold=2, max_attempts=5).compile()
+    out = await app.invoke({"artifact": ""})
+    verdict = out["gate_results"]["review"]
+    assert isinstance(verdict, dict)
+    assert set(verdict) == {"passed", "score", "reasons", "feedback"}
+    # the whole state must round-trip through JSON (what a durable cp does)
+    json.dumps(out)
+
+
+async def test_gate_survives_a_sqlite_checkpointer(tmp_path):
+    from agentflow import SqliteCheckpointer
+
+    db = str(tmp_path / "gate.db")
+    app = _build(threshold=2, max_attempts=5).compile(checkpointer=SqliteCheckpointer(db))
+    out = await app.invoke({"artifact": ""}, thread="g1")
+    assert out["gate_results"]["review"]["passed"] is True
+    # reload from a fresh checkpointer on the same file
+    reloaded = await app.get_state("g1")
+    assert reloaded.state["gate_results"]["review"]["passed"] is True
