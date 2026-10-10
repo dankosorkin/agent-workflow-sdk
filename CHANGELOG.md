@@ -4,6 +4,31 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [0.5.0] - 2026-10-04
+
+### Added
+
+- `by_key(policy)` reducer (`agentflow.state`, re-exported from `agentflow`):
+  a reducer for a dict channel whose fields each fold with their own reducer.
+  Where `merge` applies one last-wins policy to a whole dict, `by_key` lets a
+  single structured channel hold fields that accumulate differently — e.g. one
+  `search` channel where `intents` / `candidates` / `verified` grow via
+  `append` while `events` / `incumbent` are replaced via `last`. This is the
+  core primitive a dual-state search/optimization layer (single planner,
+  concurrent workers, a deterministic promotion boundary) builds on; the
+  fan-out, state isolation, checkpoints, Store, and quality gates it also needs
+  already exist. See the dual-state search recipe and
+  `examples/dual_state_search.py`.
+
+### Notes
+
+- `by_key` folding is one level of structure, not a recursive deep-merge: each
+  field's value is combined whole by its reducer (so `last` on a field replaces
+  the whole object, it does not patch one of its keys). Writing a field absent
+  from the policy raises `KeyError`, mirroring how the engine rejects writes to
+  undeclared top-level channels. Use it for distinct fields that accumulate
+  differently, not for concurrent partial patches of the same nested object.
+
 ## [0.4.0] - 2026-10-03
 
 ### Added
