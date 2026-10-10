@@ -45,6 +45,7 @@ from agentflow.events import (
     ToolCall,
     ToolCallSpec,
     TurnEnd,
+    Usage,
 )
 
 try:
@@ -99,6 +100,7 @@ class OllamaBackend(BaseLLMBackend):
         text_parts: list[str] = []
         tool_calls: list[ToolCallSpec] = []
         stop_reason: str | None = None
+        usage: Usage | None = None
 
         async with (
             self.concurrency_guard(),
@@ -127,6 +129,13 @@ class OllamaBackend(BaseLLMBackend):
 
                     if chunk.get("done"):
                         stop_reason = chunk.get("done_reason") or "stop"
+                        # Ollama reports token counts on the final chunk:
+                        # prompt_eval_count = input, eval_count = output.
+                        pin = chunk.get("prompt_eval_count")
+                        pout = chunk.get("eval_count")
+                        if pin is not None or pout is not None:
+                            total = (pin or 0) + (pout or 0) if (pin or pout) else None
+                            usage = Usage(input_tokens=pin, output_tokens=pout, total_tokens=total)
             except httpx.HTTPError as exc:
                 raise BackendTransportError(f"ollama stream failed: {exc}") from exc
 
@@ -136,7 +145,7 @@ class OllamaBackend(BaseLLMBackend):
             content=final_text,
             tool_calls=tuple(tool_calls),
         )
-        yield TurnEnd(text=final_text, stop_reason=stop_reason, message=message)
+        yield TurnEnd(text=final_text, stop_reason=stop_reason, message=message, usage=usage)
 
     # ------------------------------------------------------------------
 

@@ -44,6 +44,7 @@ __all__ = [
     "ToolResult",
     "PermissionOption",
     "PermissionRequest",
+    "Usage",
     "TurnEnd",
     "ErrorEvent",
     "BackendEvent",
@@ -179,13 +180,34 @@ class PermissionRequest:
 
 
 @dataclass(frozen=True, slots=True)
+class Usage:
+    """Token (and optional cost) usage reported by a backend for one turn.
+
+    All fields are optional because backends differ in what they report: some
+    give input/output splits, some only a total, some none at all. A field left
+    ``None`` means "not reported" — a token budget simply cannot count what a
+    backend does not surface, and the budget helpers treat ``None`` as zero.
+    ``cost_usd`` is only present when a backend or the caller supplies pricing;
+    the SDK ships no price table (it would go stale), so budget on tokens by
+    default and set ``cost_usd`` yourself if you want a dollar cap.
+    """
+
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+    cost_usd: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class TurnEnd:
-    """Terminal event of a turn. Carries the fully assembled assistant text
-    and the backend's stop reason (e.g. ``end_turn``, ``max_tokens``)."""
+    """Terminal event of a turn. Carries the fully assembled assistant text,
+    the backend's stop reason (e.g. ``end_turn``, ``max_tokens``), and optional
+    token/cost :class:`Usage` when the backend reports it."""
 
     text: str = ""
     stop_reason: str | None = None
     message: Message | None = None
+    usage: Usage | None = None
 
 
 @dataclass(frozen=True, slots=True)

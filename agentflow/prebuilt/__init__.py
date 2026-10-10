@@ -14,6 +14,7 @@
 
 """Prebuilt graph patterns built entirely from core primitives."""
 
+from agentflow.prebuilt.budget import BudgetState, TokenMeter, over_budget, record_usage
 from agentflow.prebuilt.effects import IdempotentOp, IncompleteEffectError, effect_key
 from agentflow.prebuilt.gate import Evaluator, GateResult, GateState, add_quality_gate
 from agentflow.prebuilt.idempotent import artifact_key, skip_if_done
@@ -73,6 +74,10 @@ __all__ = [
     "ScoreCache",
     "score_candidates",
     "best_of",
+    "TokenMeter",
+    "BudgetState",
+    "record_usage",
+    "over_budget",
     "WatchResult",
     "Watcher",
     "CommandWatcher",

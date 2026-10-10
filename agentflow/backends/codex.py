@@ -34,7 +34,7 @@ from typing import Any, Literal
 
 from agentflow.backends.base import PermissionPolicy, policy_intent
 from agentflow.backends.cli_exec import CLIExecBackend, TurnAccumulator
-from agentflow.events import BackendEvent, TextChunk, ToolCall, ToolResult
+from agentflow.events import BackendEvent, TextChunk, ToolCall, ToolResult, Usage
 
 __all__ = ["CodexBackend"]
 
@@ -109,6 +109,14 @@ class CodexBackend(CLIExecBackend):
 
         if kind == "turn.completed":
             acc.stop_reason = "end_turn"
+            usage = obj.get("usage")
+            if isinstance(usage, dict):
+                pin = usage.get("input_tokens")
+                pout = usage.get("output_tokens")
+                total = usage.get("total_tokens")
+                if total is None and (pin is not None or pout is not None):
+                    total = (pin or 0) + (pout or 0)
+                acc.usage = Usage(input_tokens=pin, output_tokens=pout, total_tokens=total)
             return []
 
         if kind == "turn.failed" or kind == "error":

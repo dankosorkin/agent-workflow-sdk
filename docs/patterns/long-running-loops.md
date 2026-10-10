@@ -143,13 +143,13 @@ Three properties worth stating plainly:
 
 ## Recipe: budget-aware stopping
 
-An autonomous run needs a ceiling — a router that stops not only on quality but on cost. Keep the budget where it belongs: `attempts` is a decision input that must survive a resume, so it lives in state; wall-clock time and token counts are non-deterministic, so keep them in [`RunMetrics`](../durability/observability.md) or your own hook rather than in the checkpoint. Putting a timestamp in state means a resume would "replay" a time from the past and mislead the router.
+An autonomous run needs a ceiling — a router that stops not only on quality but on cost. Keep the budget where it belongs: a count of attempts is a decision input that must survive a resume, so it lives in state; wall-clock time is non-deterministic, so keep it in [`RunMetrics`](../durability/observability.md) or your own hook rather than in the checkpoint. Putting a timestamp in state means a resume would "replay" a time from the past and mislead the router.
 
 ```python
 from typing import Annotated
-from agentflow import add, last
+from agentflow import add
 
-class BudgetState(GateState):
+class ReviewState(GateState):
     attempts: Annotated[int, add]      # survives resume — safe to route on
 
 def route(state):
@@ -162,6 +162,28 @@ def route(state):
 ```
 
 A quality gate already enforces a per-gate `max_attempts`; this recipe is for a budget that spans several nodes or the whole run.
+
+### Token and cost budget
+
+When the proposer is an LLM, each round costs tokens — and a count of attempts does not capture that a few expensive turns can blow the budget. Unlike wall-clock time, token spend *is* safe to keep in state: it only accumulates, so a resume continues from what was already spent rather than replaying. The [`budget`](../reference/api/budget.md) helpers make this a mixin plus two calls.
+
+```python
+from agentflow.prebuilt import BudgetState, record_usage, over_budget
+
+class SearchState(BudgetState):          # adds the summed `budget` channel
+    ...
+
+async def propose(state, ctx):
+    turn = await call_llm(...)           # a TurnEnd carrying .usage
+    return {**result, **record_usage(turn.usage)}   # fold its tokens into budget
+
+def route(state):
+    if over_budget(state, max_tokens=100_000):   # or max_cost_usd=...
+        return "stop"
+    return "continue"
+```
+
+`record_usage` adds a turn's tokens (and `cost_usd`, when a backend or you supply pricing) into the `budget` channel; `over_budget` is the router's predicate. The stop is a routing decision at the next super-step boundary, so a run can overshoot by at most the turn in flight — the deliberate trade for a budget that is durable and needs no engine support. A backend that reports no token counts (`usage` is `None`) contributes zero, so the heuristic/offline path simply never trips the cap. For pure observation without stopping, attach a [`TokenMeter`](../reference/api/budget.md) hook, which sums the same usage but cannot (by the hook contract) halt the run.
 
 ## Recipe: idempotency, skip work already done
 

@@ -176,6 +176,7 @@ from agentflow.prebuilt import (
     iterate_until_converged, Candidate,
     Task, TaskResult, PlanState, add_plan_executor, plan_complete, plan_stalled,
     Score, Scorer, score_candidates, best_of, ScoreCache,
+    BudgetState, record_usage, over_budget, TokenMeter,
     with_retry, with_timeout,
     GateResult, GateState, Evaluator, add_quality_gate,
     artifact_key, skip_if_done,
@@ -187,6 +188,7 @@ add_plan_executor(g, *, handlers, on_idle, dispatch="dispatch", collect="collect
 plan_complete(state) -> bool; plan_stalled(state) -> bool
 score_candidates(candidates, problem, scorer, *, max_concurrency=None) -> [(candidate, Score)]
 best_of(scored, *, incumbent=None); ScoreCache(scorer, *, namespace, store=None, ttl=None)
+record_usage(usage) -> {"budget": {...}}; over_budget(state, *, max_tokens=None, max_cost_usd=None) -> bool
 with_retry(node, retries=2, backoff=0.1, backoff_factor=2.0, max_backoff=30.0, on=(Exception,), jitter=0.0)
 with_timeout(node, seconds)
 add_quality_gate(g, name, evaluator, *, on_pass, on_fail, on_escalate, max_attempts=3)

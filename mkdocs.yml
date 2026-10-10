@@ -166,6 +166,7 @@ nav:
           - Quality gates: reference/api/gate.md
           - Plan executor: reference/api/plan-executor.md
           - Scoring: reference/api/scoring.md
+          - Token budget: reference/api/budget.md
           - Watch: reference/api/watch.md
           - Interrupt payloads: reference/api/interrupts.md
           - Errors: reference/api/errors.md

@@ -15,6 +15,7 @@ The request, message, and backend-event vocabulary. See the [Backends overview](
         - ToolResult
         - PermissionRequest
         - PermissionOption
+        - Usage
         - TurnEnd
         - ErrorEvent
         - GateEvent

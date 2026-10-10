@@ -48,6 +48,7 @@ from agentflow.events import (
     ErrorEvent,
     TextRequest,
     TurnEnd,
+    Usage,
 )
 
 __all__ = ["CLIExecBackend", "TurnAccumulator"]
@@ -61,6 +62,9 @@ class TurnAccumulator:
     stop_reason: str | None = None
     session_id: str | None = None
     is_error: bool = False
+    #: Token/cost usage, if the CLI reports it (set by the subclass on the
+    #: terminal event). Left None when the CLI surfaces no counts.
+    usage: Usage | None = None
 
     def add_text(self, text: str) -> None:
         if text:
@@ -178,6 +182,7 @@ class CLIExecBackend(BaseAgentBackend):
         yield TurnEnd(
             text=acc.text,
             stop_reason=acc.stop_reason or ("error" if acc.is_error else "end_turn"),
+            usage=acc.usage,
         )
 
     # ------------------------------------------------------------------
