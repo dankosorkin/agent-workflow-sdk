@@ -51,6 +51,14 @@ best value -8.0 with 2 indexes
 
 This is exactly the "agents locally, LLM in production" story. You develop against a local Codex agent, ship against a hosted LLM, and the deterministic SQLite measure tells you honestly whether the swap helped — a change in the result is a real change, not a change in how the proposer happened to phrase things. Without a backend-independent verifier, you could never tell those apart.
 
+## The agent is not guaranteed to win — and that is the point
+
+The heuristic output above is deterministic and reproducible. The Codex output is not: a given model, on a given run, may propose a different set, converge sooner, or land on a worse plan than the heuristic. On one real run the agent stopped after a single index (value -15) where the heuristic finds a pair (value -8) — a worse result.
+
+That is not a flaw in the tutorial; it is the lesson. The deterministic scorer is exactly what *reveals* that the agent underperformed — it put a comparable number on both and showed the agent's plan was worse. Without a backend-independent measure you would have no way to know the swap hurt. So the takeaway is not "the agent is better" (it may not be); it is "whatever proposes, the measure keeps everyone honest."
+
+To give the agent a fair chance at an incremental search, the `CodexProposer` here tells it which indexes are already applied and asks for the single best next one, rather than re-asking the whole question each round. Even so, the outcome depends on the model — treat the agent as a strong, fallible proposer, and lean on the scorer and the [promotion gate](06-gate.md) to catch its misses.
+
 ## What you learned
 
 - Split propose (an agent, maybe wrong) from verify (deterministic SQLite truth); the agent explores, the database judges.

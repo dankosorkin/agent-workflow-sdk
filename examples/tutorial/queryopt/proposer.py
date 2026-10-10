@@ -86,13 +86,26 @@ class CodexProposer:
         from agentflow.events import TurnEnd
         from examples.tutorial.queryopt.db import SCHEMA
 
+        # Give the agent the *search state*, not just the query: which indexes
+        # are already applied, so it proposes the next step on top of them
+        # rather than re-suggesting the obvious ones every round. This is what
+        # lets the agent search incrementally, like the heuristic does.
+        already = (
+            "Indexes already applied (do not repeat these):\n  " + "\n  ".join(applied) + "\n\n"
+            if applied
+            else "No indexes applied yet.\n\n"
+        )
         prompt = (
-            "Given this SQLite schema:\n"
+            "You are tuning indexes for a slow SQLite query, one step at a time.\n\n"
+            "Schema:\n"
             + SCHEMA
-            + "\nand this query:\n"
+            + "\nQuery:\n"
             + problem.query
-            + "\n\nList up to 3 CREATE INDEX statements that would speed it up, "
-            "one per line, no prose. Only index columns used in JOIN or WHERE."
+            + "\n\n"
+            + already
+            + "Suggest the SINGLE most useful additional CREATE INDEX statement to add "
+            "next, on a column used in a JOIN or WHERE. Reply with just the statement, "
+            "no prose. If no further index would help, reply 'none'."
         )
         backend = CodexBackend(permission=AllowAll(), model=self.model)
         text = ""
@@ -101,20 +114,25 @@ class CodexProposer:
                 if isinstance(ev, TurnEnd):
                     text = ev.text
 
-        # Validate: keep only statements that match a known safe move. A real
-        # system would parse/whitelist columns; for the tutorial we map the
-        # agent's suggestions onto the vetted _MOVES set by substring.
+        # Validate against the vetted move set so a hallucinated column cannot
+        # reach the scorer; map the agent's free text onto known-safe moves.
         applied_set = set(applied)
-        chosen: set[str] = set()
         low = text.lower()
-        for stmt in _MOVES.values():
-            table_col = stmt.split("ON ")[1].rstrip(";")  # e.g. "orders(customer_id)"
-            if table_col.lower() in low and stmt not in applied_set:
-                chosen.add(stmt)
-        if not chosen:
-            # fall back to the heuristic if the agent gave nothing usable
-            return await HeuristicProposer().propose(problem, applied)
-        return [Candidate(indexes=tuple(sorted(applied_set | {stmt}))) for stmt in chosen]
+        chosen = {
+            stmt
+            for stmt in _MOVES.values()
+            if stmt not in applied_set and stmt.split("ON ")[1].rstrip(";").lower() in low
+        }
+        if chosen:
+            # one candidate per suggested move, each extending applied by one
+            return [Candidate(indexes=tuple(sorted(applied_set | {stmt}))) for stmt in chosen]
+        if "none" in low:
+            # the agent judged no further index worthwhile — let the search end
+            return []
+        # non-empty but unmappable (a column we don't vet): fall back to the
+        # heuristic for this round so the search still progresses and the
+        # scorer decides. The agent informs; it does not gate.
+        return await HeuristicProposer().propose(problem, applied)
 
 
 def get_proposer() -> Proposer:
