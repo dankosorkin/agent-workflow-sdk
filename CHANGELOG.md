@@ -4,6 +4,31 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] - 2026-10-03
+
+### Added
+
+- Optional HTTP control-plane server (`server` extra): `agentflow.server.
+  create_app(queue)` returns a FastAPI ASGI app that maps 1:1 onto a
+  `RunQueue`, so runs can be enqueued and observed over the network. Routes:
+  `POST /runs`, `GET /runs/{id}`, `GET /runs`, `POST /runs/{id}/resume`,
+  `POST /runs/{id}/cancel`, `GET /stats`, `GET /healthz`. Request/response
+  bodies are Pydantic models, so FastAPI serves interactive OpenAPI docs at
+  `/docs`. `pool_health=` wires a `WorkerPool`'s health into `/healthz`. The
+  app adds no behavior of its own — each route forwards to one queue method.
+  See `examples/serve_control_plane.py` and the control-plane docs.
+- `server` install extra: `pip install 'agent-workflow-sdk[server]'`
+  (`fastapi>=0.110`). The core remains dependency-free; serve the returned
+  ASGI app with any ASGI server (e.g. `uvicorn`), installed separately.
+
+### Changed
+
+- The worker protocol (`claim` / `heartbeat` / `complete`) is deliberately not
+  exposed over HTTP; workers talk to the queue directly. The HTTP layer ships
+  no authentication, authorization, rate limiting, or multi-tenancy — those
+  stay out of scope and are the caller's responsibility (trust boundary /
+  reverse proxy). `DESIGN.md` updated accordingly.
+
 ## [0.3.0] - 2026-10-02
 
 ### Added
