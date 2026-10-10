@@ -31,6 +31,35 @@ A field annotated `Annotated[type, reducer]` uses that reducer. A bare field use
 
 `append` extends when the update is a list or tuple, and appends a single element otherwise. Any pure `(current, update) -> new` is a valid reducer — the built-ins are just the common ones. A reducer must be pure and must treat a `None` current as its empty value.
 
+## Structured channels with `by_key`
+
+`merge` folds a whole dict with one policy (last-wins). When one dict channel holds fields that must accumulate differently, `by_key` gives each field its own reducer:
+
+```python
+from agentflow import State, append, by_key, last
+from typing import Annotated
+
+search = by_key({
+    "intents": append,     # grow
+    "candidates": append,  # grow (concurrent workers each add one)
+    "events": last,        # replace
+    "incumbent": last,     # overwrite the current best, whole
+})
+
+class OptState(State):
+    search: Annotated[dict, search]
+```
+
+A node writes the fields it changes, and each is folded by that field's reducer. `{"search": {"candidates": [c]}}` appends one candidate; `{"search": {"events": []}}` clears events. Fields a node does not write are left untouched, so two nodes in one super-step writing different fields never clobber each other.
+
+Three rules worth stating plainly:
+
+- A field in the update that is not in the policy raises `KeyError`. Writing an undeclared field is a bug, just like writing an undeclared top-level channel.
+- Each field's value is folded whole by its reducer. This is one level of structure, not a recursive deep-merge: `last` on `incumbent` replaces the whole object, it does not patch one of its keys.
+- Use `by_key` for distinct fields that accumulate differently, not for concurrent partial patches of the same nested object.
+
+This is the channel behind a search or optimization loop, where a planner appends intents, concurrent workers append candidates, and a verifier replaces events and overwrites the incumbent whole. See the [dual-state search recipe](../patterns/long-running-loops.md#recipe-dual-state-search-with-a-planner-and-a-promotion-boundary) and `examples/dual_state_search.py`.
+
 ## Nodes return deltas, not absolutes
 
 A node returns a partial update — a dict of channel names to values — and the engine folds each value through that channel's reducer:

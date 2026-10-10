@@ -57,6 +57,7 @@ __all__ = [
     "append",
     "add",
     "merge",
+    "by_key",
     "union",
     "channels_from_schema",
     "apply_update",
@@ -127,6 +128,65 @@ def merge(current: Any, update: Any) -> dict:
     if update:
         base.update(update)
     return base
+
+
+def by_key(policy: Mapping[str, Reducer]) -> Reducer:
+    """Build a reducer for a dict channel that folds each key with its own reducer.
+
+    Where :func:`merge` applies one policy (last-wins) to a whole dict, this
+    lets a single structured channel hold keys that accumulate differently —
+    for example an ``intents`` list that grows with :func:`append` beside an
+    ``events`` list that is replaced with :func:`last` and an ``incumbent`` that
+    is overwritten whole::
+
+        search = by_key({
+            "intents":   append,   # grow
+            "candidates": append,  # grow (concurrent workers each add one)
+            "verified":  append,   # grow
+            "events":    last,     # replace (planner clears what it consumed)
+            "incumbent": last,     # overwrite the current best, whole
+        })
+
+        class OptState(State):
+            search: Annotated[dict, search]
+
+    Folding rules, given ``current`` (``None`` is treated as ``{}``) and an
+    ``update`` dict:
+
+    - Only keys present in ``update`` are folded; a key absent from ``update``
+      keeps its ``current`` value untouched.
+    - Each folded key ``k`` is combined as ``policy[k](current.get(k),
+      update[k])`` — so ``{"events": []}`` genuinely clears ``events`` (that is
+      a ``last`` of an empty list, not a no-op), while ``{}`` or ``None`` is a
+      no-op returning a copy of ``current``.
+    - A key in ``update`` that is not in ``policy`` raises :class:`KeyError`.
+      Writing an undeclared field is a bug (usually a typo), mirroring how the
+      engine rejects writes to undeclared top-level channels.
+    - A key in ``current`` that is not in ``policy`` is passed through
+      unchanged; the policy only governs keys an update actually writes.
+
+    The value under each key is combined *whole* by that key's reducer; this is
+    one level of structure, not a recursive deep-merge. It is for distinct keys
+    that accumulate differently, not for concurrent partial patches of the same
+    nested object.
+    """
+    policy = dict(policy)
+
+    def _by_key(current: Any, update: Any) -> dict:
+        base = dict(current) if current is not None else {}
+        if not update:
+            return base
+        for key, value in update.items():
+            reducer = policy.get(key)
+            if reducer is None:
+                raise KeyError(
+                    f"by_key update wrote field {key!r} with no reducer in policy; "
+                    f"declared fields: {sorted(policy)}"
+                )
+            base[key] = reducer(base.get(key), value)
+        return base
+
+    return _by_key
 
 
 def union(current: Any, update: Any) -> set:

@@ -12,4 +12,5 @@ State schemas, channels, and the built-in reducers. See the [State and reducers]
         - append
         - add
         - merge
+        - by_key
         - union

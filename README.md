@@ -139,7 +139,8 @@ shows the iterate-until-converged loop.
 State is a `TypedDict` subclass of `State`. Each field is a channel; annotate
 it with a reducer that folds each node's update into the current value. A
 field without a reducer uses `last` (last-value-wins). Built-in reducers:
-`last`, `append`, `add`, `merge`, `union`. A node returns a partial update; it
+`last`, `append`, `add`, `merge`, `union`, and `by_key` (a dict channel whose
+fields each fold with their own reducer). A node returns a partial update; it
 never mutates the state it was given.
 
 ### Nodes and edges

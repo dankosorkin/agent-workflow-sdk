@@ -81,7 +81,7 @@ How an [agent backend](#agent-backend) answers a tool-authorization request. `Al
 A checked "good enough?" decision added with [`add_quality_gate`](../durability/quality-gates.md): an [evaluator](#evaluator) plus three-way routing (accept / revise / escalate) and an attempt budget. See [quality gates](../durability/quality-gates.md).
 
 ### Reducer
-A pure `(current, update) -> new` function that folds a node's update into a [channel](#channel). `last`, `append`, `add`, `merge`, `union`, or custom. See [state and reducers](../concepts/state.md).
+A pure `(current, update) -> new` function that folds a node's update into a [channel](#channel). `last`, `append`, `add`, `merge`, `by_key`, `union`, or custom. See [state and reducers](../concepts/state.md).
 
 ### Resume
 Continuing a suspended or crashed run from its last [checkpoint](#checkpoint), via `app.resume(thread, value)`. Requires a [checkpointer](#checkpointer). See [human-in-the-loop](../durability/human-in-the-loop.md).

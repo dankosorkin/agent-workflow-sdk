@@ -64,6 +64,28 @@ flowchart TD
 
 Two things matter here. First, reducers do the merging: give the aggregate channel an `append` or `merge` reducer so the parallel updates fold together deterministically instead of racing. Second, a super-step is all-or-nothing — if any branch raises, the whole step is discarded and no checkpoint is written, so a resume never sees a half-merged aggregate. Bound the fan-out with `compile(max_node_concurrency=...)` if the branches hit a shared resource.
 
+## Recipe: dual-state search with a planner and a promotion boundary
+
+A search or optimization loop separates proposing from judging. One structured channel holds the whole search, and a single `planner` is the only writer of the proposals. Several workers run concurrently, each producing one candidate. A single deterministic `verifier` is the promotion boundary: it checks candidates, overwrites the current best whole, and emits events the router reacts to.
+
+```mermaid
+flowchart LR
+    START --> planner --> dispatch{runnable?}
+    dispatch -- fan out --> workers
+    workers --> verifier
+    verifier -- improved --> planner
+    verifier -- done --> END
+```
+
+The reason this needs [`by_key`](../concepts/state.md#structured-channels-with-by_key): the one `search` channel holds fields that fold differently — `intents` and `candidates` and `verified` grow with `append`, `events` is replaced with `last`, `incumbent` is overwritten whole with `last`. A single `merge` cannot express that; `by_key` gives each field its own reducer, so concurrent workers appending candidates never clobber the planner's intents.
+
+Two subtleties this recipe makes you confront, both consequences of reducers, not bugs:
+
+- An `append` channel does not clear when you write `[]` to it — `append(current, [])` adds nothing. To drain one, have the consumer work off what it has not yet handled (key by id) rather than relying on a clear.
+- `intents` accumulates across rounds, so dispatch must compute a *runnable* subset (proposed minus already verified) instead of fanning out the raw list. This is the frontier idea: runnable work is a function of state, not the whole backlog.
+
+`examples/dual_state_search.py` is a runnable, offline version — a planner proposing strategies, workers scoring them concurrently, and a verifier promoting the best. The domain types (intents, candidates, verified, incumbent) live in the consumer; the core provides only the `by_key` channel they fold through.
+
 ## Recipe: budget-aware stopping
 
 An autonomous run needs a ceiling — a router that stops not only on quality but on cost. Keep the budget where it belongs: `attempts` is a decision input that must survive a resume, so it lives in state; wall-clock time and token counts are non-deterministic, so keep them in [`RunMetrics`](../durability/observability.md) or your own hook rather than in the checkpoint. Putting a timestamp in state means a resume would "replay" a time from the past and mislead the router.

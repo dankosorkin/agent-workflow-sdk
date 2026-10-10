@@ -90,6 +90,7 @@ from agentflow.state import (
     State,
     add,
     append,
+    by_key,
     last,
     merge,
     union,
@@ -109,6 +110,7 @@ __all__ = [
     "append",
     "add",
     "merge",
+    "by_key",
     "union",
     # graph
     "Graph",

@@ -15,6 +15,7 @@ class MyState(State):
 | `append` | list concatenation |
 | `add` | numeric sum |
 | `merge` | dict merge (update wins) |
+| `by_key` | per-key reducers for one dict channel |
 | `union` | set union |
 
 ## Graph — [guide](../concepts/nodes-and-edges.md)
