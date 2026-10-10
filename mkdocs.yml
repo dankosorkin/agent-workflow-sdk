@@ -146,6 +146,16 @@ nav:
           - "10. Plan-as-data at scale": tutorials/optimizer/10-plan-executor.md
       - "Applied: a query optimizer with agents":
           - Overview: tutorials/query-optimizer/index.md
+          - "1. Your first graph": tutorials/query-optimizer/01-first-graph.md
+          - "2. Branching and loops": tutorials/query-optimizer/02-branching.md
+          - "3. Parallel experiments": tutorials/query-optimizer/03-parallel.md
+          - "4. Dual-state with by_key": tutorials/query-optimizer/04-dual-state.md
+          - "5. A real agent proposer": tutorials/query-optimizer/05-agent.md
+          - "6. The promotion gate": tutorials/query-optimizer/06-gate.md
+          - "7. Human approval": tutorials/query-optimizer/07-human.md
+          - "8. Surviving restarts": tutorials/query-optimizer/08-durability.md
+          - "9. Waiting on a benchmark": tutorials/query-optimizer/09-watch.md
+          - "10. Plan-as-data at scale": tutorials/query-optimizer/10-plan-executor.md
   - Reference:
       - API cheatsheet: reference/api.md
       - Glossary: reference/glossary.md

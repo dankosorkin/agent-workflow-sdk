@@ -48,4 +48,17 @@ The point this proves is the one that matters for "agents locally, LLM in produc
 
 ## Chapters
 
-This tutorial is being written. It will follow the same ten-layer arc as the mechanics tutorial — first graph, branching, parallel experiments, dual-state, a real agent proposer, the promotion gate, human approval, durability, waiting on a benchmark, and the plan-as-data finale — but every layer measured against a real database. Start with the [mechanics tutorial](../optimizer/index.md) for the engine fundamentals; this applied tutorial assumes them.
+The tutorial follows the same ten-layer arc as the mechanics tutorial, but every layer is measured against a real database:
+
+1. [Your first graph](01-first-graph.md) — one node scores one candidate against SQLite.
+2. [Branching and loops](02-branching.md) — greedily add indexes until the plan stops improving.
+3. [Parallel experiments](03-parallel.md) — score a round's candidates concurrently.
+4. [Dual-state with by_key](04-dual-state.md) — fixed problem facts apart from the moving search.
+5. [A real agent proposer](05-agent.md) — a Codex agent proposes; SQLite verifies.
+6. [The promotion gate](06-gate.md) — accept, retry, or escalate with an attempt budget.
+7. [Human approval](07-human.md) — pause before applying indexes.
+8. [Surviving restarts](08-durability.md) — durable search and a token budget.
+9. [Waiting on a benchmark](09-watch.md) — park on a full benchmark run.
+10. [Plan-as-data at scale](10-plan-executor.md) — a DAG of experiments on the control plane.
+
+Start with the [mechanics tutorial](../optimizer/index.md) for the engine fundamentals; this applied tutorial assumes them.
