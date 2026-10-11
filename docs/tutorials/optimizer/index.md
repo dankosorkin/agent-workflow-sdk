@@ -24,3 +24,5 @@ This is a stand-in, chosen for determinism. The shape — propose, verify, keep 
 10. Plan-as-data at scale — the planner emits a dependency graph of experiments the engine runs and re-optimizes, served over the control plane and HTTP.
 
 Each chapter links to a runnable file under `examples/tutorial/`. Start with [chapter 1](01-first-graph.md).
+
+Requires `agent-workflow-sdk >= 0.6.0` (`by_key`, `plan_executor`, and the token budget used in the later chapters land in 0.6.0).

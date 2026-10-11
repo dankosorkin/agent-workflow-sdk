@@ -4,6 +4,49 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.0] - 2026-09-29
+
+### Changed (breaking)
+
+- Quality-gate results and plan-executor tasks are now stored in state as plain
+  dicts, not dataclasses, so they are JSON-serializable and survive a durable
+  checkpointer. Read `state["gate_results"][name]` as a mapping
+  (`result["passed"]`, not `result.passed`), and read `plan_executor` results
+  as dicts (`r["output"]`, not `r.output`). The evaluator you pass to
+  `add_quality_gate` still returns a `GateResult`, and a handler still returns a
+  `TaskResult` — only the *stored* form changed. This fixes a real bug: either
+  prebuilt combined with a file/sqlite/postgres/redis checkpointer previously
+  raised "not JSON serializable" on the first checkpoint.
+
+### Added
+
+- `plan_executor` (`agentflow.prebuilt`): `add_plan_executor(g, handlers=...,
+  on_idle=...)` runs a dependency graph of tasks a planner emits as data — a
+  task runs once its prerequisites are done, independent tasks fan out
+  concurrently into a fixed slot pool, and the plan is checkpointed so a resume
+  recomputes the runnable frontier. Ships `Task`, `TaskResult`, the `PlanState`
+  mixin, and `plan_complete` / `plan_stalled`.
+- `scoring` (`agentflow.prebuilt`): a deterministic, backend-independent measure
+  for a candidate — `Score`, the `Scorer` contract, `score_candidates` (batch,
+  bounded concurrency), `best_of` (promote the best feasible, keep the incumbent
+  unless strictly beaten), and `ScoreCache`. The verifier half of an optimizer
+  loop, so swapping the proposer (a local agent, a hosted LLM) never changes the
+  score.
+- Token / cost budget: `Usage` (input/output/total tokens, optional `cost_usd`)
+  is now an optional field on `TurnEnd`, populated by the Ollama and Codex
+  backends. New `agentflow.prebuilt` helpers: `TokenMeter` (a `Hooks` listener
+  that sums usage for observation), the `BudgetState` mixin, `record_usage`, and
+  `over_budget` — budget lives in state, survives a resume, and a router stops
+  the run at a token or cost cap.
+
+### Documentation
+
+- A unified Tutorials section: the Q&A agent quick start, a ten-chapter
+  "Mechanics: building an optimizer" tutorial on a toy cost model, and a
+  ten-chapter "Applied: a query optimizer with agents" tutorial that measures
+  real index/rewrite candidates against a seeded SQLite database, with a local
+  Codex agent as the opt-in proposer.
+
 ## [0.5.0] - 2026-10-04
 
 ### Added

@@ -62,3 +62,5 @@ The tutorial follows the same ten-layer arc as the mechanics tutorial, but every
 10. [Plan-as-data at scale](10-plan-executor.md) — a DAG of experiments on the control plane.
 
 Start with the [mechanics tutorial](../optimizer/index.md) for the engine fundamentals; this applied tutorial assumes them.
+
+Requires `agent-workflow-sdk >= 0.6.0` (`scoring`, `plan_executor`, and the token budget land in 0.6.0). The optional Codex path also needs the `codex` CLI on your PATH.
