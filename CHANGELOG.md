@@ -4,7 +4,7 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
-## [0.6.0] - 2026-09-29
+## [0.6.0] - 2026-10-11
 
 ### Changed (breaking)
 
