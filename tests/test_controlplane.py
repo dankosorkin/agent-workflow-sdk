@@ -461,3 +461,181 @@ async def test_worker_pool_health_lifecycle():
     await pool.stop()
     h2 = pool.health()
     assert h2.alive == 0 and h2.healthy is False
+
+
+# --- bug 1: a stale worker must stop on lease loss -------------------------
+
+
+class OwnState(State):
+    n: Annotated[int, last]
+
+
+_lease_side_effect: list[str] = []
+
+
+def _lease_graph(checkpointer, delay):
+    """A single node that sleeps (so the lease can be lost mid-run), then
+    performs an observable side effect, then returns an update (which triggers a
+    checkpoint write). Both the side effect and the write must be blocked once
+    the lease is lost."""
+    g = Graph(OwnState)
+
+    async def work(state, ctx):
+        await asyncio.sleep(delay)
+        _lease_side_effect.append("ran")
+        return {"n": 1}
+
+    g.add_node("work", work)
+    g.add_edge(START, "work")
+    g.add_edge("work", END)
+    return g.compile(checkpointer=checkpointer)
+
+
+async def test_lost_lease_cancels_graph_and_blocks_side_effect():
+    """Bug 1: a worker that loses its lease mid-run must (a) stop the graph task
+    (no further side effect) and (b) refuse to persist a checkpoint, and it must
+    NOT complete the run successfully — the newer attempt owns it.
+
+    Pre-fix failure mode: the heartbeat loop only logged on lease loss, so the
+    graph task kept running, the side effect fired, the owner-less checkpoint
+    was written, and attempt #1 completed the run SUCCEEDED over the re-claim.
+    """
+    _lease_side_effect.clear()
+    cp = MemoryCheckpointer()
+    reg = GraphRegistry()
+    reg.register("own", lambda: _lease_graph(cp, delay=0.6))
+    q = MemoryRunQueue()
+    rec = await q.enqueue("own", {"n": 0})
+
+    # Lease shorter than the heartbeat interval, so the lease expires before
+    # attempt 1 renews it — the external re-claim then wins, and attempt 1's
+    # first heartbeat (fired after the re-claim) detects the loss.
+    worker = Worker(
+        q, reg, poll_interval=0.02, heartbeat_interval=0.2, lease_seconds=0.05
+    )
+    task = asyncio.ensure_future(worker.run_once())
+    await asyncio.sleep(0.08)  # worker claimed as attempt 1, now in the sleep
+
+    # Externally re-claim: the short lease has expired, claim as attempt 2.
+    reclaimed = await q.claim(lease_seconds=60)
+    assert reclaimed is not None and reclaimed.attempt == 2
+
+    # Attempt 1's worker must settle without blowing up.
+    await asyncio.wait_for(task, timeout=2.0)
+
+    # (a) side effect blocked (cancelled at the await before it ran).
+    assert _lease_side_effect == []
+    # (b) no checkpoint written by the stale owner.
+    assert await cp.get(rec.thread) is None
+    # Attempt 1 did NOT complete the run; attempt 2 still owns it (RUNNING).
+    now = await q.get(rec.run_id)
+    assert now.attempt == 2 and now.status == RunStatus.RUNNING
+
+
+_child_lease_side_effect: list[str] = []
+
+
+class ChildLease(State):
+    n: Annotated[int, last]
+
+
+class ParentLease(State):
+    n: Annotated[int, last]
+
+
+def _child_lease_graph(checkpointer, delay):
+    g = Graph(ChildLease)
+
+    async def cwork(state, ctx):
+        await asyncio.sleep(delay)
+        _child_lease_side_effect.append("child-ran")
+        return {"n": 1}
+
+    g.add_node("cwork", cwork)
+    g.add_edge(START, "cwork")
+    g.add_edge("cwork", END)
+    return g.compile(checkpointer=checkpointer)
+
+
+async def test_lost_lease_blocks_child_subgraph_write():
+    """Bug 1 (subgraph child): when the lease is lost while a subgraph child is
+    mid-super-step, the stale owner must not persist the CHILD sub-thread
+    checkpoint (owner_check forwarded through run_subgraph), and the stale
+    subgraph worker must land in the worker's lease-lost arm (log + return, NO
+    queue.complete, run NOT marked FAILED).
+
+    Pre-fix failure mode: owner_check never reached the child run, and a child
+    LeaseLost would have been re-wrapped by _run_node as NodeError and completed
+    the run as FAILED.
+    """
+    _child_lease_side_effect.clear()
+    child_cp = MemoryCheckpointer()
+    child = _child_lease_graph(child_cp, delay=0.4)
+
+    def _parent():
+        g = Graph(ParentLease)
+        g.add_subgraph("sub", child, input_map={}, output_map={})
+        g.add_edge(START, "sub")
+        g.add_edge("sub", END)
+        return g.compile(checkpointer=MemoryCheckpointer())
+
+    reg = GraphRegistry()
+    reg.register("own", _parent)
+    q = MemoryRunQueue()
+    rec = await q.enqueue("own", {"n": 0})
+
+    worker = Worker(
+        q, reg, poll_interval=0.02, heartbeat_interval=0.2, lease_seconds=0.05
+    )
+    task = asyncio.ensure_future(worker.run_once())
+    await asyncio.sleep(0.08)  # claimed as attempt 1, child in its sleep
+
+    reclaimed = await q.claim(lease_seconds=60)
+    assert reclaimed is not None and reclaimed.attempt == 2
+
+    await asyncio.wait_for(task, timeout=2.0)
+
+    # Child side effect blocked, child checkpoint not written by the stale owner.
+    assert _child_lease_side_effect == []
+    assert await child_cp.get(f"{rec.thread}::sub#0") is None
+    # Stale worker landed in the lease-lost arm: run NOT FAILED, attempt 2 owns.
+    now = await q.get(rec.run_id)
+    assert now.status == RunStatus.RUNNING and now.attempt == 2
+
+
+# --- is_owner unit tests ---------------------------------------------------
+
+
+async def test_is_owner_true_for_current_running_attempt():
+    q = MemoryRunQueue()
+    await q.enqueue("g")
+    c = await q.claim()
+    assert c is not None
+    assert await q.is_owner(c.run_id, c.attempt) is True
+    # A different owner token is not the owner.
+    assert await q.is_owner(c.run_id, c.attempt + 1) is False
+    # Unknown run is not owned.
+    assert await q.is_owner("missing", 1) is False
+
+
+async def test_is_owner_false_after_reclaim():
+    q = MemoryRunQueue()
+    rec = await q.enqueue("g")
+    c1 = await q.claim(lease_seconds=0.01)
+    assert c1 is not None and c1.attempt == 1
+    await asyncio.sleep(0.03)  # lease expires
+    c2 = await q.claim(lease_seconds=60)  # re-claim -> attempt 2
+    assert c2 is not None and c2.attempt == 2
+    # Stale attempt 1 is no longer the owner; attempt 2 is.
+    assert await q.is_owner(rec.run_id, 1) is False
+    assert await q.is_owner(rec.run_id, 2) is True
+
+
+async def test_is_owner_false_after_complete():
+    q = MemoryRunQueue()
+    rec = await q.enqueue("g")
+    c = await q.claim()
+    assert c is not None
+    await q.complete(rec.run_id, c.attempt, status=RunStatus.SUCCEEDED)
+    # A completed run is not RUNNING, so nobody owns it.
+    assert await q.is_owner(rec.run_id, c.attempt) is False

@@ -29,7 +29,7 @@ import logging
 from agentflow.controlplane.queue import RunQueue
 from agentflow.controlplane.records import PoolHealth, RunRecord, RunStatus
 from agentflow.controlplane.registry import GraphRegistry
-from agentflow.errors import InterruptError
+from agentflow.errors import InterruptError, LeaseLost
 
 __all__ = ["Worker", "WorkerPool"]
 
@@ -38,6 +38,10 @@ log = logging.getLogger(__name__)
 
 class _Cancelled(Exception):
     """Internal: the run was cancelled cooperatively."""
+
+
+#: Private alias so the lease-lost arm reads symmetrically with ``_Cancelled``.
+_LeaseLost = LeaseLost
 
 
 class Worker:
@@ -125,10 +129,24 @@ class Worker:
             await self.queue.complete(rec.run_id, owner, status=status)
             return
 
-        heartbeat = asyncio.create_task(self._heartbeat_loop(rec.run_id, owner))
+        lost = asyncio.Event()
+        heartbeat = asyncio.create_task(self._heartbeat_loop(rec.run_id, owner, lost))
         try:
-            work = self._start_work(graph, rec, await self._is_resume(graph, rec))
-            await self._race_with_cancel(rec.run_id, work)
+
+            async def owner_check() -> bool:
+                return await self.queue.is_owner(rec.run_id, owner)
+
+            work = self._start_work(
+                graph, rec, await self._is_resume(graph, rec), owner_check
+            )
+            await self._race_with_cancel(rec.run_id, work, lost)
+        except _LeaseLost:
+            # Lease lost mid-run: a newer attempt owns the run and its
+            # completion. Relinquish entirely — do NOT call queue.complete (the
+            # stale owner would be rejected anyway) so the live attempt's work
+            # stands. Placed before the cancel/interrupt/exception arms.
+            log.warning("run %s lease lost; discarding stale execution", rec.run_id)
+            return
         except _Cancelled:
             await self.queue.complete(rec.run_id, owner, status=RunStatus.CANCELLED)
             return
@@ -154,10 +172,10 @@ class Worker:
                 "run %s was re-claimed; completion by attempt %d discarded", rec.run_id, owner
             )
 
-    def _start_work(self, graph, rec: RunRecord, is_resume: bool):
+    def _start_work(self, graph, rec: RunRecord, is_resume: bool, owner_check):
         if is_resume:
-            return graph.resume(rec.thread, rec.resume_value)
-        return graph.invoke(dict(rec.input), thread=rec.thread)
+            return graph.resume(rec.thread, rec.resume_value, owner_check=owner_check)
+        return graph.invoke(dict(rec.input), thread=rec.thread, owner_check=owner_check)
 
     async def _is_resume(self, graph, rec: RunRecord) -> bool:
         """A claim is a resume iff the thread already sits on an unfinished
@@ -191,39 +209,56 @@ class Worker:
             return RunStatus.WAITING, cp.wake_at
         return RunStatus.INTERRUPTED, None
 
-    async def _heartbeat_loop(self, run_id: str, owner: int) -> None:
+    async def _heartbeat_loop(self, run_id: str, owner: int, lost: asyncio.Event) -> None:
         while True:
             await asyncio.sleep(self.heartbeat_interval)
             if not await self.queue.heartbeat(run_id, owner, lease_seconds=self.lease_seconds):
                 # The run was re-claimed by a newer attempt (or finished); this
-                # worker is stale. Stop renewing a lease it no longer owns.
-                log.warning("run %s lease lost by attempt %d; stopping heartbeat", run_id, owner)
+                # worker is stale. Signal the race to cancel the graph task so
+                # it stops running nodes and writing checkpoints, not merely
+                # stop renewing the lease.
+                log.warning("run %s lease lost by attempt %d; cancelling work", run_id, owner)
+                lost.set()
                 return
 
-    async def _race_with_cancel(self, run_id: str, work) -> None:
-        """Run ``work`` while polling for a cancel request; raise _Cancelled.
+    async def _race_with_cancel(self, run_id: str, work, lost: asyncio.Event) -> None:
+        """Run ``work`` while watching for a lost lease or a cancel request.
 
-        Whatever ends the race — the work finishing, a cooperative cancel, or
-        this coroutine itself being cancelled from outside (the worker task is
-        cancelled) — the ``finally`` guarantees the child ``work_task`` is
-        cancelled and awaited so no graph execution is left running detached in
-        the background after the lease is relinquished.
+        Raises :class:`_LeaseLost` when the heartbeat loop reports the lease
+        gone (checked FIRST — the harder stop), else :class:`_Cancelled` on a
+        cooperative cancel request. Whatever ends the race — the work finishing,
+        a lost lease, a cooperative cancel, or this coroutine itself being
+        cancelled from outside — the ``finally`` cancels and awaits both the
+        work task and the lost-wait so no graph execution is left running
+        detached after the lease is relinquished.
+
+        A simultaneous normal completion and lease loss resolves in favor of the
+        lease loss (the newer attempt owns the run and re-derives terminal state
+        on its own), so the stale completion is discarded by design.
         """
         work_task = asyncio.ensure_future(work)
+        lost_wait = asyncio.ensure_future(lost.wait())
         try:
             while True:
-                done, _ = await asyncio.wait({work_task}, timeout=self.poll_interval)
-                if work_task in done:
+                await asyncio.wait(
+                    {work_task, lost_wait},
+                    timeout=self.poll_interval,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+                if lost.is_set():  # lease loss — the harder stop, checked first
+                    raise _LeaseLost(run_id)
+                if work_task.done():
                     work_task.result()  # propagate exception / completion
                     return
                 rec = await self.queue.get(run_id)
                 if rec is not None and rec.cancel_requested:
                     raise _Cancelled
         finally:
-            if not work_task.done():
-                work_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError, Exception):
-                    await work_task
+            for t in (work_task, lost_wait):
+                if not t.done():
+                    t.cancel()
+                    with contextlib.suppress(asyncio.CancelledError, Exception):
+                        await t
 
 
 class WorkerPool:

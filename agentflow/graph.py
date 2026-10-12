@@ -359,7 +359,7 @@ def _subgraph_node(
             value = ctx.consume_resume()
             if value is _UNSET:
                 value = None
-            final = await subgraph.resume(sub_thread, value)
+            final = await subgraph.resume(sub_thread, value, owner_check=ctx.owner_check)
         else:
             if input_map is not None:
                 sub_input = {
@@ -369,7 +369,9 @@ def _subgraph_node(
                 }
             else:
                 sub_input = {k: v for k, v in state.items() if k in sub_channels}
-            final = await subgraph.invoke(sub_input, thread=sub_thread)
+            final = await subgraph.invoke(
+                sub_input, thread=sub_thread, owner_check=ctx.owner_check
+            )
 
         # If the child suspended rather than finished, propagate the pause to
         # the parent: re-raise so the parent runtime writes an interrupted

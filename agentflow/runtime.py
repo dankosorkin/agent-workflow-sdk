@@ -32,13 +32,13 @@ import asyncio
 import contextvars
 import copy
 import time
-from collections.abc import Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
 
 from agentflow.checkpoint.base import Checkpoint
-from agentflow.errors import InterruptError, NodeError
+from agentflow.errors import InterruptError, LeaseLost, NodeError
 from agentflow.events import EmittableEvent
 from agentflow.graph import END, START, _ConditionalEdge
 from agentflow.observability import _NOOP, Hooks, _safe
@@ -129,6 +129,11 @@ class Context:
     #: A subgraph node derives its child sub-thread from it so loop iterations
     #: and fresh starts do not collide; plain nodes ignore it.
     invocation: int = 0
+    #: Optional async predicate the runtime calls before each checkpoint write
+    #: to confirm this worker still owns the run's lease. Forwarded into child
+    #: subgraph runs so a stale owner cannot persist a child checkpoint either.
+    #: None (the default, e.g. inline invoke) means "always the owner".
+    owner_check: Callable[[], Awaitable[bool]] | None = field(default=None, repr=False)
     _emit_queue: asyncio.Queue[StreamEvent] | None = field(default=None, repr=False)
     _resume: _Resume | None = field(default=None, repr=False)
     _hooks: Hooks | None = field(default=None, repr=False)
@@ -286,8 +291,11 @@ async def _run_node(
             result = await result
         await _safe(hooks.on_node_end(ctx.thread, ctx.step, node, time.monotonic() - t0))
         return result
-    except InterruptError:
-        # A suspend is not an error; still record the elapsed time.
+    except (InterruptError, LeaseLost):
+        # A suspend or a lease-loss is not a node failure; record elapsed time
+        # and re-raise bare so the runtime/worker handle it (a LeaseLost raised
+        # by a child subgraph must reach the worker's lease-lost arm, not be
+        # rewrapped as NodeError and completed as FAILED).
         await _safe(hooks.on_node_end(ctx.thread, ctx.step, node, time.monotonic() - t0))
         raise
     except Exception as exc:  # noqa: BLE001 - wrap any node failure
@@ -307,6 +315,7 @@ async def run(
     checkpointer: Any,
     resume_values: Mapping[str, Any] | None = None,
     start_invocations: dict[str, int] | None = None,
+    owner_check: Callable[[], Awaitable[bool]] | None = None,
     emit_queue: asyncio.Queue[StreamEvent] | None = None,
     hooks: Hooks = _NOOP,
 ) -> Checkpoint:
@@ -339,6 +348,20 @@ async def run(
         if emit_queue is not None:
             emit_queue.put_nowait(ev)
 
+    async def _check_owner() -> None:
+        """Fail-safe gate before a checkpoint write: raise LeaseLost if this
+        worker no longer owns the run. A raising/erroring check is also treated
+        as a loss (fail-safe) so a flaky ownership read never lets a stale
+        worker persist a checkpoint."""
+        if owner_check is None:
+            return
+        try:
+            still = await owner_check()
+        except Exception as exc:  # noqa: BLE001 - any failure means "not owner"
+            raise LeaseLost(thread) from exc
+        if not still:
+            raise LeaseLost(thread)
+
     await _safe(hooks.on_run_start(thread, step))
 
     while frontier:
@@ -360,6 +383,7 @@ async def run(
                 thread=thread,
                 step=step,
                 invocation=inv,
+                owner_check=owner_check,
                 _emit_queue=emit_queue,
                 _resume=_Resume(resume_values[name]) if name in resume_values else None,
                 _hooks=hooks,
@@ -429,6 +453,7 @@ async def run(
                     invocations=invocations,
                 )
                 if checkpointer is not None:
+                    await _check_owner()  # refuse to persist if the lease is lost
                     parent_id = await checkpointer.put(cp)
                 return cp
             if isinstance(res, BaseException):
@@ -462,6 +487,7 @@ async def run(
             invocations=invocations,
         )
         if checkpointer is not None:
+            await _check_owner()  # refuse to persist if the lease is lost
             parent_id = await checkpointer.put(cp)
         await _emit(StreamEvent("step", step, data=tuple(next_frontier)))
         await _safe(hooks.on_step_end(thread, step, tuple(frontier)))

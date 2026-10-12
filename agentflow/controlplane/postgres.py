@@ -245,6 +245,17 @@ class PostgresRunQueue:
         )
         return result.split()[-1] != "0"
 
+    async def is_owner(self, run_id: str, owner: int) -> bool:
+        pool = await self._get_pool()
+        # Read-only ownership check: the same predicate heartbeat/complete apply
+        # (RUNNING and attempt == owner), used to gate a running graph's writes.
+        row = await pool.fetchrow(
+            f"SELECT status, attempt FROM {self.table} WHERE run_id=$1", run_id
+        )
+        if row is None:
+            return False
+        return row["status"] == RunStatus.RUNNING and row["attempt"] == owner
+
     async def complete(
         self,
         run_id: str,

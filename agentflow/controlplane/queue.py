@@ -83,6 +83,14 @@ class RunQueue(Protocol):
         stale worker and should stop)."""
         ...
 
+    async def is_owner(self, run_id: str, owner: int) -> bool:
+        """Return True iff ``owner`` still owns the run: it exists, is RUNNING,
+        and its ``attempt`` equals ``owner``. The same ownership predicate
+        :meth:`heartbeat`/:meth:`complete` apply, exposed as a read-only check so
+        a running graph can gate each checkpoint write on still holding its
+        lease. False once a newer attempt has re-claimed the run."""
+        ...
+
     async def complete(
         self,
         run_id: str,

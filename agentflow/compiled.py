@@ -26,7 +26,7 @@ structure and drives it through :mod:`agentflow.runtime`, exposing:
 from __future__ import annotations
 
 import asyncio
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from typing import Any
 
 from agentflow.checkpoint.base import Checkpoint
@@ -77,6 +77,7 @@ class CompiledGraph:
         *,
         thread: str = "default",
         timeout: float | None = None,
+        owner_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> dict[str, Any]:
         """Run from ``input`` to completion and return the final state.
 
@@ -98,13 +99,18 @@ class CompiledGraph:
             start_step=0,
             checkpointer=self.checkpointer,
             start_invocations=None,
+            owner_check=owner_check,
             hooks=self.hooks,
         )
         cp = await self._run_with_timeout(coro, thread, timeout)
         return dict(cp.state)
 
     async def stream(
-        self, input: Mapping[str, Any] | None = None, *, thread: str = "default"
+        self,
+        input: Mapping[str, Any] | None = None,
+        *,
+        thread: str = "default",
+        owner_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Run from ``input``, yielding :class:`StreamEvent`s as they occur."""
         async for ev in self._stream_run(
@@ -113,6 +119,7 @@ class CompiledGraph:
             start_frontier=None,
             start_step=0,
             start_invocations=None,
+            owner_check=owner_check,
         ):
             yield ev
 
@@ -121,7 +128,12 @@ class CompiledGraph:
     # ------------------------------------------------------------------
 
     async def resume(
-        self, thread: str, value: Any = None, *, timeout: float | None = None
+        self,
+        thread: str,
+        value: Any = None,
+        *,
+        timeout: float | None = None,
+        owner_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> dict[str, Any]:
         """Continue a suspended run, feeding ``value`` to the interrupted node."""
         cp = await self._load_for_resume(thread)
@@ -135,12 +147,19 @@ class CompiledGraph:
             checkpointer=self.checkpointer,
             resume_values=resume_values,
             start_invocations=cp.invocations,
+            owner_check=owner_check,
             hooks=self.hooks,
         )
         result = await self._run_with_timeout(coro, thread, timeout)
         return dict(result.state)
 
-    async def stream_resume(self, thread: str, value: Any = None) -> AsyncIterator[StreamEvent]:
+    async def stream_resume(
+        self,
+        thread: str,
+        value: Any = None,
+        *,
+        owner_check: Callable[[], Awaitable[bool]] | None = None,
+    ) -> AsyncIterator[StreamEvent]:
         """Streaming form of :meth:`resume`."""
         cp = await self._load_for_resume(thread)
         resume_values = self._resume_values_for(cp, value)
@@ -151,6 +170,7 @@ class CompiledGraph:
             start_step=cp.step,
             resume_values=resume_values,
             start_invocations=cp.invocations,
+            owner_check=owner_check,
         ):
             yield ev
 
@@ -329,6 +349,7 @@ class CompiledGraph:
         start_step: int,
         resume_values: Mapping[str, Any] | None = None,
         start_invocations: dict[str, int] | None = None,
+        owner_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Run in a background task, draining the emit queue as a stream."""
         queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -345,6 +366,7 @@ class CompiledGraph:
                     checkpointer=self.checkpointer,
                     resume_values=resume_values,
                     start_invocations=start_invocations,
+                    owner_check=owner_check,
                     emit_queue=queue,
                     hooks=self.hooks,
                 )

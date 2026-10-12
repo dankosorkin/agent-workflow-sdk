@@ -36,6 +36,7 @@ __all__ = [
     "ControlPlaneError",
     "RunNotFound",
     "InterruptError",
+    "LeaseLost",
 ]
 
 
@@ -207,3 +208,18 @@ class InterruptError(AgentFlowError):
         self.payload = payload
         self.wake_at = wake_at
         super().__init__(f"interrupt requested by node {node!r}")
+
+
+class LeaseLost(AgentFlowError):
+    """A graph run detected it no longer owns its execution lease.
+
+    Raised when an owner-check fails (or errors) at a checkpoint-write boundary:
+    a newer attempt has re-claimed the run, so this worker must stop rather than
+    persist a checkpoint or run further nodes. A fail-safe control-flow signal,
+    not a node failure — the worker catches it and relinquishes the run to the
+    live attempt without writing a terminal status.
+    """
+
+    def __init__(self, thread: str):
+        self.thread = thread
+        super().__init__(f"execution lease lost for {thread!r}")

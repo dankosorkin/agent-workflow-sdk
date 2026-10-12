@@ -68,8 +68,9 @@ __all__ = [
 
 RESERVED_PREFIX = "__"
 
-#: Channel names the runtime injects into state and manages itself. User
-#: schemas and node updates may not use these.
+#: Channel names reserved for the engine. User schemas and node updates may not
+#: use these. The runtime does not inject them into ``state``; they are guarded
+#: here only so a user channel can never shadow an engine-reserved name.
 RESERVED_NAMES = frozenset({"__step", "__next"})
 
 # A reducer takes the current channel value (or None if unset) and an incoming

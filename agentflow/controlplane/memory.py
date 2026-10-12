@@ -129,6 +129,11 @@ class MemoryRunQueue:
             )
             return True
 
+    async def is_owner(self, run_id: str, owner: int) -> bool:
+        async with self._lock:
+            rec = self._runs.get(run_id)
+            return rec is not None and rec.attempt == owner and rec.status == RunStatus.RUNNING
+
     async def complete(
         self,
         run_id: str,
