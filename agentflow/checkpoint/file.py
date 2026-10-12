@@ -97,6 +97,7 @@ class FileCheckpointer:
         payload = to_payload(cp)
         payload["state"] = self._redact(payload["state"])
         payload["interrupt_payload"] = self._redact(payload["interrupt_payload"])
+        payload["interrupt_answers"] = self._redact(payload["interrupt_answers"])
         envelope = {"revision": current + 1, "payload": payload}
         try:
             data = json.dumps(envelope, ensure_ascii=False, indent=2)

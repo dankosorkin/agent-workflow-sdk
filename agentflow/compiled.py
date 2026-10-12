@@ -123,7 +123,7 @@ class CompiledGraph:
     ) -> dict[str, Any]:
         """Continue a suspended run, feeding ``value`` to the interrupted node."""
         cp = await self._load_for_resume(thread)
-        resume_values = {cp.interrupt_node: value} if cp.interrupt_node else {}
+        resume_values = self._resume_values_for(cp, value)
         coro = run(
             self._graph,
             dict(cp.state),
@@ -140,7 +140,7 @@ class CompiledGraph:
     async def stream_resume(self, thread: str, value: Any = None) -> AsyncIterator[StreamEvent]:
         """Streaming form of :meth:`resume`."""
         cp = await self._load_for_resume(thread)
-        resume_values = {cp.interrupt_node: value} if cp.interrupt_node else {}
+        resume_values = self._resume_values_for(cp, value)
         async for ev in self._stream_run(
             thread=thread,
             initial_state=dict(cp.state),
@@ -149,6 +149,19 @@ class CompiledGraph:
             resume_values=resume_values,
         ):
             yield ev
+
+    @staticmethod
+    def _resume_values_for(cp: Checkpoint, value: Any) -> dict[str, Any]:
+        """Build the resumed node's full ordered answer sequence.
+
+        The external protocol stays one value per resume; durably we grow the
+        tuple of answers (``cp.interrupt_answers`` + this ``value``) so a node
+        that interrupts multiple times replays each prior answer in order and
+        the Nth ``interrupt`` call receives the Nth answer across resumes."""
+        if not cp.interrupt_node:
+            return {}
+        new_answers = (*cp.interrupt_answers, value)
+        return {cp.interrupt_node: new_answers}
 
     async def run_until_done(
         self,

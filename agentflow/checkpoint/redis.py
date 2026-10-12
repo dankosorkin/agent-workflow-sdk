@@ -87,6 +87,7 @@ class RedisCheckpointer:
         payload = to_payload(cp)
         payload["state"] = self._redact(payload["state"])
         payload["interrupt_payload"] = self._redact(payload["interrupt_payload"])
+        payload["interrupt_answers"] = self._redact(payload["interrupt_answers"])
         key = self._cp_key(cp.thread, cp.step)
 
         if if_revision is None:

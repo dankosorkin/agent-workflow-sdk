@@ -78,14 +78,44 @@ class StreamEvent:
 # ---------------------------------------------------------------------------
 
 
+#: Sentinel for "no resume value available" (distinct from a legitimate None
+#: answer a human might give).
+_UNSET: Any = object()
+
+
 class _Resume:
-    """Carries a human's answer for a node awaiting an interrupt on resume."""
+    """An ordered replay cursor of the human answers given to a node so far.
 
-    __slots__ = ("value", "used")
+    A node may call ``interrupt`` more than once. Because a resume re-runs the
+    whole node from the top, each resumed run must replay the earlier answers
+    in order — the first ``interrupt`` gets the first answer, the second the
+    second — and only the first *un*answered call suspends again. The cursor
+    holds the answers oldest-first and advances one position per call.
+    """
 
-    def __init__(self, value: Any) -> None:
-        self.value = value
-        self.used = False
+    __slots__ = ("answers", "index")
+
+    def __init__(self, answers: Any) -> None:
+        # Accept the stored tuple of prior answers, or a single bare value for
+        # the first resume of a never-before-answered node.
+        self.answers: list[Any] = list(answers) if isinstance(answers, tuple) else [answers]
+        self.index = 0
+
+    def next(self) -> tuple[bool, Any]:
+        """Return ``(has_answer, value)`` for the current call and advance.
+
+        ``has_answer`` is False once the cursor runs past the answers given so
+        far — that call is the one that must suspend the run again."""
+        if self.index < len(self.answers):
+            value = self.answers[self.index]
+            self.index += 1
+            return True, value
+        return False, None
+
+    @property
+    def answers_tuple(self) -> tuple[Any, ...]:
+        """The full ordered answer sequence (for persisting on a checkpoint)."""
+        return tuple(self.answers)
 
 
 @dataclass
@@ -125,11 +155,26 @@ class Context:
         On a fresh run this raises :class:`InterruptError`; the runtime catches
         it, writes an interrupted checkpoint, and stops. When the run is later
         resumed with a value, that value is seeded here and returned directly.
+
+        A node may call this more than once. Each resume replays the answers
+        already given in order (the Nth call gets the Nth answer); the first
+        call still awaiting an answer suspends the run again.
         """
-        if self._resume is not None and not self._resume.used:
-            self._resume.used = True
-            return self._resume.value
+        if self._resume is not None:
+            has, value = self._resume.next()
+            if has:
+                return value
         raise InterruptError(self.node, payload)
+
+    def consume_resume(self) -> Any:
+        """Return the latest human answer for this node, or ``_UNSET``.
+
+        Used by the subgraph wrapper to forward the parent's resume value into
+        a resuming child graph: the child is driven by one value per resume,
+        and that value is the most recent answer threaded to this node."""
+        if self._resume is not None and self._resume.answers:
+            return self._resume.answers[-1]
+        return _UNSET
 
     async def wait(self, wake_at: str, payload: Any = None) -> Any:
         """Suspend the run until ``wake_at`` (an ISO-8601 time), then re-run.
@@ -146,9 +191,10 @@ class Context:
         returned, mirroring :meth:`interrupt`; a watcher usually ignores it and
         reads its cursor from state instead.
         """
-        if self._resume is not None and not self._resume.used:
-            self._resume.used = True
-            return self._resume.value
+        if self._resume is not None:
+            has, value = self._resume.next()
+            if has:
+                return value
         raise InterruptError(self.node, payload, wake_at=wake_at)
 
 
@@ -329,6 +375,11 @@ async def run(
                 kind = "wait" if res.wake_at is not None else "interrupt"
                 await _emit(StreamEvent(kind, step, node=name, data=res.payload))
                 await _safe(hooks.on_run_end(thread, step, completed=False))
+                # Persist the ordered answers already given to this node so a
+                # later resume replays them in order (the Nth interrupt gets the
+                # Nth answer) instead of re-asking the first question.
+                ctx_resume = contexts[name]._resume
+                prior = ctx_resume.answers_tuple if ctx_resume is not None else ()
                 cp = Checkpoint(
                     thread=thread,
                     step=step,
@@ -340,6 +391,7 @@ async def run(
                     interrupt_node=name,
                     interrupt_payload=res.payload,
                     wake_at=res.wake_at,
+                    interrupt_answers=prior,
                 )
                 if checkpointer is not None:
                     parent_id = await checkpointer.put(cp)

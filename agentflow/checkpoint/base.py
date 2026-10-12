@@ -76,6 +76,12 @@ class Checkpoint:
     #: ISO-8601 UTC time the run should wake, for a ``"timer"`` suspend; None
     #: for a ``"human"`` suspend (which waits for an explicit resume value).
     wake_at: str | None = None
+    #: Ordered human answers delivered to a node's successive ``interrupt``
+    #: calls so far. A node that interrupts N times is driven across N resumes;
+    #: on each resume this holds the answers already given (oldest first), and
+    #: the Nth ``interrupt`` call replays the Nth answer. Empty for a run that
+    #: has never interrupted or for a timer wait.
+    interrupt_answers: tuple[Any, ...] = ()
     extra: dict[str, Any] = field(default_factory=dict)
     #: Monotonic write count for this (thread, step). Set by the store on read;
     #: pass the value you read back as ``put(..., if_revision=)`` to guard a

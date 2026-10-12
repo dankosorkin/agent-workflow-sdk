@@ -27,7 +27,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from typing import Any, Union
 
-from agentflow.errors import CompilationError
+from agentflow.errors import CompilationError, GraphError, InterruptError
 from agentflow.state import Channel, channels_from_schema
 
 __all__ = ["START", "END", "Graph", "Node", "Router"]
@@ -305,17 +305,15 @@ def _subgraph_node(
     sub_channels = set(subgraph._graph.channels)
     parent_names = set(parent_channels)
 
-    async def run_subgraph(state: Mapping[str, Any], ctx: Any) -> Mapping[str, Any]:
-        if input_map is not None:
-            sub_input = {
-                sub_key: state[p_key] for p_key, sub_key in input_map.items() if p_key in state
-            }
-        else:
-            sub_input = {k: v for k, v in state.items() if k in sub_channels}
+    def _sub_thread(ctx: Any) -> str:
+        # Derived from the parent thread + this node's name ONLY. Dropping the
+        # old ``@{ctx.step}`` component keeps the sub-thread stable across a
+        # resume: when a parent interrupt rewinds the super-step, the child's
+        # checkpoint must still be found so the suspended child resumes instead
+        # of re-running from scratch.
+        return f"{ctx.thread}::{name}"
 
-        sub_thread = f"{ctx.thread}::{name}@{ctx.step}"
-        final = await subgraph.invoke(sub_input, thread=sub_thread)
-
+    def _route_output(final: Mapping[str, Any]) -> Mapping[str, Any]:
         if output_map is not None:
             return {
                 p_key: final[sub_key]
@@ -323,6 +321,51 @@ def _subgraph_node(
                 if sub_key in final and p_key in parent_names
             }
         return {k: v for k, v in final.items() if k in parent_names}
+
+    async def run_subgraph(state: Mapping[str, Any], ctx: Any) -> Mapping[str, Any]:
+        # A subgraph that can suspend needs its own durable checkpoint, else a
+        # child interrupt could not be resumed. Fail loudly rather than lose it.
+        if subgraph.checkpointer is None:
+            raise GraphError(
+                f"subgraph {name!r} needs its own checkpointer to support "
+                f"interrupts/resume; compile it with checkpointer=..."
+            )
+
+        sub_thread = _sub_thread(ctx)
+        child_cp = await subgraph.checkpointer.get(sub_thread)
+        resuming = child_cp is not None and child_cp.interrupted and not child_cp.done
+
+        if resuming:
+            # The child is mid-interrupt; forward the parent's resume value and
+            # continue the child from its own checkpoint.
+            from agentflow.runtime import _UNSET
+
+            value = ctx.consume_resume()
+            if value is _UNSET:
+                value = None
+            final = await subgraph.resume(sub_thread, value)
+        else:
+            if input_map is not None:
+                sub_input = {
+                    sub_key: state[p_key]
+                    for p_key, sub_key in input_map.items()
+                    if p_key in state
+                }
+            else:
+                sub_input = {k: v for k, v in state.items() if k in sub_channels}
+            final = await subgraph.invoke(sub_input, thread=sub_thread)
+
+        # If the child suspended rather than finished, propagate the pause to
+        # the parent: re-raise so the parent runtime writes an interrupted
+        # checkpoint and stops, instead of treating the subgraph as complete
+        # and running the parent's downstream nodes without an answer.
+        child_cp = await subgraph.checkpointer.get(sub_thread)
+        if child_cp is not None and child_cp.interrupted and not child_cp.done:
+            raise InterruptError(
+                name, child_cp.interrupt_payload, wake_at=child_cp.wake_at
+            )
+
+        return _route_output(final)
 
     run_subgraph.__name__ = f"subgraph[{name}]"
     return run_subgraph

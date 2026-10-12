@@ -128,6 +128,7 @@ class PostgresCheckpointer:
         payload = to_payload(cp)
         payload["state"] = self._redact(payload["state"])
         payload["interrupt_payload"] = self._redact(payload["interrupt_payload"])
+        payload["interrupt_answers"] = self._redact(payload["interrupt_answers"])
         try:
             return json.dumps(payload, ensure_ascii=False)
         except TypeError as exc:
