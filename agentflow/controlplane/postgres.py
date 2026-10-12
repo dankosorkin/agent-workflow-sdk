@@ -284,18 +284,22 @@ class PostgresRunQueue:
             )
             if row is None or row["status"] in RunStatus.TERMINAL:
                 return False
-            if row["status"] == RunStatus.QUEUED:
-                await conn.execute(
-                    f"UPDATE {self.table} SET status=$2, lease_until=NULL, updated_at=NOW() "
-                    "WHERE run_id=$1",
-                    run_id,
-                    RunStatus.CANCELLED,
-                )
-            else:
+            if row["status"] == RunStatus.RUNNING:
+                # In-flight — flag it for the worker to stop cooperatively.
                 await conn.execute(
                     f"UPDATE {self.table} SET cancel_requested=TRUE, updated_at=NOW() "
                     "WHERE run_id=$1",
                     run_id,
+                )
+            else:
+                # Not actively executing (queued / interrupted / waiting): no
+                # worker holds it, so cancel it outright rather than leaving an
+                # interrupted run suspended forever behind a flag nobody reads.
+                await conn.execute(
+                    f"UPDATE {self.table} SET status=$2, lease_until=NULL, "
+                    "cancel_requested=FALSE, updated_at=NOW() WHERE run_id=$1",
+                    run_id,
+                    RunStatus.CANCELLED,
                 )
             return True
 

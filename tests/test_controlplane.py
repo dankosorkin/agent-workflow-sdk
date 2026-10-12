@@ -374,6 +374,27 @@ async def test_worker_cooperative_cancel():
 # --- Queue stats + pool health --------------------------------------------
 
 
+async def test_cancel_interrupted_run_finishes():
+    """Bug 6: cancelling an interrupted (suspended) run must transition it to
+    CANCELLED immediately. A worker never re-claims an interrupted run, so the
+    old cancel_requested=True flag left it suspended forever."""
+    cp = MemoryCheckpointer()
+    reg = GraphRegistry()
+    reg.register("hitl", lambda: _hitl_graph(cp))
+    q = MemoryRunQueue()
+    rec = await q.enqueue("hitl", {"stage": []})
+
+    worker = Worker(q, reg, poll_interval=0.01)
+    await worker.run_once()
+    assert (await q.get(rec.run_id)).status == RunStatus.INTERRUPTED
+
+    assert await q.request_cancel(rec.run_id) is True
+    # Terminal immediately — not left as interrupted.
+    assert (await q.get(rec.run_id)).status == RunStatus.CANCELLED
+    # And it is no longer claimable (the run is terminal).
+    assert await q.claim() is None
+
+
 async def test_queue_stats_by_status():
     from agentflow import QueueStats
 

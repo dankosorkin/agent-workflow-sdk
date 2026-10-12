@@ -161,15 +161,22 @@ class MemoryRunQueue:
             rec = self._runs.get(run_id)
             if rec is None or rec.status in RunStatus.TERMINAL:
                 return False
-            if rec.status == RunStatus.QUEUED:
-                # Not yet claimed — cancel outright.
-                self._runs[run_id] = dataclasses.replace(
-                    rec, status=RunStatus.CANCELLED, lease_until=None, updated_at=_iso(_now())
-                )
-            else:
-                # Running / interrupted — flag for the worker to stop.
+            if rec.status == RunStatus.RUNNING:
+                # In-flight — flag it so the worker stops at the next boundary.
                 self._runs[run_id] = dataclasses.replace(
                     rec, cancel_requested=True, updated_at=_iso(_now())
+                )
+            else:
+                # Not actively executing (queued / interrupted / waiting): no
+                # worker holds it, so a cooperative flag would never be seen.
+                # Transition straight to CANCELLED — otherwise an interrupted
+                # run would sit suspended forever.
+                self._runs[run_id] = dataclasses.replace(
+                    rec,
+                    status=RunStatus.CANCELLED,
+                    lease_until=None,
+                    cancel_requested=False,
+                    updated_at=_iso(_now()),
                 )
             return True
 

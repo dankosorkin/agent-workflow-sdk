@@ -118,6 +118,47 @@ async def test_stale_worker_heartbeat_noop(queue):
     assert (await queue.get(rec.run_id)).status == RunStatus.SUCCEEDED
 
 
+async def test_cancel_interrupted_run_finishes(queue):
+    """Bug 6 (SQL twin): a non-running (interrupted/waiting/queued) run cancels
+    straight to CANCELLED; it is terminal and no longer claimable."""
+    from agentflow.checkpoint import PostgresCheckpointer
+
+    ckpt_table = unique_table("runs_ckpt")
+    cp = PostgresCheckpointer(POSTGRES_TEST_DSN, table=ckpt_table)
+
+    def build():
+        g = Graph(HitlState)
+
+        async def ask(state, ctx):
+            human = await ctx.interrupt({"q": "ok?"})
+            return {"answer": human, "stage": "asked"}
+
+        async def finish(state, ctx):
+            return {"stage": "finished"}
+
+        g.add_node("ask", ask)
+        g.add_node("finish", finish)
+        g.add_edge(START, "ask")
+        g.add_edge("ask", "finish")
+        g.add_edge("finish", END)
+        return g.compile(checkpointer=cp)
+
+    reg = GraphRegistry()
+    reg.register("hitl", build)
+    try:
+        rec = await queue.enqueue("hitl", {"stage": []})
+        worker = Worker(queue, reg, poll_interval=0.01)
+        await worker.run_once()
+        assert (await queue.get(rec.run_id)).status == RunStatus.INTERRUPTED
+
+        assert await queue.request_cancel(rec.run_id) is True
+        assert (await queue.get(rec.run_id)).status == RunStatus.CANCELLED
+        assert await queue.claim() is None
+    finally:
+        await cp.close()
+        await drop_table(POSTGRES_TEST_DSN, ckpt_table)
+
+
 async def test_stats_snapshot(queue):
     await queue.enqueue("g", {"n": 1})
     await queue.enqueue("g", {"n": 2})
