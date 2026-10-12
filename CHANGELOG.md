@@ -4,6 +4,59 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [0.7.0] - unreleased
+
+### Changed (breaking)
+
+- `RunQueue.heartbeat` and `RunQueue.complete` now take a required positional
+  `owner` (the `attempt` number stamped on the record `claim` returns) and
+  return `bool` instead of `None`. Both are owner-checked: once a run is
+  re-claimed by a newer attempt, a stale worker's `heartbeat`/`complete`
+  matches nothing and returns `False` instead of silently clobbering the live
+  attempt. They no longer raise `RunNotFound` for an unknown/stale run — they
+  return `False`. Update any custom worker loop or `RunQueue` implementation to
+  pass `owner=` and honor the returned bool.
+- A subgraph node reached at run time now requires its embedded graph to have
+  its own checkpointer (compile it with `checkpointer=...`). A suspend inside a
+  subgraph is unobservable without a child checkpoint, so a checkpointer-less
+  subgraph — even one that would have finished cleanly — now raises `GraphError`
+  naming the subgraph instead of risking a swallowed interrupt.
+
+### Added
+
+- `Checkpoint.interrupt_answers`: an ordered tuple of the human answers already
+  delivered to a node's successive `interrupt` calls. A node that interrupts
+  more than once is now driven across resumes so the Nth `interrupt` receives
+  the Nth answer, and the sequence survives a crash replay. Round-tripped by
+  every checkpoint backend and redacted alongside `state`/`interrupt_payload`.
+
+### Fixed
+
+- Worker crash recovery resumes any unfinished run from its saved checkpoint
+  instead of re-running the graph from START, so a step completed before the
+  crash (and its side effects) is not repeated (bug 1).
+- A human interrupt inside a subgraph now pauses the parent run: the child
+  suspend propagates up as a parent interrupt and the child resumes correctly on
+  continuation, rather than the parent treating the subgraph as done and running
+  downstream nodes without an answer (bug 2).
+- Two `interrupt()` calls in one node now receive their answers in order across
+  resumes; previously the single stored answer always went to the first call and
+  the second question reappeared (bug 3).
+- A stale worker whose lease expired can no longer `complete` or `heartbeat` a
+  run that was re-claimed by a newer attempt (owner-checked lease) (bug 4).
+- Cancelling a worker task now cancels and awaits the in-flight graph work
+  rather than leaving it running detached in the background, where it could
+  re-run concurrently after lease expiry (bug 5).
+- Cancelling a suspended run (interrupted / waiting / queued) now transitions it
+  straight to `cancelled`; a worker never re-claims such a run, so the old
+  cooperative flag left it suspended forever (bug 6).
+- `run_until_done` with a capped `max_sleep` now loops until the real `wake_at`
+  deadline instead of resuming after a single shortened nap, so a timer no longer
+  fires early (bug 7).
+- `MemoryCheckpointer` now deep-isolates checkpoint state at both the write and
+  read boundaries, so mutating a nested container after `invoke`/`get` no longer
+  rewrites a stored checkpoint (bug 8).
+
 ## [0.6.0] - 2026-10-11
 
 ### Changed (breaking)
