@@ -110,9 +110,7 @@ class Worker:
         try:
             graph = self.registry.get(rec.graph)
         except KeyError as exc:
-            await self.queue.complete(
-                rec.run_id, owner, status=RunStatus.FAILED, error=str(exc)
-            )
+            await self.queue.complete(rec.run_id, owner, status=RunStatus.FAILED, error=str(exc))
             return
 
         # The thread may already sit on a finished checkpoint — e.g. the run
@@ -136,9 +134,7 @@ class Worker:
             async def owner_check() -> bool:
                 return await self.queue.is_owner(rec.run_id, owner)
 
-            work = self._start_work(
-                graph, rec, await self._is_resume(graph, rec), owner_check
-            )
+            work = self._start_work(graph, rec, await self._is_resume(graph, rec), owner_check)
             await self._race_with_cancel(rec.run_id, work, lost)
         except _LeaseLost:
             # Lease lost mid-run: a newer attempt owns the run and its

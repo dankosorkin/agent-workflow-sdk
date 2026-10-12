@@ -96,7 +96,10 @@ async def test_subgraph_with_output_map_avoids_double_count():
 async def test_subgraph_only_sees_mapped_input():
     g = Graph(Outer)
     g.add_subgraph(
-        "inner", _inner_graph(MemoryCheckpointer()), input_map={"n": "n"}, output_map={"n": "result"}
+        "inner",
+        _inner_graph(MemoryCheckpointer()),
+        input_map={"n": "n"},
+        output_map={"n": "result"},
     )
     g.add_edge(START, "inner")
     g.add_edge("inner", END)

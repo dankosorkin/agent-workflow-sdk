@@ -363,15 +363,11 @@ def _subgraph_node(
         else:
             if input_map is not None:
                 sub_input = {
-                    sub_key: state[p_key]
-                    for p_key, sub_key in input_map.items()
-                    if p_key in state
+                    sub_key: state[p_key] for p_key, sub_key in input_map.items() if p_key in state
                 }
             else:
                 sub_input = {k: v for k, v in state.items() if k in sub_channels}
-            final = await subgraph.invoke(
-                sub_input, thread=sub_thread, owner_check=ctx.owner_check
-            )
+            final = await subgraph.invoke(sub_input, thread=sub_thread, owner_check=ctx.owner_check)
 
         # If the child suspended rather than finished, propagate the pause to
         # the parent: re-raise so the parent runtime writes an interrupted
@@ -379,9 +375,7 @@ def _subgraph_node(
         # and running the parent's downstream nodes without an answer.
         child_cp = await subgraph.checkpointer.get(sub_thread)
         if child_cp is not None and child_cp.interrupted and not child_cp.done:
-            raise InterruptError(
-                name, child_cp.interrupt_payload, wake_at=child_cp.wake_at
-            )
+            raise InterruptError(name, child_cp.interrupt_payload, wake_at=child_cp.wake_at)
 
         return _route_output(final)
 

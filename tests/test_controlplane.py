@@ -510,9 +510,7 @@ async def test_lost_lease_cancels_graph_and_blocks_side_effect():
     # Lease shorter than the heartbeat interval, so the lease expires before
     # attempt 1 renews it — the external re-claim then wins, and attempt 1's
     # first heartbeat (fired after the re-claim) detects the loss.
-    worker = Worker(
-        q, reg, poll_interval=0.02, heartbeat_interval=0.2, lease_seconds=0.05
-    )
+    worker = Worker(q, reg, poll_interval=0.02, heartbeat_interval=0.2, lease_seconds=0.05)
     task = asyncio.ensure_future(worker.run_once())
     await asyncio.sleep(0.08)  # worker claimed as attempt 1, now in the sleep
 
@@ -584,9 +582,7 @@ async def test_lost_lease_blocks_child_subgraph_write():
     q = MemoryRunQueue()
     rec = await q.enqueue("own", {"n": 0})
 
-    worker = Worker(
-        q, reg, poll_interval=0.02, heartbeat_interval=0.2, lease_seconds=0.05
-    )
+    worker = Worker(q, reg, poll_interval=0.02, heartbeat_interval=0.2, lease_seconds=0.05)
     task = asyncio.ensure_future(worker.run_once())
     await asyncio.sleep(0.08)  # claimed as attempt 1, child in its sleep
 

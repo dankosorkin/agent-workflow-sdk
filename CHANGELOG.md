@@ -16,6 +16,16 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   attempt. They no longer raise `RunNotFound` for an unknown/stale run — they
   return `False`. Update any custom worker loop or `RunQueue` implementation to
   pass `owner=` and honor the returned bool.
+- `Checkpoint` gained a required-at-rest `invocations` map (node name → highest
+  invocation ordinal on this thread), changing the persisted checkpoint format.
+  There is no migration (pre-1.0): a run checkpointed by an earlier version is
+  not resumable under this version; a legacy payload without the key loads with
+  an empty map. Node names + ints only, so it is never redacted.
+- `RunQueue` gained a required `async def is_owner(self, run_id, owner) -> bool`
+  (True iff the run exists, is `RUNNING`, and `attempt == owner`). An out-of-tree
+  `RunQueue` implementation must add it; `MemoryRunQueue` and `PostgresRunQueue`
+  implement it in-tree. The running graph calls it to owner-check every
+  checkpoint write.
 - A subgraph node reached at run time now requires its embedded graph to have
   its own checkpointer (compile it with `checkpointer=...`). A suspend inside a
   subgraph is unobservable without a child checkpoint, so a checkpointer-less
@@ -56,6 +66,24 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 - `MemoryCheckpointer` now deep-isolates checkpoint state at both the write and
   read boundaries, so mutating a nested container after `invoke`/`get` no longer
   rewrites a stored checkpoint (bug 8).
+- A worker that loses its lease mid-run now cancels and awaits the in-flight
+  graph task and owner-checks every checkpoint write (parent thread and child
+  sub-threads alike), so a stale attempt can no longer run further nodes, fire
+  side effects, or persist a checkpoint after a newer attempt has re-claimed the
+  run; the stale worker relinquishes the run without writing a terminal status
+  (invocation-ownership bug 1).
+- A loop that re-enters the same subgraph node no longer collides across
+  iterations: each entry derives a per-invocation sub-thread
+  (`{thread}::{name}#{inv}`), so iteration 1 no longer reads iteration 0's
+  finished child checkpoint and the parent correctly observes a later-iteration
+  interrupt (invocation-ownership bug 3).
+- An ordinary (non-interrupt) child checkpoint left after a crash now resumes
+  the child from its own checkpoint instead of re-invoking it from START, so the
+  child's already-completed first step is not repeated
+  (invocation-ownership bug 5).
+
+The interrupt answer-delivery path (`interrupt_answers`) is unchanged this
+release.
 
 ## [0.6.0] - 2026-10-11
 
