@@ -39,6 +39,7 @@ def _isolate(cp: Checkpoint) -> Checkpoint:
         state=copy.deepcopy(dict(cp.state)),
         interrupt_payload=copy.deepcopy(cp.interrupt_payload),
         interrupt_answers=copy.deepcopy(tuple(cp.interrupt_answers)),
+        invocations=copy.deepcopy(dict(cp.invocations)),
         extra=copy.deepcopy(dict(cp.extra)),
     )
 

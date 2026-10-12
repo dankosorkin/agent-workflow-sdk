@@ -82,6 +82,15 @@ class Checkpoint:
     #: the Nth ``interrupt`` call replays the Nth answer. Empty for a run that
     #: has never interrupted or for a timer wait.
     interrupt_answers: tuple[Any, ...] = ()
+    #: Per-node invocation counter for THIS thread. Maps a node name -> the
+    #: highest invocation ordinal allocated for it so far on this thread. A
+    #: top-level Checkpoint field written directly by the scheduler (NOT a
+    #: state channel). A subgraph node reads its own ordinal (via Context) to
+    #: derive its child sub-thread; the map is persisted so a resume reuses the
+    #: SAME ordinal (stable) while the next loop iteration gets ordinal+1
+    #: (fresh). Replaces the collision-prone ``{thread}::{name}`` scheme.
+    #: New in v0.7.0.
+    invocations: dict[str, int] = field(default_factory=dict)
     extra: dict[str, Any] = field(default_factory=dict)
     #: Monotonic write count for this (thread, step). Set by the store on read;
     #: pass the value you read back as ``put(..., if_revision=)`` to guard a

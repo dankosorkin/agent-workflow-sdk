@@ -164,3 +164,66 @@ async def test_delete_thread_drops_from_listing(kind, tmp_path):
     await cp.put(Checkpoint(thread="b", step=1, state={"n": 1}))
     await cp.delete_thread("a")
     assert [i.thread for i in await cp.list_threads()] == ["b"]
+
+
+# --- invocations field (bugs 3/5 identity) ---------------------------------
+
+
+@pytest.mark.parametrize("kind", BACKENDS)
+async def test_invocations_round_trips(kind, tmp_path):
+    """A Checkpoint carrying a non-empty invocations map round-trips verbatim."""
+    cp = _make(kind, tmp_path)
+    await cp.put(
+        Checkpoint(thread="t", step=1, state={"n": 1}, invocations={"child": 0, "other": 2})
+    )
+    got = await cp.get("t", 1)
+    assert got.invocations == {"child": 0, "other": 2}
+
+
+def test_serde_defaults_invocations_when_missing():
+    """A legacy payload lacking ``invocations`` loads with an empty map (no
+    migration — pre-1.0 breaking)."""
+    from agentflow.checkpoint._serde import from_payload, to_payload
+
+    legacy = {"thread": "t", "step": 1, "state": {"n": 1}}
+    cp = from_payload(legacy)
+    assert cp.invocations == {}
+    # And a round-trip through to_payload preserves a populated map.
+    cp2 = from_payload(to_payload(Checkpoint(thread="t", step=1, state={}, invocations={"a": 3})))
+    assert cp2.invocations == {"a": 3}
+
+
+def test_revision_not_in_payload():
+    """``revision`` is store-managed and must not ride in the JSON payload."""
+    from agentflow.checkpoint._serde import to_payload
+
+    payload = to_payload(Checkpoint(thread="t", step=1, state={}, revision=7))
+    assert "revision" not in payload
+
+
+async def test_invocations_survives_redaction():
+    """A redacting checkpointer must NOT mask ``invocations`` (node names + ints
+    carry no secrets, and the identity bugs 3/5 depend on them surviving), while
+    ``interrupt_answers`` redaction stays in force."""
+    from agentflow import SqliteCheckpointer
+
+    def mask(value):
+        return "***"
+
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as d:
+        cp = SqliteCheckpointer(f"{d}/cp.db", redact=mask)
+        await cp.put(
+            Checkpoint(
+                thread="t",
+                step=1,
+                state={"secret": "shh"},
+                interrupt_answers=("human-answer",),
+                invocations={"child": 1},
+            )
+        )
+        got = await cp.get("t", 1)
+        assert got.invocations == {"child": 1}  # NOT masked
+        assert got.state == "***"  # masked
+        assert "human-answer" not in got.interrupt_answers  # masked
