@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 from collections.abc import AsyncIterator
 
@@ -23,6 +24,23 @@ from agentflow.checkpoint.base import Checkpoint, ThreadInfo
 from agentflow.errors import CheckpointConflict
 
 __all__ = ["MemoryCheckpointer"]
+
+
+def _isolate(cp: Checkpoint) -> Checkpoint:
+    """Return a deep copy of the mutable payload fields of ``cp``.
+
+    The in-memory store holds Python objects directly, so without copying, a
+    caller mutating a nested container in a checkpoint's ``state`` (before or
+    after it is stored) would silently rewrite history. Deep-copy at both the
+    write and read boundaries so a stored checkpoint is an immutable snapshot.
+    """
+    return dataclasses.replace(
+        cp,
+        state=copy.deepcopy(dict(cp.state)),
+        interrupt_payload=copy.deepcopy(cp.interrupt_payload),
+        interrupt_answers=copy.deepcopy(tuple(cp.interrupt_answers)),
+        extra=copy.deepcopy(dict(cp.extra)),
+    )
 
 
 class MemoryCheckpointer:
@@ -37,7 +55,8 @@ class MemoryCheckpointer:
         current_rev = existing.revision if existing else 0
         if if_revision is not None and if_revision != current_rev:
             raise CheckpointConflict(cp.thread, cp.step, if_revision, current_rev)
-        steps[cp.step] = dataclasses.replace(cp, revision=current_rev + 1)
+        isolated = _isolate(cp)
+        steps[cp.step] = dataclasses.replace(isolated, revision=current_rev + 1)
         return f"{cp.thread}:{cp.step}"
 
     async def get(self, thread: str, step: int | None = None) -> Checkpoint | None:
@@ -46,12 +65,13 @@ class MemoryCheckpointer:
             return None
         if step is None:
             step = max(steps)
-        return steps.get(step)
+        stored = steps.get(step)
+        return _isolate(stored) if stored is not None else None
 
     async def history(self, thread: str) -> AsyncIterator[Checkpoint]:
         steps = self._threads.get(thread, {})
         for step in sorted(steps):
-            yield steps[step]
+            yield _isolate(steps[step])
 
     async def delete_thread(self, thread: str) -> None:
         self._threads.pop(thread, None)

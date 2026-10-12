@@ -107,6 +107,30 @@ async def test_always_isolates_even_single_node():
     assert out["shared"] == []
 
 
+async def test_memory_checkpointer_isolates_state():
+    """Bug 8: MemoryCheckpointer must deep-isolate at BOTH boundaries so a
+    stored checkpoint is a true snapshot — mutating the caller's original (or
+    a value returned by get) never reaches back into the store."""
+    from agentflow.checkpoint import Checkpoint, MemoryCheckpointer
+
+    cp = MemoryCheckpointer()
+    nested = ["original"]
+    original = Checkpoint(thread="t", step=1, state={"items": nested})
+    await cp.put(original)
+
+    # Write boundary: mutating the original nested list after put must not
+    # change the stored checkpoint.
+    nested.append("outside")
+    stored = await cp.get("t")
+    assert stored.state["items"] == ["original"]
+
+    # Read boundary: mutating the list handed back by get must not change the
+    # store either.
+    stored.state["items"].append("read_mutation")
+    again = await cp.get("t")
+    assert again.state["items"] == ["original"]
+
+
 def test_invalid_isolate_state_rejected():
     g = Graph(S)
     g.add_node("n", lambda s, c: {})

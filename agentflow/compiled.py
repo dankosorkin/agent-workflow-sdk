@@ -202,12 +202,16 @@ class CompiledGraph:
             return
         from datetime import UTC, datetime
 
-        delay = (datetime.fromisoformat(wake_at) - datetime.now(UTC)).total_seconds()
-        if delay <= 0:
-            return
-        if max_sleep is not None:
-            delay = min(delay, max_sleep)
-        await asyncio.sleep(delay)
+        deadline = datetime.fromisoformat(wake_at)
+        # Loop until the real deadline. A single capped (max_sleep) nap must not
+        # be mistaken for the wait being over — re-check the clock each time and
+        # only return once wake_at has actually passed.
+        while True:
+            remaining = (deadline - datetime.now(UTC)).total_seconds()
+            if remaining <= 0:
+                return
+            nap = remaining if max_sleep is None else min(remaining, max_sleep)
+            await asyncio.sleep(nap)
 
     # ------------------------------------------------------------------
     # Synchronous facade (convenience for non-async callers)
