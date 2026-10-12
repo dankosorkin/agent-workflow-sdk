@@ -125,6 +125,10 @@ class Context:
     node: str
     thread: str
     step: int
+    #: This node's invocation ordinal on this thread (see ``_invocation_for``).
+    #: A subgraph node derives its child sub-thread from it so loop iterations
+    #: and fresh starts do not collide; plain nodes ignore it.
+    invocation: int = 0
     _emit_queue: asyncio.Queue[StreamEvent] | None = field(default=None, repr=False)
     _resume: _Resume | None = field(default=None, repr=False)
     _hooks: Hooks | None = field(default=None, repr=False)
@@ -223,6 +227,24 @@ def _now() -> str:
     return datetime.now(UTC).isoformat()
 
 
+def _invocation_for(
+    name: str, invocations: dict[str, int], *, replaying: bool
+) -> tuple[int, dict[str, int]]:
+    """Allocate ``name``'s invocation ordinal and return it with the next map.
+
+    When ``replaying`` (the first resumed super-step) and ``name`` already has a
+    stored ordinal, reuse it unchanged — the suspended frontier re-executes with
+    the SAME identity it had before the suspend (stable on resume). Otherwise
+    allocate ``invocations.get(name, -1) + 1`` (fresh on first entry and on each
+    later forward re-entry). Returns a FRESH dict on a bump so the caller never
+    mutates the loaded checkpoint's map in place.
+    """
+    if replaying and name in invocations:
+        return invocations[name], invocations
+    nxt = invocations.get(name, -1) + 1
+    return nxt, {**invocations, name: nxt}
+
+
 async def _resolve_targets(graph: _Graph, node: str, state: Mapping[str, Any]) -> list[str]:
     """Compute the next nodes to run after ``node`` completes."""
     targets: list[str] = []
@@ -284,6 +306,7 @@ async def run(
     start_step: int,
     checkpointer: Any,
     resume_values: Mapping[str, Any] | None = None,
+    start_invocations: dict[str, int] | None = None,
     emit_queue: asyncio.Queue[StreamEvent] | None = None,
     hooks: Hooks = _NOOP,
 ) -> Checkpoint:
@@ -303,6 +326,14 @@ async def run(
     step = start_step
     parent_id: str | None = None
     resume_values = dict(resume_values or {})
+    # Per-node invocation ordinals, seeded from the resumed checkpoint (never
+    # mutated in place — ``_invocation_for`` returns a fresh dict on a bump).
+    invocations: dict[str, int] = dict(start_invocations or {})
+    # ``replaying`` is True only for the FIRST resumed super-step (the one
+    # re-driven from ``cp.next``); every frontier node already in ``invocations``
+    # then reuses its stored ordinal instead of bumping. Cleared after the first
+    # loop iteration, exactly like ``resume_values``.
+    replaying = start_frontier is not None and start_invocations is not None
 
     async def _emit(ev: StreamEvent) -> None:
         if emit_queue is not None:
@@ -318,20 +349,23 @@ async def run(
             )
         step += 1
 
-        # Build a context per node; seed a resume value if this node is
-        # resuming from an interrupt.
-        contexts = {
-            name: Context(
+        # Build a context per node; allocate each node's invocation ordinal
+        # (every node, so the field is uniform) and seed a resume value if this
+        # node is resuming from an interrupt.
+        contexts = {}
+        for name in frontier:
+            inv, invocations = _invocation_for(name, invocations, replaying=replaying)
+            contexts[name] = Context(
                 node=name,
                 thread=thread,
                 step=step,
+                invocation=inv,
                 _emit_queue=emit_queue,
                 _resume=_Resume(resume_values[name]) if name in resume_values else None,
                 _hooks=hooks,
             )
-            for name in frontier
-        }
         resume_values.clear()  # only applies to the first resumed super-step
+        replaying = False  # ordinal reuse applies to the first resumed step only
 
         for name in frontier:
             await _emit(StreamEvent("node_start", step, node=name))
@@ -392,6 +426,7 @@ async def run(
                     interrupt_payload=res.payload,
                     wake_at=res.wake_at,
                     interrupt_answers=prior,
+                    invocations=invocations,
                 )
                 if checkpointer is not None:
                     parent_id = await checkpointer.put(cp)
@@ -424,6 +459,7 @@ async def run(
             next=tuple(next_frontier),
             parent=parent_id,
             ts=_now(),
+            invocations=invocations,
         )
         if checkpointer is not None:
             parent_id = await checkpointer.put(cp)
@@ -434,4 +470,12 @@ async def run(
 
     await _emit(StreamEvent("done", step, data=state))
     await _safe(hooks.on_run_end(thread, step, completed=True))
-    return Checkpoint(thread=thread, step=step, state=state, next=(), parent=parent_id, ts=_now())
+    return Checkpoint(
+        thread=thread,
+        step=step,
+        state=state,
+        next=(),
+        parent=parent_id,
+        ts=_now(),
+        invocations=invocations,
+    )

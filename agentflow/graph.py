@@ -306,12 +306,12 @@ def _subgraph_node(
     parent_names = set(parent_channels)
 
     def _sub_thread(ctx: Any) -> str:
-        # Derived from the parent thread + this node's name ONLY. Dropping the
-        # old ``@{ctx.step}`` component keeps the sub-thread stable across a
-        # resume: when a parent interrupt rewinds the super-step, the child's
-        # checkpoint must still be found so the suspended child resumes instead
-        # of re-running from scratch.
-        return f"{ctx.thread}::{name}"
+        # Derived from the parent thread, this node's name, and the node's
+        # per-invocation ordinal (``#inv``). The ordinal is stable across a
+        # resume of a given invocation (so a parent interrupt that rewinds the
+        # super-step still finds the suspended child) and fresh on the next loop
+        # iteration (so iteration 1 never reads iteration 0's finished child).
+        return f"{ctx.thread}::{name}#{ctx.invocation}"
 
     def _route_output(final: Mapping[str, Any]) -> Mapping[str, Any]:
         if output_map is not None:
@@ -333,7 +333,23 @@ def _subgraph_node(
 
         sub_thread = _sub_thread(ctx)
         child_cp = await subgraph.checkpointer.get(sub_thread)
-        resuming = child_cp is not None and child_cp.interrupted and not child_cp.done
+
+        # Finished-sibling replay: on the first resumed super-step the whole
+        # frontier re-executes, and a sibling that already ran to completion
+        # keeps its stored invocation ordinal (so this same sub-thread) — its
+        # child checkpoint is DONE. Re-invoking it from START would repeat its
+        # side effects, so instead reuse the completed child's final state.
+        # A brand-new iteration never reaches here: it derives a fresh ``#inv``
+        # sub-thread with no checkpoint yet.
+        if child_cp is not None and child_cp.done:
+            return _route_output(child_cp.state)
+
+        # Resume iff the child left an UNFINISHED checkpoint on this exact
+        # sub-thread — whether a HITL interrupt or an ordinary post-crash step
+        # (bug 5). The per-invocation sub-thread guarantees this checkpoint
+        # belongs to THIS invocation, so a fresh iteration gets None and runs
+        # from START.
+        resuming = child_cp is not None and not child_cp.done
 
         if resuming:
             # The child is mid-interrupt; forward the parent's resume value and

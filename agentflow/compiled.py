@@ -97,6 +97,7 @@ class CompiledGraph:
             start_frontier=None,
             start_step=0,
             checkpointer=self.checkpointer,
+            start_invocations=None,
             hooks=self.hooks,
         )
         cp = await self._run_with_timeout(coro, thread, timeout)
@@ -111,6 +112,7 @@ class CompiledGraph:
             initial_state=self._validate_input(input),
             start_frontier=None,
             start_step=0,
+            start_invocations=None,
         ):
             yield ev
 
@@ -132,6 +134,7 @@ class CompiledGraph:
             start_step=cp.step,
             checkpointer=self.checkpointer,
             resume_values=resume_values,
+            start_invocations=cp.invocations,
             hooks=self.hooks,
         )
         result = await self._run_with_timeout(coro, thread, timeout)
@@ -147,6 +150,7 @@ class CompiledGraph:
             start_frontier=list(cp.next),
             start_step=cp.step,
             resume_values=resume_values,
+            start_invocations=cp.invocations,
         ):
             yield ev
 
@@ -324,6 +328,7 @@ class CompiledGraph:
         start_frontier: list[str] | None,
         start_step: int,
         resume_values: Mapping[str, Any] | None = None,
+        start_invocations: dict[str, int] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Run in a background task, draining the emit queue as a stream."""
         queue: asyncio.Queue[Any] = asyncio.Queue()
@@ -339,6 +344,7 @@ class CompiledGraph:
                     start_step=start_step,
                     checkpointer=self.checkpointer,
                     resume_values=resume_values,
+                    start_invocations=start_invocations,
                     emit_queue=queue,
                     hooks=self.hooks,
                 )
