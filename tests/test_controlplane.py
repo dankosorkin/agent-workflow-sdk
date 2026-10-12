@@ -17,6 +17,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from typing import Annotated
 
 import pytest
@@ -33,7 +34,6 @@ from agentflow import (
     append,
     last,
 )
-from agentflow.errors import RunNotFound
 
 
 class Doubler(State):
@@ -151,8 +151,8 @@ async def test_complete_and_list_filter():
     q = MemoryRunQueue()
     r1 = await q.enqueue("g", {"n": 1})
     await q.enqueue("h", {"n": 2})
-    await q.claim()  # claims r1 (oldest)
-    await q.complete(r1.run_id, status=RunStatus.SUCCEEDED)
+    claimed = await q.claim()  # claims r1 (oldest)
+    await q.complete(r1.run_id, claimed.attempt, status=RunStatus.SUCCEEDED)
     done = await q.list(status=RunStatus.SUCCEEDED)
     assert [r.run_id for r in done] == [r1.run_id]
     assert len(await q.list(graph="h")) == 1
@@ -169,15 +169,37 @@ async def test_request_cancel_unknown_and_terminal():
     q = MemoryRunQueue()
     assert await q.request_cancel("missing") is False
     rec = await q.enqueue("g")
-    await q.claim()
-    await q.complete(rec.run_id, status=RunStatus.SUCCEEDED)
+    claimed = await q.claim()
+    await q.complete(rec.run_id, claimed.attempt, status=RunStatus.SUCCEEDED)
     assert await q.request_cancel(rec.run_id) is False
 
 
-async def test_heartbeat_unknown_raises():
+async def test_heartbeat_unknown_returns_false():
     q = MemoryRunQueue()
-    with pytest.raises(RunNotFound):
-        await q.heartbeat("missing")
+    assert await q.heartbeat("missing", 1) is False
+
+
+async def test_stale_worker_cannot_complete():
+    """Bug 4: after a lease expires and the run is re-claimed, the first
+    worker's attempt token no longer owns the run — its heartbeat and
+    completion must be no-ops so it cannot clobber the live attempt."""
+    q = MemoryRunQueue()
+    rec = await q.enqueue("g", {"n": 1})
+    c1 = await q.claim(lease_seconds=0.01)  # owner = attempt 1
+    assert c1 is not None and c1.attempt == 1
+    await asyncio.sleep(0.03)  # let the lease expire
+    c2 = await q.claim(lease_seconds=60)  # re-claim, owner = attempt 2
+    assert c2 is not None and c2.attempt == 2
+
+    # Stale attempt 1 may neither complete nor heartbeat the re-claimed run.
+    assert await q.complete(rec.run_id, 1, status=RunStatus.SUCCEEDED) is False
+    assert await q.heartbeat(rec.run_id, 1) is False
+    now = await q.get(rec.run_id)
+    assert now.status == RunStatus.RUNNING and now.attempt == 2
+
+    # The live attempt 2 completes normally.
+    assert await q.complete(rec.run_id, 2, status=RunStatus.SUCCEEDED) is True
+    assert (await q.get(rec.run_id)).status == RunStatus.SUCCEEDED
 
 
 # --- Worker end-to-end -----------------------------------------------------
@@ -230,6 +252,110 @@ async def test_worker_interrupt_then_resume():
     assert state.state["stage"] == ["asked", "finished"]
 
 
+class CrashState(State):
+    trace: Annotated[list, append]
+
+
+_crash_counter = {"a": 0, "b": 0}
+
+
+def _crash_graph(checkpointer):
+    """Two-node graph: A records that it ran; B fails on its first call and
+    succeeds on its second. Used to prove a crashed run resumes from the saved
+    checkpoint rather than re-running A."""
+    g = Graph(CrashState)
+
+    async def a(state, ctx):
+        _crash_counter["a"] += 1
+        return {"trace": "a"}
+
+    async def b(state, ctx):
+        _crash_counter["b"] += 1
+        if _crash_counter["b"] == 1:
+            raise RuntimeError("boom")
+        return {"trace": "b"}
+
+    g.add_node("a", a)
+    g.add_node("b", b)
+    g.add_edge(START, "a")
+    g.add_edge("a", "b")
+    g.add_edge("b", END)
+    return g.compile(checkpointer=checkpointer)
+
+
+async def test_worker_resumes_after_crash_not_restart():
+    """Bug 1: a crash after step A's checkpoint must resume at B, not re-run
+    the whole graph from START (which would run A twice, repeating side
+    effects)."""
+    _crash_counter["a"] = 0
+    _crash_counter["b"] = 0
+    cp = MemoryCheckpointer()
+    reg = GraphRegistry()
+    reg.register("crash", lambda: _crash_graph(cp))
+    q = MemoryRunQueue()
+    rec = await q.enqueue("crash", {"trace": []})
+
+    worker = Worker(q, reg, poll_interval=0.01)
+    await worker.run_once()  # A ok, B raises -> FAILED
+    assert (await q.get(rec.run_id)).status == RunStatus.FAILED
+    assert _crash_counter["a"] == 1 and _crash_counter["b"] == 1
+
+    # Re-queue and re-run; must resume from A's checkpoint (frontier = [b]).
+    await q.enqueue_resume(rec.run_id)
+    await worker.run_once()
+
+    final = await q.get(rec.run_id)
+    assert final.status == RunStatus.SUCCEEDED
+    # A ran exactly once across the crash; only B retried.
+    assert _crash_counter["a"] == 1
+    assert (await cp.get(rec.thread)).state["trace"] == ["a", "b"]
+
+
+class ExternalCancelState(State):
+    n: Annotated[int, last]
+
+
+_external_counter = {"n": 0}
+
+
+def _side_effect_graph(checkpointer, delay):
+    """A single slow node that performs an observable side effect only AFTER a
+    sleep — so cancelling the worker mid-sleep must prevent the increment."""
+    g = Graph(ExternalCancelState)
+
+    async def slow(state, ctx):
+        await asyncio.sleep(delay)
+        _external_counter["n"] += 1
+        return {"n": _external_counter["n"]}
+
+    g.add_node("slow", slow)
+    g.add_edge(START, "slow")
+    g.add_edge("slow", END)
+    return g.compile(checkpointer=checkpointer)
+
+
+async def test_external_cancel_stops_graph_execution():
+    """Bug 5: cancelling the worker task from outside must cancel the in-flight
+    graph work, not leave it running detached in the background."""
+    _external_counter["n"] = 0
+    cp = MemoryCheckpointer()
+    reg = GraphRegistry()
+    reg.register("se", lambda: _side_effect_graph(cp, delay=0.3))
+    q = MemoryRunQueue()
+    await q.enqueue("se", {"n": 0})
+
+    worker = Worker(q, reg, poll_interval=0.02)
+    task = asyncio.ensure_future(worker.run_once())
+    await asyncio.sleep(0.1)  # let the worker claim and enter the slow node
+    task.cancel()  # external cancel (NOT request_cancel)
+    with contextlib.suppress(asyncio.CancelledError):
+        await task
+
+    # Wait well past when the node would have incremented had it kept running.
+    await asyncio.sleep(0.5)
+    assert _external_counter["n"] == 0  # the detached work was cancelled
+
+
 async def test_worker_cooperative_cancel():
     cp = MemoryCheckpointer()
     reg = GraphRegistry()
@@ -254,8 +380,8 @@ async def test_queue_stats_by_status():
     q = MemoryRunQueue()
     r1 = await q.enqueue("g")
     await q.enqueue("g")
-    await q.claim()  # claims r1 -> running
-    await q.complete(r1.run_id, status=RunStatus.SUCCEEDED)
+    claimed = await q.claim()  # claims r1 -> running
+    await q.complete(r1.run_id, claimed.attempt, status=RunStatus.SUCCEEDED)
 
     stats = await q.stats()
     assert isinstance(stats, QueueStats)

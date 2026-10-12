@@ -445,8 +445,9 @@ async def test_live_postgres_run_queue():
         assert await q.request_cancel(c.run_id) is True
         assert (await q.get(c.run_id)).status == RunStatus.CANCELLED
 
-        # complete + list filter.
-        await q.complete(rec.run_id, status=RunStatus.SUCCEEDED)
+        # complete + list filter. The run was re-claimed above (attempt 2),
+        # so the live owner token is `again.attempt`, not the stale first claim.
+        await q.complete(rec.run_id, again.attempt, status=RunStatus.SUCCEEDED)
         done = await q.list(status=RunStatus.SUCCEEDED)
         assert rec.run_id in {r.run_id for r in done}
 

@@ -33,7 +33,17 @@ __all__ = ["RunQueue"]
 
 @runtime_checkable
 class RunQueue(Protocol):
-    """Persists run requests and hands them to workers under a lease."""
+    """Persists run requests and hands them to workers under a lease.
+
+    Ownership: :meth:`claim` stamps the run with an incrementing ``attempt``
+    number and returns it on the record; that number is the claiming worker's
+    *owner token*. Every subsequent mutation of the claim — :meth:`heartbeat`
+    and :meth:`complete` — must pass the same ``owner`` and is a no-op (returns
+    ``False``) when the run has since been re-claimed by a newer attempt. This
+    stops a stale worker (one whose lease expired and whose run was handed to a
+    fresh attempt) from extending the lease or writing a terminal status over
+    the live attempt's work.
+    """
 
     async def enqueue(
         self, graph: str, input: Mapping[str, Any] | None = None, *, thread: str | None = None
@@ -64,17 +74,33 @@ class RunQueue(Protocol):
         None if nothing is available. Safe for concurrent workers."""
         ...
 
-    async def heartbeat(self, run_id: str, *, lease_seconds: float = 60.0) -> None:
-        """Extend the lease on a claimed run (call periodically while working)."""
+    async def heartbeat(self, run_id: str, owner: int, *, lease_seconds: float = 60.0) -> bool:
+        """Extend the lease on a claimed run (call periodically while working).
+
+        ``owner`` is the ``attempt`` returned by :meth:`claim`. Returns True
+        when the lease was extended; False when the run is unknown, no longer
+        running, or has been re-claimed by a newer attempt (the caller is a
+        stale worker and should stop)."""
         ...
 
     async def complete(
-        self, run_id: str, *, status: str, error: str | None = None, wake_at: str | None = None
-    ) -> None:
+        self,
+        run_id: str,
+        owner: int,
+        *,
+        status: str,
+        error: str | None = None,
+        wake_at: str | None = None,
+    ) -> bool:
         """Move a claimed run to a terminal-ish status (succeeded / failed /
         interrupted / cancelled), clearing its lease. For a ``waiting`` status
         (parked on ``ctx.wait``), pass ``wake_at`` so the run becomes claimable
-        again once that time passes."""
+        again once that time passes.
+
+        ``owner`` is the ``attempt`` returned by :meth:`claim`. Returns True
+        when the run was updated; False when the run is unknown or has been
+        re-claimed by a newer attempt (the caller is a stale worker and its
+        completion is discarded)."""
         ...
 
     async def request_cancel(self, run_id: str) -> bool:

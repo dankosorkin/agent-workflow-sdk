@@ -230,21 +230,30 @@ class PostgresRunQueue:
         )
         return self._row_to_record(row) if row is not None else None
 
-    async def heartbeat(self, run_id: str, *, lease_seconds: float = 60.0) -> None:
+    async def heartbeat(self, run_id: str, owner: int, *, lease_seconds: float = 60.0) -> bool:
         pool = await self._get_pool()
+        # Only the current owner of a still-running claim may extend it; a
+        # re-claim bumps ``attempt`` so a stale worker's UPDATE matches 0 rows.
         result = await pool.execute(
             f"UPDATE {self.table} SET "
             "lease_until = NOW() + make_interval(secs => $2), updated_at = NOW() "
-            "WHERE run_id = $1",
+            "WHERE run_id = $1 AND attempt = $3 AND status = $4",
             run_id,
             float(lease_seconds),
+            int(owner),
+            RunStatus.RUNNING,
         )
-        if result.split()[-1] == "0":
-            raise RunNotFound(run_id)
+        return result.split()[-1] != "0"
 
     async def complete(
-        self, run_id: str, *, status: str, error: str | None = None, wake_at: str | None = None
-    ) -> None:
+        self,
+        run_id: str,
+        owner: int,
+        *,
+        status: str,
+        error: str | None = None,
+        wake_at: str | None = None,
+    ) -> bool:
         pool = await self._get_pool()
         # wake_at applies only to a parked (waiting) run; any other completion
         # clears it so a terminal/queued row never carries a stale wake time.
@@ -252,18 +261,20 @@ class PostgresRunQueue:
         # asyncpg binds a timestamptz parameter from a datetime, not a str, so
         # parse the ISO wake time before binding.
         wake = datetime.fromisoformat(wake_iso) if wake_iso else None
+        # The owner guard discards a stale worker's completion once the run has
+        # been re-claimed by a newer attempt.
         result = await pool.execute(
             f"UPDATE {self.table} SET "
             "status = $2, error = $3, lease_until = NULL, "
             "wake_at = $4, updated_at = NOW() "
-            "WHERE run_id = $1",
+            "WHERE run_id = $1 AND attempt = $5",
             run_id,
             status,
             error,
             wake,
+            int(owner),
         )
-        if result.split()[-1] == "0":
-            raise RunNotFound(run_id)
+        return result.split()[-1] != "0"
 
     async def request_cancel(self, run_id: str) -> bool:
         pool = await self._get_pool()

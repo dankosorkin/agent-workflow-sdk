@@ -116,20 +116,34 @@ class MemoryRunQueue:
             self._runs[chosen.run_id] = claimed
             return claimed
 
-    async def heartbeat(self, run_id: str, *, lease_seconds: float = 60.0) -> None:
+    async def heartbeat(self, run_id: str, owner: int, *, lease_seconds: float = 60.0) -> bool:
         async with self._lock:
-            rec = self._require(run_id)
+            rec = self._runs.get(run_id)
+            # Only the current owner of a still-running claim may extend it.
+            if rec is None or rec.attempt != owner or rec.status != RunStatus.RUNNING:
+                return False
             self._runs[run_id] = dataclasses.replace(
                 rec,
                 lease_until=_iso(_now() + timedelta(seconds=lease_seconds)),
                 updated_at=_iso(_now()),
             )
+            return True
 
     async def complete(
-        self, run_id: str, *, status: str, error: str | None = None, wake_at: str | None = None
-    ) -> None:
+        self,
+        run_id: str,
+        owner: int,
+        *,
+        status: str,
+        error: str | None = None,
+        wake_at: str | None = None,
+    ) -> bool:
         async with self._lock:
-            rec = self._require(run_id)
+            rec = self._runs.get(run_id)
+            # A stale worker (its run already re-claimed by a newer attempt)
+            # must not write a terminal status over the live attempt's work.
+            if rec is None or rec.attempt != owner:
+                return False
             self._runs[run_id] = dataclasses.replace(
                 rec,
                 status=status,
@@ -140,6 +154,7 @@ class MemoryRunQueue:
                 wake_at=wake_at if status == RunStatus.WAITING else None,
                 updated_at=_iso(_now()),
             )
+            return True
 
     async def request_cancel(self, run_id: str) -> bool:
         async with self._lock:

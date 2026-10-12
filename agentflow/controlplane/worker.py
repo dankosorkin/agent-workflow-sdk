@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import logging
 
 from agentflow.controlplane.queue import RunQueue
 from agentflow.controlplane.records import PoolHealth, RunRecord, RunStatus
@@ -31,6 +32,8 @@ from agentflow.controlplane.registry import GraphRegistry
 from agentflow.errors import InterruptError
 
 __all__ = ["Worker", "WorkerPool"]
+
+log = logging.getLogger(__name__)
 
 
 class _Cancelled(Exception):
@@ -97,26 +100,45 @@ class Worker:
     # ------------------------------------------------------------------
 
     async def _execute(self, rec: RunRecord) -> None:
+        # The attempt stamped on the claim is this worker's owner token; every
+        # lease mutation carries it so a stale worker cannot clobber a re-claim.
+        owner = rec.attempt
         try:
             graph = self.registry.get(rec.graph)
         except KeyError as exc:
-            await self.queue.complete(rec.run_id, status=RunStatus.FAILED, error=str(exc))
+            await self.queue.complete(
+                rec.run_id, owner, status=RunStatus.FAILED, error=str(exc)
+            )
             return
 
-        heartbeat = asyncio.create_task(self._heartbeat_loop(rec.run_id))
+        # The thread may already sit on a finished checkpoint — e.g. the run
+        # crashed after the graph completed but before the queue was marked
+        # terminal. Re-running would repeat the whole graph, so just reconcile
+        # the queue status from the checkpoint and return.
+        if await self._already_done(graph, rec):
+            fresh = await self.queue.get(rec.run_id)
+            status = (
+                RunStatus.CANCELLED
+                if (fresh is not None and fresh.cancel_requested)
+                else RunStatus.SUCCEEDED
+            )
+            await self.queue.complete(rec.run_id, owner, status=status)
+            return
+
+        heartbeat = asyncio.create_task(self._heartbeat_loop(rec.run_id, owner))
         try:
             work = self._start_work(graph, rec, await self._is_resume(graph, rec))
             await self._race_with_cancel(rec.run_id, work)
         except _Cancelled:
-            await self.queue.complete(rec.run_id, status=RunStatus.CANCELLED)
+            await self.queue.complete(rec.run_id, owner, status=RunStatus.CANCELLED)
             return
         except InterruptError:
             # Should not escape the runtime, but treat defensively as suspended.
-            await self.queue.complete(rec.run_id, status=RunStatus.INTERRUPTED)
+            await self.queue.complete(rec.run_id, owner, status=RunStatus.INTERRUPTED)
             return
         except Exception as exc:  # noqa: BLE001 - report any node/graph failure
             await self.queue.complete(
-                rec.run_id, status=RunStatus.FAILED, error=f"{type(exc).__name__}: {exc}"
+                rec.run_id, owner, status=RunStatus.FAILED, error=f"{type(exc).__name__}: {exc}"
             )
             return
         finally:
@@ -127,7 +149,10 @@ class Worker:
         # Read the checkpoint the run just wrote to tell finished from
         # suspended, and a human interrupt from a timer wait (ctx.wait).
         status, wake_at = await self._final_status(graph, rec.thread)
-        await self.queue.complete(rec.run_id, status=status, wake_at=wake_at)
+        if not await self.queue.complete(rec.run_id, owner, status=status, wake_at=wake_at):
+            log.warning(
+                "run %s was re-claimed; completion by attempt %d discarded", rec.run_id, owner
+            )
 
     def _start_work(self, graph, rec: RunRecord, is_resume: bool):
         if is_resume:
@@ -135,13 +160,25 @@ class Worker:
         return graph.invoke(dict(rec.input), thread=rec.thread)
 
     async def _is_resume(self, graph, rec: RunRecord) -> bool:
-        """A claim is a resume iff the thread already sits on an interrupted,
-        not-yet-finished checkpoint. Authoritative regardless of attempt count
-        or whether the human answer happened to be None."""
+        """A claim is a resume iff the thread already sits on an unfinished
+        checkpoint. This covers BOTH a human/timer interrupt AND a plain
+        checkpoint left after a completed super-step whose run crashed before
+        finishing: resuming continues from the saved frontier instead of
+        re-running the graph from START (which would repeat earlier steps and
+        their side effects). Authoritative regardless of attempt count or
+        whether a stored human answer happened to be None."""
         if graph.checkpointer is None:
             return False
         cp = await graph.get_state(rec.thread)
-        return cp is not None and cp.interrupted and not cp.done
+        return cp is not None and not cp.done
+
+    async def _already_done(self, graph, rec: RunRecord) -> bool:
+        """True when the thread already sits on a finished checkpoint, so there
+        is nothing left to run — only the queue status to reconcile."""
+        if graph.checkpointer is None:
+            return False
+        cp = await graph.get_state(rec.thread)
+        return cp is not None and cp.done
 
     async def _final_status(self, graph, thread: str) -> tuple[str, str | None]:
         cp = await graph.get_state(thread) if graph.checkpointer is not None else None
@@ -154,25 +191,39 @@ class Worker:
             return RunStatus.WAITING, cp.wake_at
         return RunStatus.INTERRUPTED, None
 
-    async def _heartbeat_loop(self, run_id: str) -> None:
+    async def _heartbeat_loop(self, run_id: str, owner: int) -> None:
         while True:
             await asyncio.sleep(self.heartbeat_interval)
-            await self.queue.heartbeat(run_id, lease_seconds=self.lease_seconds)
+            if not await self.queue.heartbeat(run_id, owner, lease_seconds=self.lease_seconds):
+                # The run was re-claimed by a newer attempt (or finished); this
+                # worker is stale. Stop renewing a lease it no longer owns.
+                log.warning("run %s lease lost by attempt %d; stopping heartbeat", run_id, owner)
+                return
 
     async def _race_with_cancel(self, run_id: str, work) -> None:
-        """Run ``work`` while polling for a cancel request; raise _Cancelled."""
+        """Run ``work`` while polling for a cancel request; raise _Cancelled.
+
+        Whatever ends the race — the work finishing, a cooperative cancel, or
+        this coroutine itself being cancelled from outside (the worker task is
+        cancelled) — the ``finally`` guarantees the child ``work_task`` is
+        cancelled and awaited so no graph execution is left running detached in
+        the background after the lease is relinquished.
+        """
         work_task = asyncio.ensure_future(work)
-        while True:
-            done, _ = await asyncio.wait({work_task}, timeout=self.poll_interval)
-            if work_task in done:
-                work_task.result()  # propagate exception / completion
-                return
-            rec = await self.queue.get(run_id)
-            if rec is not None and rec.cancel_requested:
+        try:
+            while True:
+                done, _ = await asyncio.wait({work_task}, timeout=self.poll_interval)
+                if work_task in done:
+                    work_task.result()  # propagate exception / completion
+                    return
+                rec = await self.queue.get(run_id)
+                if rec is not None and rec.cancel_requested:
+                    raise _Cancelled
+        finally:
+            if not work_task.done():
                 work_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await work_task
-                raise _Cancelled
 
 
 class WorkerPool:

@@ -85,8 +85,8 @@ async def test_claim_reclaims_expired_lease(queue):
 async def test_complete_and_list_filter(queue):
     r1 = await queue.enqueue("g", {"n": 1})
     await queue.enqueue("h", {"n": 2})
-    await queue.claim()
-    await queue.complete(r1.run_id, status=RunStatus.SUCCEEDED)
+    claimed = await queue.claim()
+    await queue.complete(r1.run_id, claimed.attempt, status=RunStatus.SUCCEEDED)
     done = await queue.list(status=RunStatus.SUCCEEDED)
     assert [r.run_id for r in done] == [r1.run_id]
     assert len(await queue.list(graph="h")) == 1
@@ -96,6 +96,26 @@ async def test_request_cancel_queued_is_immediate(queue):
     rec = await queue.enqueue("g", {"n": 1})
     assert await queue.request_cancel(rec.run_id) is True
     assert (await queue.get(rec.run_id)).status == RunStatus.CANCELLED
+
+
+async def test_stale_worker_heartbeat_noop(queue):
+    """Bug 4 (SQL twin): a stale attempt's heartbeat/complete match 0 rows
+    once the run is re-claimed under a newer attempt, so they return False and
+    cannot clobber the live attempt."""
+    rec = await queue.enqueue("g", {"n": 1})
+    c1 = await queue.claim(lease_seconds=0.01)
+    assert c1 is not None and c1.attempt == 1
+    await asyncio.sleep(0.05)
+    c2 = await queue.claim(lease_seconds=60)
+    assert c2 is not None and c2.attempt == 2
+
+    assert await queue.heartbeat(rec.run_id, 1) is False
+    assert await queue.complete(rec.run_id, 1, status=RunStatus.SUCCEEDED) is False
+    now = await queue.get(rec.run_id)
+    assert now.status == RunStatus.RUNNING and now.attempt == 2
+
+    assert await queue.complete(rec.run_id, 2, status=RunStatus.SUCCEEDED) is True
+    assert (await queue.get(rec.run_id)).status == RunStatus.SUCCEEDED
 
 
 async def test_stats_snapshot(queue):
@@ -116,9 +136,9 @@ async def test_waiting_run_not_claimable_before_wake(queue):
     from agentflow import RunStatus
 
     rec = await queue.enqueue("g", {})
-    await queue.claim()
+    claimed = await queue.claim()
     future = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
-    await queue.complete(rec.run_id, status=RunStatus.WAITING, wake_at=future)
+    await queue.complete(rec.run_id, claimed.attempt, status=RunStatus.WAITING, wake_at=future)
 
     assert (await queue.get(rec.run_id)).status == RunStatus.WAITING
     # wake_at is an hour out, so nothing is runnable yet.
@@ -132,9 +152,9 @@ async def test_waiting_run_reclaimed_after_wake(queue):
     from agentflow import RunStatus
 
     rec = await queue.enqueue("g", {})
-    await queue.claim()
+    claimed = await queue.claim()
     soon = (datetime.now(UTC) + timedelta(seconds=0.5)).isoformat()
-    await queue.complete(rec.run_id, status=RunStatus.WAITING, wake_at=soon)
+    await queue.complete(rec.run_id, claimed.attempt, status=RunStatus.WAITING, wake_at=soon)
 
     assert await queue.claim() is None  # not yet
     await asyncio.sleep(0.7)
