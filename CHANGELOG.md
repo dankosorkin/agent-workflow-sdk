@@ -59,10 +59,24 @@ project aims to follow [Semantic Versioning](https://semver.org/).
     (`completed | partial | failed`, with failed and blocked steps listed).
     `backend_runner(cwd=...)` runs each attempt on a fresh Kiro / Claude Code / Codex
     backend whose policy comes from the step's `permission`.
+  - `may_ask`: a step may answer with a clarifying question instead of a result. It is
+    answered by `default_answer`, by a human (`ask_mode="interrupt"`: the run returns
+    `waiting` with the question, continue with `resume_plan(..., answer=...)`), or it
+    stops the step with `needs_clarification` (`ask_mode="stop"`, the default). A
+    stopped run continues as a NEW run: `run_plan(..., answers={step: answer})` reuses
+    the finished steps from the cache, the answer is part of the cache key, and the
+    approval stays valid. A resume does not repeat the agent's question: the finished
+    attempt is read back from its durable sub-thread.
+  - `resume_plan(...)` continues a run that is waiting, held, or was interrupted by a
+    crash, after re-checking the approval. With `inventory_source=...`, the approval is
+    re-checked against the CURRENT inventory before every step; a revoked approval
+    HOLDS the run (`RunOutcome.status == "held"`, finished steps kept) instead of
+    failing it.
   - Refused up front (`PlanRefused`), never ignored: an invalid, unapproved or
-    stale-approved plan, missing or unknown run parameters, and features not
-    executable yet: `may_ask`, `semantic_check`, budgets, timeouts, artifacts, and
-    check kinds other than `not_empty` and `has_fields`.
+    stale-approved plan, missing or unknown run parameters, an answer for a step that
+    cannot take one, and features not executable yet: `semantic_check`, budgets,
+    timeouts, artifacts, `may_ask` together with `side_effects`, and check kinds other
+    than `not_empty` and `has_fields`.
 
 - `Checkpoint.interrupt_answers`: an ordered tuple of the human answers already
   delivered to a node's successive `interrupt` calls. A node that interrupts

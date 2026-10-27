@@ -39,10 +39,12 @@ from agentflow.workflow.plan import (
 )
 from agentflow.workflow.runner import (
     AgentRunner,
+    ApprovalRevoked,
     PlanRefused,
     RunOutcome,
     backend_runner,
     build_workflow_graph,
+    resume_plan,
     run_plan,
     summarize,
     unsupported_features,
@@ -50,6 +52,7 @@ from agentflow.workflow.runner import (
 
 __all__ = [
     "AgentRunner",
+    "ApprovalRevoked",
     "PlanRefused",
     "RunOutcome",
     "backend_runner",
@@ -72,6 +75,7 @@ __all__ = [
     "load_schema",
     "plan_hash",
     "render_prompt",
+    "resume_plan",
     "resolve_backend",
     "resolve_backends",
     "resolve_inputs",

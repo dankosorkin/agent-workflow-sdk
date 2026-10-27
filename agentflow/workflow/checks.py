@@ -28,7 +28,7 @@ from typing import Any
 
 from agentflow.workflow.bindings import type_ok
 
-__all__ = ["CHECKS", "extract_json_object", "parse_output", "run_checks"]
+__all__ = ["CHECKS", "extract_json_object", "extract_question", "parse_output", "run_checks"]
 
 
 def _not_empty(output: dict[str, Any], check: dict[str, Any]) -> str | None:
@@ -114,3 +114,19 @@ def parse_output(text: str, outputs: dict[str, str]) -> tuple[dict[str, Any] | N
         else:
             fields[name] = obj[name]
     return (None, reasons) if reasons else (fields, [])
+
+
+def extract_question(text: str) -> dict[str, Any] | None:
+    """A clarifying question the agent asked instead of answering, or ``None``.
+
+    The agent signals it with ``{"needs_clarification": {"question": str, "options": [str]}}``.
+    ``options`` is optional (free text when absent or empty).
+    """
+    obj = extract_json_object(text)
+    ask = obj.get("needs_clarification") if obj else None
+    if not isinstance(ask, dict) or not isinstance(ask.get("question"), str) or not ask["question"]:
+        return None
+    options = ask.get("options") or []
+    if not isinstance(options, list) or any(not isinstance(o, str) for o in options):
+        return None
+    return {"question": ask["question"], "options": options}

@@ -46,7 +46,12 @@ async def test_a_plan_runs_end_to_end(plan, inventory):
         {"step": "analyze", "field": "findings", "value": ["spike at 03:00"]}
     ]
     assert outcome.failed == [] and outcome.blocked == []
-    assert outcome.steps["collect"] == {"status": "ok", "attempts": 1, "cached": False}
+    assert outcome.steps["collect"] == {
+        "status": "ok",
+        "attempts": 1,
+        "cached": False,
+        "clarifications": [],
+    }
 
 
 async def test_data_flows_into_the_prompt_and_the_contract_is_stated(plan, inventory):
@@ -171,7 +176,10 @@ async def test_an_invalid_plan_is_refused_before_anything_runs(plan, inventory):
 @pytest.mark.parametrize(
     ("mutate", "code"),
     [
-        (lambda s: s.update(may_ask={"max_questions": 1}), "unsupported_feature"),
+        (
+            lambda s: s.update(may_ask={"max_questions": 1}, side_effects=True),
+            "unsupported_feature",
+        ),
         (lambda s: s.update(timeout=5), "unsupported_feature"),
         (lambda s: s.update(budget={"tokens": 10}), "unsupported_feature"),
         (lambda s: s.update(semantic_check={"agent": "x"}), "unsupported_feature"),
