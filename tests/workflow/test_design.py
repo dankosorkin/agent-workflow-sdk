@@ -309,3 +309,70 @@ def test_prompts_are_deterministic_and_carry_their_inputs(inventory):
         "agent_missing",
     ):
         assert code in v
+
+
+# --- the orchestrator talks to the user -----------------------------------------------------
+
+QUESTIONS = json.dumps({"questions": ["Which log files?", "How far back?"]})
+
+
+def make_ask(*replies):
+    asked: list[list[str]] = []
+    queue = list(replies)
+
+    async def ask(questions):
+        asked.append(questions)
+        return queue.pop(0)
+
+    ask.asked = asked  # type: ignore[attr-defined]
+    return ask
+
+
+async def test_the_orchestrator_asks_then_writes_the_brief(inventory):
+    d = Designer(
+        orchestrator=[QUESTIONS, BRIEF], creator=[j(good_plan_obj())], verifier=[NO_ISSUES]
+    )
+    ask = make_ask("app.log, last 24h")
+    result = await design_plan("find anomalies", inventory, d, ask=ask)
+    assert result.status == "converged"
+    assert ask.asked == [["Which log files?", "How far back?"]]
+    assert result.dialogue == [
+        {"questions": ["Which log files?", "How far back?"], "answer": "app.log, last 24h"}
+    ]
+    second = d.prompts("orchestrator")[1]  # the agent gets the talk so far, statelessly
+    assert "Which log files?" in second and "app.log, last 24h" in second
+    assert "You cannot ask the user" not in d.prompts("orchestrator")[0]
+
+
+async def test_without_ask_the_orchestrator_is_told_not_to_ask(inventory):
+    d = Designer(orchestrator=[BRIEF], creator=[j(good_plan_obj())], verifier=[NO_ISSUES])
+    await design_plan("x", inventory, d)
+    assert "You cannot ask the user" in d.prompts("orchestrator")[0]
+
+
+async def test_questions_without_ask_are_an_unusable_brief(inventory):
+    d = Designer(orchestrator=[QUESTIONS, QUESTIONS], creator=[], verifier=[])
+    result = await design_plan("x", inventory, d)
+    assert result.status == "failed" and result.dialogue == []
+
+
+async def test_the_question_budget_ends_the_talk(inventory):
+    d = Designer(
+        orchestrator=[QUESTIONS, QUESTIONS, BRIEF],
+        creator=[j(good_plan_obj())],
+        verifier=[NO_ISSUES],
+    )
+    ask = make_ask("a", "b")
+    result = await design_plan("x", inventory, d, ask=ask, max_question_rounds=2)
+    assert result.status == "converged" and len(ask.asked) == 2
+    assert "You cannot ask the user" in d.prompts("orchestrator")[2]
+
+
+async def test_an_empty_reply_stops_further_questions(inventory):
+    d = Designer(
+        orchestrator=[QUESTIONS, BRIEF], creator=[j(good_plan_obj())], verifier=[NO_ISSUES]
+    )
+    result = await design_plan("x", inventory, d, ask=make_ask("  "))
+    assert result.status == "converged"
+    assert "You cannot ask the user" in d.prompts("orchestrator")[1]
+    assert "no answer" in result.dialogue[0]["answer"]

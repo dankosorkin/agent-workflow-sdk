@@ -22,6 +22,7 @@ from agentflow.workflow.bindings import (
 )
 from agentflow.workflow.capabilities import CATALOG, PERMISSIONS, Capabilities
 from agentflow.workflow.design import (
+    AskUser,
     DesignerRunner,
     DesignResult,
     approve_plan,
@@ -61,6 +62,7 @@ from agentflow.workflow.runner import (
 )
 
 __all__ = [
+    "AskUser",
     "DesignResult",
     "DesignerRunner",
     "approve_plan",

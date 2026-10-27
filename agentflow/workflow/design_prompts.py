@@ -112,15 +112,27 @@ Do NOT use: skills, mcp, artifacts, semantic_check, budget, timeout (not support
 
 def _orchestrator_system() -> str:
     return """You are wf-orchestrator. Turn the user's request into a brief for a workflow designer.
-Do not design the workflow and do not do the work. If something is unclear, list it under
-"ambiguities" instead of guessing.
+Do not design the workflow and do not do the work.
 
-The user message contains the request under "### request".
+You talk to the user like a colleague who needs to understand the task before it is handed on.
+If something that would change the workflow is unclear (the goal, the inputs, what a good result
+looks like, limits, what must not be touched), ask about it instead of guessing. Ask only what you
+cannot settle yourself: at most 5 short, concrete questions at a time, each with the answer you
+would assume if the user does not care. Do not ask about how to build the workflow; that is the
+designer's job. If the request is already clear, ask nothing. You may ask again after the answers
+if they opened a new gap.
+
+The user message contains the request under "### request" and, after the first round, the
+conversation so far under "### conversation". When it says you cannot ask (more) questions, do not
+ask: put what is still unclear under "ambiguities".
 
 ### answer format
-Finish with ONE JSON object and nothing after it:
+Finish with ONE JSON object and nothing after it. Either questions for the user:
+{"questions": [<string>, ...]}
+or, when you understand the task well enough, the brief:
 {"goal": <string>, "context": <string>, "constraints": [<string>, ...],
-  "expected_results": [<string>, ...], "ambiguities": [<string>, ...]}"""
+  "expected_results": [<string>, ...], "ambiguities": [<string>, ...]}
+Fold everything the user told you into the brief."""
 
 
 def _creator_system() -> str:
@@ -178,8 +190,27 @@ def role_system(role: str) -> str:
     }[role]()
 
 
-def orchestrator_task(request: str) -> str:
-    return f"### request\n{request}"
+def orchestrator_task(
+    request: str, dialogue: list[dict[str, Any]] | None = None, *, can_ask: bool = False
+) -> str:
+    """The orchestrator's data: the request, the talk so far, and whether more questions are allowed.
+
+    ``can_ask`` is False when nobody is there to answer (or the question budget is spent); the
+    message then says so, because a named agent's instructions cannot know it.
+    """
+    parts = [f"### request\n{request}"]
+    if dialogue:
+        lines = []
+        for turn in dialogue:
+            lines.append("you asked:\n" + "\n".join(f"- {q}" for q in turn["questions"]))
+            lines.append(f"the user answered:\n{turn['answer']}")
+        parts.append("### conversation\n" + "\n\n".join(lines))
+    if not can_ask:
+        parts.append(
+            "### questions\nYou cannot ask the user (more) questions. Answer with the brief; "
+            'list what is still unclear under "ambiguities".'
+        )
+    return "\n\n".join(parts)
 
 
 def creator_task(
@@ -213,8 +244,12 @@ def verifier_task(brief: dict[str, Any], inventory: dict[str, Any], plan: dict[s
 # the `*_task` part.
 
 
-def orchestrator_prompt(request: str) -> str:
-    return role_system("orchestrator") + "\n\n" + orchestrator_task(request)
+def orchestrator_prompt(
+    request: str, dialogue: list[dict[str, Any]] | None = None, *, can_ask: bool = False
+) -> str:
+    return (
+        role_system("orchestrator") + "\n\n" + orchestrator_task(request, dialogue, can_ask=can_ask)
+    )
 
 
 def creator_prompt(

@@ -62,6 +62,7 @@ from agentflow.workflow.roles import agent_name, claude_inline_agents
 from agentflow.workflow.runner import PlanRefused, collect_text, unsupported_features
 
 __all__ = [
+    "AskUser",
     "DesignResult",
     "DesignerRunner",
     "approve_plan",
@@ -75,9 +76,13 @@ __all__ = [
 #: ``(role, prompt) -> the agent's final text``; role is orchestrator, creator or verifier.
 DesignerRunner = Callable[[str, str], Awaitable[str]]
 
+#: ``(questions) -> the user's reply``, free text; ``None`` or blank means "no more answers".
+AskUser = Callable[[list[str]], Awaitable[str | None]]
+
 _PLAN_KEYS_FROM_CREATOR = {
     "parameters", "graph", "final_outputs", "run_limits", "budget",
 }  # fmt: skip
+_MAX_QUESTIONS_PER_ROUND = 5
 _BRIEF_KEYS = ("goal", "context", "constraints", "expected_results", "ambiguities")
 
 
@@ -96,6 +101,7 @@ class DesignResult:
     issues: list[dict[str, Any]] = field(default_factory=list)  # open remarks
     mechanical: list[Issue] = field(default_factory=list)  # validator findings on the last plan
     rounds: list[dict[str, Any]] = field(default_factory=list)  # history, one entry per round
+    dialogue: list[dict[str, Any]] = field(default_factory=list)  # the orchestrator's Q&A
     reason: str = ""
 
     def to_dict(self) -> dict[str, Any]:
@@ -106,6 +112,7 @@ class DesignResult:
             "issues": self.issues,
             "mechanical": [i.to_dict() for i in self.mechanical],
             "rounds": self.rounds,
+            "dialogue": self.dialogue,
             "reason": self.reason,
         }
 
@@ -213,6 +220,15 @@ def _parse_brief(text: str) -> dict[str, Any] | None:
     return brief
 
 
+def _parse_questions(text: str) -> list[str] | None:
+    """The orchestrator's questions, or ``None`` when the answer is not a question round."""
+    obj = extract_json_object(text)
+    if not obj or obj.get("goal") or not isinstance(obj.get("questions"), list):
+        return None
+    questions = [str(q).strip() for q in obj["questions"] if str(q).strip()]
+    return questions[:_MAX_QUESTIONS_PER_ROUND] or None
+
+
 def _parse_plan(text: str, brief: dict[str, Any]) -> dict[str, Any] | None:
     obj = extract_json_object(text)
     if not obj or "graph" not in obj:
@@ -274,9 +290,17 @@ async def design_plan(
     *,
     max_rounds: int = 3,
     named_agents: bool = False,
+    ask: AskUser | None = None,
+    max_question_rounds: int = 3,
 ) -> DesignResult:
     """Design a plan for ``request`` from the agents in ``inventory``. Never raises on bad
-    agent output: every failure ends in a :class:`DesignResult` that says what happened."""
+    agent output: every failure ends in a :class:`DesignResult` that says what happened.
+
+    With ``ask`` the orchestrator may talk to the user first: it sends questions, ``ask``
+    returns the reply, and this repeats up to ``max_question_rounds`` times until the
+    orchestrator writes the brief. Without ``ask`` (or after the budget, or when ``ask``
+    returns nothing) the orchestrator must write the brief and list the gaps as ambiguities.
+    """
     if max_rounds < 1:
         raise ValueError("max_rounds must be >= 1")
     # With named agents the role's instructions live in the agent definition (installed from
@@ -291,15 +315,32 @@ async def design_plan(
         creator_text = creator_prompt
         verifier_text = verifier_prompt
 
+    dialogue: list[dict[str, Any]] = []
+    questions_left = max_question_rounds if ask is not None else 0
     brief = None
-    for _ in range(2):  # one retry for an unusable brief
-        brief = _parse_brief(await designer("orchestrator", orchestrator_text(request)))
-        if brief is not None:
-            break
+    unusable = 0
+    while brief is None and unusable < 2:  # one retry for an unusable brief
+        text = await designer(
+            "orchestrator", orchestrator_text(request, dialogue, can_ask=questions_left > 0)
+        )
+        questions = _parse_questions(text) if questions_left > 0 else None
+        if questions is not None and ask is not None:
+            questions_left -= 1
+            reply = await ask(questions)
+            if not reply or not reply.strip():
+                reply = "(the user gave no answer; decide yourself and note it as an ambiguity)"
+                questions_left = 0
+            dialogue.append({"questions": questions, "answer": reply})
+            continue
+        brief = _parse_brief(text)
+        if brief is None:
+            unusable += 1
     if brief is None:
-        return DesignResult("failed", reason="the orchestrator did not produce a usable brief")
+        return DesignResult(
+            "failed", dialogue=dialogue, reason="the orchestrator did not produce a usable brief"
+        )
 
-    result = DesignResult("failed", brief=brief)
+    result = DesignResult("failed", brief=brief, dialogue=dialogue)
     plan: dict[str, Any] | None = None
     feedback: list[str] = []
     remarks: list[dict[str, Any]] = []
