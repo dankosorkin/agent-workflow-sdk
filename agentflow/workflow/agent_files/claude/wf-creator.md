@@ -46,7 +46,9 @@ A "target" is an output field of the step, optionally with a path: "items[*].lev
 - {"kind": "count", "target": <list/string/object>, "min": n, "max": n, "equals": n,
   "same_count_as": <another target>} (give at least one of the four)
 - {"kind": "compare", "target": <path>, "op": eq|ne|gt|ge|lt|le|in|not_in|contains|starts_with|
-  ends_with|exists, "value": <literal> OR "other": <another target>} ("in"/"not_in" take a list;
+  ends_with|exists, "value": <literal> OR "other": <another target>} ("in"/"not_in" take a list in "value", or in "other" a list field or a [*] path
+  (the allowed set); with another operator a [*] "other" means
+  the test must hold against EVERY item (e.g. "ge" against all counts = a maximum);
   "exists" takes neither; with [*] every item must pass, and an empty match fails unless
   "allow_empty": true)
 - {"kind": "unique", "target": <path>, e.g. "items[*].id"} (no duplicate values)

@@ -391,6 +391,28 @@
 плана; факт о внешнем мире (файлы действительно такие) они не доказывают. Для этого
 создатель добавляет независимый шаг-перепроверку, а полнота остаётся за человеком.
 
+### Локальный сервис для интерфейса (реализован)
+
+`WorkflowService` (`agentflow/workflow/service.py`, только stdlib) и HTTP-обёртка
+`agentflow/server/workflow_app.py` (extra `server`, включает uvicorn). Запуск:
+`python -m agentflow.workflow serve --inventory FILE --data-dir DIR --cwd DIR`; слушает
+только `127.0.0.1`, аутентификации нет. Маршруты: `POST /designs` (запрос -> фон),
+`GET /designs/{id}` (`designing | asking | done | failed | interrupted`), `POST
+/designs/{id}/answer` (ответ на вопросы оркестратора), `GET /plans/{id}`, `GET
+/plans/{id}/issues`, `POST /plans/{id}/approve {by}`, `POST /plans/{id}/runs {params}`, `GET
+/runs/{id}` (`running | waiting | held | completed | partial | failed | refused | error |
+interrupted`), `POST /runs/{id}/answer`, `POST /runs/{id}/resume`, `GET /inventory`.
+Состояние в каталоге данных: `records.db` (проекты, планы, запуски), `store.db` и
+`checkpoints.db` (движок; запуск переживает рестарт). Ограничения: незавершённое
+проектирование не сохраняется (после рестарта `interrupted`, спросить заново, OQ-D1);
+запуск после рестарта продолжается через `resume`; события не стримятся, клиент опрашивает.
+Живая проверка (настоящий `claude`): проектирование запроса «самый длинный .txt» через
+HTTP дало исполнимый план, после `approve` запуск завершился `completed` с верным ответом
+(`f4.txt`, 161 строка). Живой прогон нашёл две ошибки, обе исправлены: проверка `compare` с
+`other` по `[*]` проходила валидатор и падала в рантайме (теперь `[*]` в `other`
+означает «для каждого элемента», а `[*]` в `count` отклоняет валидатор), и `in` не принимал
+`other`.
+
 ### Семантический уровень (второй дженерик-примитив проверки)
 
 Для того, что структурно не выразить («эти данные действительно отвечают на вопрос»):

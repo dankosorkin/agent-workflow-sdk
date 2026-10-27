@@ -194,21 +194,29 @@ def _compare(output: dict[str, Any], check: dict[str, Any]) -> str | None:
         return None if err is None else err
     if err:
         return err
+    others: list[Any] | None = None  # compare against each of these (a [*] "other")
     if "other" in check:
-        other, _, err = _resolve(output, check["other"])
+        other, other_wild, err = _resolve(output, check["other"])
         if err:
             return err
-        if len(other) != 1:
-            return "'other' must point at one value (no [*])"
-        expected = other[0]
+        if op in ("in", "not_in"):
+            # the allowed set: a list field, or every item a [*] path reaches
+            expected = other[0] if not other_wild and len(other) == 1 else other
+        elif other_wild:
+            if not other and not check.get("allow_empty"):
+                return f"{check['other']!r} matched no items (set allow_empty to accept that)"
+            others, expected = other, None
+        else:
+            expected = other[0]
     else:
         expected = check.get("value")
     if wild and not values and not check.get("allow_empty"):
         return f"{target!r} matched no items (set allow_empty to accept that)"
     for i, actual in enumerate(values):
-        if not _compare_one(op, actual, expected):
-            at = f" (item {i})" if wild else ""
-            return f"{target!r}{at} is {actual!r}, which fails {op} {expected!r}"
+        for want in others if others is not None else [expected]:
+            if not _compare_one(op, actual, want):
+                at = f" (item {i})" if wild else ""
+                return f"{target!r}{at} is {actual!r}, which fails {op} {want!r}"
     return None
 
 
@@ -300,6 +308,10 @@ def validate_check(check: dict[str, Any], outputs: dict[str, Any]) -> list[str]:
     for key in ("min", "max", "equals"):
         if key in check and (not isinstance(check[key], int) or isinstance(check[key], bool)):
             problems.append(f"{key!r} must be an integer")
+    if kind == "count":
+        for key in ("target", "same_count_as"):
+            if key in check and (parse_path(check[key]) or []).count("*"):
+                problems.append(f"{key} must point at one value, not a [*] path")
     if kind == "count" and not ({"min", "max", "equals", "same_count_as"} & set(check)):
         problems.append("count needs at least one of min, max, equals, same_count_as")
     if kind == "compare":
@@ -311,7 +323,7 @@ def validate_check(check: dict[str, Any], outputs: dict[str, Any]) -> list[str]:
                 problems.append("'exists' takes no value")
         elif ("value" in check) == ("other" in check):
             problems.append("give exactly one of 'value' and 'other'")
-        elif op in ("in", "not_in") and not isinstance(check.get("value"), list):
+        elif op in ("in", "not_in") and "value" in check and not isinstance(check["value"], list):
             problems.append(f"'{op}' needs a list in 'value'")
     if kind == "sorted" and check.get("order", "asc") not in ("asc", "desc"):
         problems.append("order must be 'asc' or 'desc'")

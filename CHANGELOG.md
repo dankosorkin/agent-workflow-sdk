@@ -106,6 +106,14 @@ project aims to follow [Semantic Versioning](https://semver.org/).
     (`items[*].level`, `items[0].name`); a missing path part fails, an empty `[*]` match
     fails unless `allow_empty`. Parameters are validated in `validate_plan` (`bad_check`).
     No regex and no `command_succeeds` on purpose.
+  - Local service for the UI: `WorkflowService` (`agentflow.workflow.service`, stdlib only)
+    designs a plan (the orchestrator's questions arrive as `asking` and are answered over
+    HTTP), records a human approval, and starts, answers and resumes runs. State lives in a
+    data directory (`records.db`, `store.db`, `checkpoints.db`). HTTP adapter:
+    `agentflow.server.workflow_app.create_workflow_app` (the `server` extra now includes
+    uvicorn); `python -m agentflow.workflow serve --inventory ... --data-dir ... --cwd ...`
+    listens on `127.0.0.1` only, with no authentication. A restart marks unfinished designs
+    and runs `interrupted`; a run is continued with `resume`. Clients poll; no event stream yet.
   - `approve_plan(plan, inventory, by=...)` records a human approval bound to the plan
     hash and the inventory digest (refuses a plan that is invalid or not executable);
     `try_auto_approve` approves only when the safety threshold holds and no verifier

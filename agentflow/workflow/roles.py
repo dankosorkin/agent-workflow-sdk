@@ -170,6 +170,14 @@ def main(argv: list[str] | None = None) -> int:
     inst.add_argument("--force", action="store_true", help="overwrite files that differ")
     inst.add_argument("--dry-run", action="store_true")
     sub.add_parser("generate", help="(maintainers) refresh the files shipped in the package")
+    srv = sub.add_parser(
+        "serve", help="run the local service on 127.0.0.1 (needs the server extra)"
+    )
+    srv.add_argument("--inventory", required=True, help="inventory.json (re-read on every use)")
+    srv.add_argument("--data-dir", required=True, help="where records, store and checkpoints live")
+    srv.add_argument("--cwd", required=True, help="working directory the agents run in")
+    srv.add_argument("--port", type=int, default=8765)
+    srv.add_argument("--cors", action="append", default=[], help="allowed UI origin (repeatable)")
     args = parser.parse_args(argv)
 
     if args.cmd == "list":
@@ -195,4 +203,20 @@ def main(argv: list[str] | None = None) -> int:
     elif args.cmd == "generate":
         for path in _generate():
             print(f"wrote {path}")
+    elif args.cmd == "serve":
+        from agentflow.server.workflow_app import serve
+        from agentflow.workflow.design import claude_designer
+        from agentflow.workflow.inventory import load_inventory
+        from agentflow.workflow.runner import backend_runner
+        from agentflow.workflow.service import WorkflowService
+
+        inventory_path = args.inventory
+        service = WorkflowService(
+            args.data_dir,
+            inventory_source=lambda: load_inventory(inventory_path),
+            designer=claude_designer(args.cwd),
+            runner=backend_runner(cwd=args.cwd),
+        )
+        print(f"listening on http://127.0.0.1:{args.port} (no authentication)")
+        serve(service, port=args.port, cors_origins=args.cors or None)
     return 0

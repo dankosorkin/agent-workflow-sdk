@@ -16,6 +16,8 @@ def test_engine_modules_never_import_the_workflow_layer():
         rel = path.relative_to(ROOT)
         if rel.parts[0] == "workflow":
             continue
+        if rel.parts == ("server", "workflow_app.py"):
+            continue  # the HTTP adapter sits ABOVE the layer, like a caller
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
             names = []
             if isinstance(node, ast.Import):
