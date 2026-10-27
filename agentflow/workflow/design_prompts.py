@@ -28,11 +28,19 @@ from agentflow.workflow.checks import CHECKS
 
 __all__ = [
     "REVIEW_CODES",
+    "ROLES",
     "creator_prompt",
+    "creator_task",
     "inventory_for_designers",
     "orchestrator_prompt",
+    "orchestrator_task",
+    "role_description",
+    "role_system",
     "verifier_prompt",
+    "verifier_task",
 ]
+
+ROLES = ("orchestrator", "creator", "verifier")
 
 #: The closed list of codes a verifier may use (design notes, OQ-5).
 REVIEW_CODES = {
@@ -60,18 +68,18 @@ def inventory_for_designers(inventory: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def orchestrator_prompt(request: str) -> str:
-    return f"""You are wf-orchestrator. Turn the user's request into a brief for a workflow designer.
-Do not design the workflow and do not do the work. If something is unclear, list it under
-"ambiguities" instead of guessing.
+_ROLE_DESCRIPTIONS = {
+    "orchestrator": "Turns a user request into a brief (goal, context, constraints, expected "
+    "results, ambiguities) for a workflow designer. Does not design and does not do the work.",
+    "creator": "Designs a workflow plan (a JSON graph of steps) that fulfils a brief, using only "
+    "the agents of an inventory. Answers with ONE JSON plan object.",
+    "verifier": "Reviews the logic of a workflow plan against its brief and returns structured "
+    "remarks (blocker or warning). Does not run the plan. Answers with ONE JSON object.",
+}
 
-### request
-{request}
 
-### answer format
-Finish with ONE JSON object and nothing after it:
-{{"goal": <string>, "context": <string>, "constraints": [<string>, ...],
-  "expected_results": [<string>, ...], "ambiguities": [<string>, ...]}}"""
+def role_description(role: str) -> str:
+    return _ROLE_DESCRIPTIONS[role]
 
 
 _PLAN_SPEC = """\
@@ -102,34 +110,37 @@ A check must be able to FAIL on a wrong result; "not_empty" alone is a weak chec
 Do NOT use: skills, mcp, artifacts, semantic_check, budget, timeout (not supported yet)."""
 
 
-def creator_prompt(
-    brief: dict[str, Any],
-    inventory: dict[str, Any],
-    *,
-    previous_plan: dict[str, Any] | None = None,
-    feedback: list[str] | None = None,
-) -> str:
+def _orchestrator_system() -> str:
+    return """You are wf-orchestrator. Turn the user's request into a brief for a workflow designer.
+Do not design the workflow and do not do the work. If something is unclear, list it under
+"ambiguities" instead of guessing.
+
+The user message contains the request under "### request".
+
+### answer format
+Finish with ONE JSON object and nothing after it:
+{"goal": <string>, "context": <string>, "constraints": [<string>, ...],
+  "expected_results": [<string>, ...], "ambiguities": [<string>, ...]}"""
+
+
+def _creator_system() -> str:
     spec = _PLAN_SPEC.replace("__CHECKS__", ", ".join(sorted(CHECKS)))
-    parts = [
-        "You are wf-creator. Design a workflow plan that fulfils the brief, using ONLY the agents "
-        "in the inventory. Keep it as small as the brief allows: one step per distinct piece of "
-        "work, steps that do not depend on each other run in parallel.",
-        f"### plan format\n{spec}",
-        f"### brief\n{_json(brief)}",
-        f"### inventory (the only agents you may use)\n{_json(inventory_for_designers(inventory))}",
-    ]
-    if previous_plan is not None:
-        parts.append(f"### your previous plan\n{_json(previous_plan)}")
-    if feedback:
-        parts.append("### problems with your previous plan (fix every one)\n" + "\n".join(feedback))
-    parts.append(
-        "### answer format\nFinish with the plan as ONE JSON object and nothing after it. "
-        "Do not include schema_version, approval, verification or provenance."
-    )
-    return "\n\n".join(parts)
+    return f"""You are wf-creator. Design a workflow plan that fulfils the brief, using ONLY the agents
+in the inventory. Keep it as small as the brief allows: one step per distinct piece of work,
+steps that do not depend on each other run in parallel.
+
+The user message contains the brief, the inventory (the only agents you may use), and, when this
+is a revision, your previous plan and the problems found in it, which you must fix.
+
+### plan format
+{spec}
+
+### answer format
+Finish with the plan as ONE JSON object and nothing after it.
+Do not include schema_version, approval, verification or provenance."""
 
 
-def verifier_prompt(brief: dict[str, Any], inventory: dict[str, Any], plan: dict[str, Any]) -> str:
+def _verifier_system() -> str:
     codes = "\n".join(f"- {code}: {meaning}" for code, meaning in REVIEW_CODES.items())
     return f"""You are wf-verifier. Review a workflow plan against its brief. You judge the LOGIC of the
 plan; you do not run it and you do not judge results. The plan already passed the mechanical
@@ -139,14 +150,7 @@ Look for: parts of the brief that no step does; checks that would still pass on 
 (for each step, name the check that would catch a wrong answer and an example it would reject);
 assumptions the plan makes without stating them; agents the plan needs but the inventory lacks.
 
-### brief
-{_json(brief)}
-
-### inventory
-{_json(inventory_for_designers(inventory))}
-
-### plan
-{_json(plan)}
+The user message contains the brief, the inventory and the plan.
 
 ### answer format
 Finish with ONE JSON object and nothing after it:
@@ -155,3 +159,66 @@ Finish with ONE JSON object and nothing after it:
 Use "blocker" only for a defect that makes the plan likely to give a wrong or incomplete result.
 If you find nothing, answer {{"issues": []}}. Allowed codes:
 {codes}"""
+
+
+def role_system(role: str) -> str:
+    """The static instructions of a role: what a named agent carries as its system prompt."""
+    return {
+        "orchestrator": _orchestrator_system,
+        "creator": _creator_system,
+        "verifier": _verifier_system,
+    }[role]()
+
+
+def orchestrator_task(request: str) -> str:
+    return f"### request\n{request}"
+
+
+def creator_task(
+    brief: dict[str, Any],
+    inventory: dict[str, Any],
+    *,
+    previous_plan: dict[str, Any] | None = None,
+    feedback: list[str] | None = None,
+) -> str:
+    parts = [
+        f"### brief\n{_json(brief)}",
+        f"### inventory (the only agents you may use)\n{_json(inventory_for_designers(inventory))}",
+    ]
+    if previous_plan is not None:
+        parts.append(f"### your previous plan\n{_json(previous_plan)}")
+    if feedback:
+        parts.append("### problems with your previous plan (fix every one)\n" + "\n".join(feedback))
+    return "\n\n".join(parts)
+
+
+def verifier_task(brief: dict[str, Any], inventory: dict[str, Any], plan: dict[str, Any]) -> str:
+    return (
+        f"### brief\n{_json(brief)}\n\n"
+        f"### inventory\n{_json(inventory_for_designers(inventory))}\n\n"
+        f"### plan\n{_json(plan)}"
+    )
+
+
+# The full prompts below carry the role AND the data in one message: they work on any backend,
+# with no agent definition installed. A named agent carries `role_system` itself and gets only
+# the `*_task` part.
+
+
+def orchestrator_prompt(request: str) -> str:
+    return role_system("orchestrator") + "\n\n" + orchestrator_task(request)
+
+
+def creator_prompt(
+    brief: dict[str, Any],
+    inventory: dict[str, Any],
+    *,
+    previous_plan: dict[str, Any] | None = None,
+    feedback: list[str] | None = None,
+) -> str:
+    task = creator_task(brief, inventory, previous_plan=previous_plan, feedback=feedback)
+    return role_system("creator") + "\n\n" + task
+
+
+def verifier_prompt(brief: dict[str, Any], inventory: dict[str, Any], plan: dict[str, Any]) -> str:
+    return role_system("verifier") + "\n\n" + verifier_task(brief, inventory, plan)

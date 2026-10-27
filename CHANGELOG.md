@@ -84,6 +84,18 @@ project aims to follow [Semantic Versioning](https://semver.org/).
     permissions, never backends or paths. Fields the creator may not set (approval,
     verification, provenance) are dropped. `backend_designer(make)` runs each call on a
     fresh backend.
+  - Design roles as agent definitions. The roles' instructions are split into a static part
+    (`role_system`) and the data (`*_task`); the full prompts (`*_prompt`) are their
+    concatenation and work on any backend with nothing installed. For backends with named
+    agents, `python -m agentflow.workflow install claude|kiro --to DIR` copies ready-made
+    definitions (Claude Code: Markdown with YAML frontmatter; Kiro: JSON) into a directory
+    YOU name: there is no default location, nothing is overwritten without `--force`,
+    `--dry-run` reports only. The shipped files live in `agentflow/workflow/agent_files/`,
+    are generated from the prompts, and a test keeps them identical. `design_plan(...,
+    named_agents=True)` then sends only the data; `claude_designer(cwd)` runs the roles on
+    Claude Code with `--agents` inline, so nothing has to be installed. Codex has custom
+    agents (TOML) too, but the SDK cannot select one by name yet, so Codex designers get the
+    full prompt.
   - `approve_plan(plan, inventory, by=...)` records a human approval bound to the plan
     hash and the inventory digest (refuses a plan that is invalid or not executable);
     `try_auto_approve` approves only when the safety threshold holds and no verifier

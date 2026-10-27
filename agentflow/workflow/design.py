@@ -37,14 +37,18 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from agentflow.workflow.checks import extract_json_object
 from agentflow.workflow.design_prompts import (
     REVIEW_CODES,
     creator_prompt,
+    creator_task,
     orchestrator_prompt,
+    orchestrator_task,
     verifier_prompt,
+    verifier_task,
 )
 from agentflow.workflow.inventory import inventory_digest
 from agentflow.workflow.issues import Issue, has_errors
@@ -54,6 +58,7 @@ from agentflow.workflow.plan import (
     plan_hash,
     validate_plan,
 )
+from agentflow.workflow.roles import agent_name, claude_inline_agents
 from agentflow.workflow.runner import PlanRefused, collect_text, unsupported_features
 
 __all__ = [
@@ -61,6 +66,7 @@ __all__ = [
     "DesignerRunner",
     "approve_plan",
     "backend_designer",
+    "claude_designer",
     "design_plan",
     "minimum_evidence_issues",
     "try_auto_approve",
@@ -102,6 +108,27 @@ class DesignResult:
             "rounds": self.rounds,
             "reason": self.reason,
         }
+
+
+def claude_designer(
+    cwd: Path | str, *, installed: bool = False, model: str | None = None
+) -> DesignerRunner:
+    """Designers on Claude Code with the named wf-* agents and no tools (use ``named_agents=True``).
+
+    ``installed=True`` expects the agents to be installed where Claude Code finds them (see
+    :mod:`agentflow.workflow.roles`); ``installed=False`` passes them inline with ``--agents``
+    for this session only, so nothing is written anywhere.
+    """
+    from agentflow.backends import DenyAll
+    from agentflow.backends.claude_code import ClaudeCodeBackend
+
+    def make(role: str) -> Any:
+        extra = [] if installed else ["--agents", claude_inline_agents()]
+        return ClaudeCodeBackend(
+            agent=agent_name(role), model=model, cwd=cwd, permission=DenyAll(), extra_args=extra
+        )
+
+    return backend_designer(make)
 
 
 def backend_designer(make: Callable[[str], Any]) -> DesignerRunner:
@@ -246,15 +273,27 @@ async def design_plan(
     designer: DesignerRunner,
     *,
     max_rounds: int = 3,
+    named_agents: bool = False,
 ) -> DesignResult:
     """Design a plan for ``request`` from the agents in ``inventory``. Never raises on bad
     agent output: every failure ends in a :class:`DesignResult` that says what happened."""
     if max_rounds < 1:
         raise ValueError("max_rounds must be >= 1")
+    # With named agents the role's instructions live in the agent definition (installed from
+    # agentflow.workflow.roles, or passed inline), so each call carries only the data. Without
+    # them, every call carries the full instructions and works on any backend.
+    if named_agents:
+        orchestrator_text = orchestrator_task
+        creator_text = creator_task
+        verifier_text = verifier_task
+    else:
+        orchestrator_text = orchestrator_prompt
+        creator_text = creator_prompt
+        verifier_text = verifier_prompt
 
     brief = None
     for _ in range(2):  # one retry for an unusable brief
-        brief = _parse_brief(await designer("orchestrator", orchestrator_prompt(request)))
+        brief = _parse_brief(await designer("orchestrator", orchestrator_text(request)))
         if brief is not None:
             break
     if brief is None:
@@ -270,7 +309,7 @@ async def design_plan(
         result.rounds.append(entry)
 
         text = await designer(
-            "creator", creator_prompt(brief, inventory, previous_plan=plan, feedback=feedback)
+            "creator", creator_text(brief, inventory, previous_plan=plan, feedback=feedback)
         )
         candidate = _parse_plan(text, brief)
         if candidate is None:
@@ -294,7 +333,7 @@ async def design_plan(
             continue
 
         entry["stage"] = "verifier"
-        found = _parse_remarks(await designer("verifier", verifier_prompt(brief, inventory, plan)))
+        found = _parse_remarks(await designer("verifier", verifier_text(brief, inventory, plan)))
         if found is None:
             found = [
                 {
