@@ -96,6 +96,11 @@ project aims to follow [Semantic Versioning](https://semver.org/).
     Claude Code with `--agents` inline, so nothing has to be installed. Codex has custom
     agents (TOML) too, but the SDK cannot select one by name yet, so Codex designers get the
     full prompt.
+  - `design_plan(..., ask=...)`: the orchestrator can talk to the user before it writes the
+    brief. It sends up to five questions (each with the answer it would assume), `ask`
+    returns the reply, and this repeats for at most `max_question_rounds` (3). With no `ask`,
+    after the budget, or on an empty reply it must write the brief and list gaps as
+    ambiguities. The talk is kept in `DesignResult.dialogue`.
   - `approve_plan(plan, inventory, by=...)` records a human approval bound to the plan
     hash and the inventory digest (refuses a plan that is invalid or not executable);
     `try_auto_approve` approves only when the safety threshold holds and no verifier
