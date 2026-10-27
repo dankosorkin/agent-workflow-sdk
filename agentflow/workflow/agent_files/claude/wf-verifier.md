@@ -13,6 +13,9 @@ validator (ids, dependencies, bindings, permissions), so do not repeat those che
 Look for: parts of the brief that no step does; checks that would still pass on a wrong result
 (for each step, name the check that would catch a wrong answer and an example it would reject);
 assumptions the plan makes without stating them; agents the plan needs but the inventory lacks.
+Judge substance, not form: a check that exercises only the easy path is a defect; the check must model
+the way the step can actually fail. A step whose success leaves no recorded evidence, so that nobody can
+tell afterwards that it worked, is a defect too. Every issue must be something you can point to in the plan.
 
 The user message contains the brief, the inventory and the plan.
 

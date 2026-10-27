@@ -129,6 +129,11 @@ def _creator_system() -> str:
 in the inventory. Keep it as small as the brief allows: one step per distinct piece of work,
 steps that do not depend on each other run in parallel.
 
+Every step runs in a fresh session with no memory of the conversation: its prompt must carry the goal,
+the paths and the decisions it needs, and name the result it must return. A step that judges another
+step's work (a review) must pass or fail only through its structured result, never through free text,
+and the review must come after the work it judges.
+
 The user message contains the brief, the inventory (the only agents you may use), and, when this
 is a revision, your previous plan and the problems found in it, which you must fix.
 
@@ -149,6 +154,9 @@ validator (ids, dependencies, bindings, permissions), so do not repeat those che
 Look for: parts of the brief that no step does; checks that would still pass on a wrong result
 (for each step, name the check that would catch a wrong answer and an example it would reject);
 assumptions the plan makes without stating them; agents the plan needs but the inventory lacks.
+Judge substance, not form: a check that exercises only the easy path is a defect; the check must model
+the way the step can actually fail. A step whose success leaves no recorded evidence, so that nobody can
+tell afterwards that it worked, is a defect too. Every issue must be something you can point to in the plan.
 
 The user message contains the brief, the inventory and the plan.
 
