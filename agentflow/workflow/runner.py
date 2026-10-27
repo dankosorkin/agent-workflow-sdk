@@ -89,6 +89,7 @@ __all__ = [
     "RunOutcome",
     "backend_runner",
     "build_workflow_graph",
+    "collect_text",
     "make_backend",
     "resume_plan",
     "run_plan",
@@ -211,26 +212,31 @@ def make_backend(entry: dict[str, Any], step: dict[str, Any], *, cwd: Path | str
     )
 
 
+async def collect_text(backend: Any, prompt: str) -> str:
+    """Run one turn on ``backend`` (started and closed here) and return the agent's final text."""
+    from agentflow.events import ErrorEvent, TextChunk, TurnEnd
+
+    text = ""
+    async with backend:
+        async for ev in backend.prompt(prompt):
+            if isinstance(ev, TextChunk):
+                text += ev.text
+            elif isinstance(ev, ErrorEvent):
+                raise BackendError(ev.message)
+            elif isinstance(ev, TurnEnd):
+                return ev.text or text
+    return text
+
+
 def backend_runner(*, cwd: Path | str = ".") -> AgentRunner:
     """An :data:`AgentRunner` that runs each attempt on a fresh SDK backend instance.
 
     A fresh instance per attempt means no conversation leaks between steps or retries
     and no concurrency limit on one instance (Kiro allows one turn at a time).
     """
-    from agentflow.events import ErrorEvent, TextChunk, TurnEnd
 
     async def run(step: dict[str, Any], entry: dict[str, Any], prompt: str) -> str:
-        backend = make_backend(entry, step, cwd=cwd)
-        text = ""
-        async with backend:
-            async for ev in backend.prompt(prompt):
-                if isinstance(ev, TextChunk):
-                    text += ev.text
-                elif isinstance(ev, ErrorEvent):
-                    raise BackendError(ev.message)
-                elif isinstance(ev, TurnEnd):
-                    return ev.text or text
-        return text
+        return await collect_text(make_backend(entry, step, cwd=cwd), prompt)
 
     return run
 

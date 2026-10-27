@@ -99,6 +99,7 @@ select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
 ignore = ["E203"]
 
 [tool.ruff.lint.per-file-ignores]
+"agentflow/workflow/design_prompts.py" = ["E501"]  # prompt text reads best unwrapped
 "tests/*" = ["E501"]        # long scripted fixtures / event dicts
 "examples/*" = ["E501"]
 

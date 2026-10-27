@@ -21,6 +21,15 @@ from agentflow.workflow.bindings import (
     step_cache_key,
 )
 from agentflow.workflow.capabilities import CATALOG, PERMISSIONS, Capabilities
+from agentflow.workflow.design import (
+    DesignerRunner,
+    DesignResult,
+    approve_plan,
+    backend_designer,
+    design_plan,
+    minimum_evidence_issues,
+    try_auto_approve,
+)
 from agentflow.workflow.inventory import (
     inventory_digest,
     load_inventory,
@@ -51,6 +60,13 @@ from agentflow.workflow.runner import (
 )
 
 __all__ = [
+    "DesignResult",
+    "DesignerRunner",
+    "approve_plan",
+    "backend_designer",
+    "design_plan",
+    "minimum_evidence_issues",
+    "try_auto_approve",
     "AgentRunner",
     "ApprovalRevoked",
     "PlanRefused",

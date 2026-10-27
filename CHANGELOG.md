@@ -72,6 +72,22 @@ project aims to follow [Semantic Versioning](https://semver.org/).
     re-checked against the CURRENT inventory before every step; a revoked approval
     HOLDS the run (`RunOutcome.status == "held"`, finished steps kept) instead of
     failing it.
+  - `design_plan(request, inventory, designer, max_rounds=3)`: the design phase. Three
+    roles, one agent call each: `orchestrator` (brief), `creator` (plan), `verifier`
+    (logic review). A bounded loop: the deterministic checks (`validate_plan`,
+    `unsupported_features`, and a minimum-evidence rule that sends back steps whose
+    checks could never fail) run BEFORE the verifier, so an invalid plan never costs a
+    verifier call; verifier `blocker` remarks go back to the creator, `warning` remarks
+    travel with the plan. It ends as `converged`, `round_limit` (a human decides, with
+    the open remarks), `not_executable` (cannot be approved) or `failed`; it never
+    raises on bad agent output. Designers see only agent names, descriptions and allowed
+    permissions, never backends or paths. Fields the creator may not set (approval,
+    verification, provenance) are dropped. `backend_designer(make)` runs each call on a
+    fresh backend.
+  - `approve_plan(plan, inventory, by=...)` records a human approval bound to the plan
+    hash and the inventory digest (refuses a plan that is invalid or not executable);
+    `try_auto_approve` approves only when the safety threshold holds and no verifier
+    blocker is open.
   - Refused up front (`PlanRefused`), never ignored: an invalid, unapproved or
     stale-approved plan, missing or unknown run parameters, an answer for a step that
     cannot take one, and features not executable yet: `semantic_check`, budgets,
