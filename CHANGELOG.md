@@ -34,6 +34,22 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `agentflow.workflow`: the building blocks of a workflow-from-request layer, kept
+  out of the engine (nothing in `agentflow` imports it; a test enforces that, and
+  that it needs no third-party package). Import it explicitly:
+  `from agentflow.workflow import validate_plan`.
+  - `validate_plan(plan, inventory=...)`: deterministic validator for `plan.json`
+    (schema version, structure, unique ids, acyclic dependencies, data bindings,
+    `final_outputs`, agents, permissions and backend capabilities). Returns every
+    problem at once as `Issue` objects with stable codes; unknown keys are errors.
+  - Agent inventory (`validate_inventory`, `load_inventory`, `resolve_backend`,
+    `inventory_digest`) and the backend capability catalog, pinned to the real
+    backend classes by a drift test.
+  - Approval helpers: `plan_hash`, `check_approval` (a plan or inventory change
+    revokes an approval), `auto_approval_blockers`.
+  - `plan.schema.json` (`load_schema()`): the structural JSON Schema, shipped in the
+    wheel.
+
 - `Checkpoint.interrupt_answers`: an ordered tuple of the human answers already
   delivered to a node's successive `interrupt` calls. A node that interrupts
   more than once is now driven across resumes so the Nth `interrupt` receives

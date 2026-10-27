@@ -1261,7 +1261,9 @@ async def test_a_raised_error_inside_the_consumer_also_cancels(fake_proc):
         {
             "jsonrpc": "2.0",
             "method": "session/update",
-            "params": {"update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "x"}}},
+            "params": {
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "x"}}
+            },
         }
     )
     with pytest.raises(RuntimeError):

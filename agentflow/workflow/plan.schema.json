@@ -1,0 +1,122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/dankosorkin/agentflow-workflow/schema/plan.schema.json",
+  "title": "agentflow-workflow plan",
+  "description": "Structural contract of plan.json (schema_version 1). Graph-level rules (unique ids, acyclic dependencies, binding resolution, inventory and backend checks) are enforced by validate_plan, not by this schema.",
+  "type": "object",
+  "required": ["schema_version", "graph", "final_outputs"],
+  "properties": {
+    "schema_version": {"const": "1"},
+    "plan_version": {"type": "integer", "minimum": 1},
+    "brief": {"type": "object"},
+    "parameters": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/type"}
+    },
+    "graph": {
+      "type": "object",
+      "required": ["steps"],
+      "properties": {
+        "steps": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/step"}}
+      },
+      "additionalProperties": false
+    },
+    "final_outputs": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["step", "field"],
+        "properties": {"step": {"type": "string"}, "field": {"type": "string"}},
+        "additionalProperties": false
+      }
+    },
+    "run_limits": {
+      "type": "object",
+      "properties": {
+        "max_design_rounds": {"type": "integer", "minimum": 1},
+        "step_limit": {"type": ["integer", "null"], "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "budget": {"type": ["object", "null"]},
+    "approval": {
+      "type": "object",
+      "required": ["mode", "status"],
+      "properties": {
+        "mode": {"enum": ["manual", "auto"]},
+        "status": {"enum": ["pending", "approved", "rejected"]},
+        "plan_hash": {"type": "string"},
+        "by": {"type": "string"},
+        "at": {"type": "string"}
+      }
+    },
+    "verification": {
+      "type": "object",
+      "properties": {
+        "iterations": {"type": "integer", "minimum": 0},
+        "issues": {"type": "array", "items": {"$ref": "#/$defs/review_issue"}}
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "properties": {
+        "inventory_digest": {"type": "string"},
+        "engine_version": {"type": "string"},
+        "plan_hash": {"type": "string"}
+      }
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "type": {"enum": ["string", "number", "integer", "boolean", "array", "object", "any"]},
+    "step": {
+      "type": "object",
+      "required": ["id", "agent", "prompt"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "agent": {"type": "string", "minLength": 1},
+        "prompt": {"type": "string", "minLength": 1},
+        "permission": {"enum": ["read_only", "allowlist", "full"], "default": "read_only"},
+        "tools": {"type": "array", "items": {"type": "string"}},
+        "skills": {"type": "array", "maxItems": 0, "description": "reserved; the SDK cannot pass skills yet"},
+        "mcp": {"type": "array", "maxItems": 0, "description": "reserved; the SDK cannot pass MCP servers yet"},
+        "inputs": {"type": "object", "additionalProperties": {"type": "object"}},
+        "outputs": {"type": "object", "additionalProperties": {"$ref": "#/$defs/type"}},
+        "artifacts": {"type": "array", "items": {"type": "string"}},
+        "side_effects": {"type": "boolean"},
+        "requires_evidence": {"type": "boolean"},
+        "may_ask": {
+          "type": ["object", "null"],
+          "required": ["max_questions"],
+          "properties": {
+            "max_questions": {"type": "integer", "minimum": 1},
+            "default_answer": {"type": ["string", "null"]}
+          },
+          "additionalProperties": false
+        },
+        "checks": {
+          "type": "array",
+          "items": {"type": "object", "required": ["kind"], "properties": {"kind": {"type": "string"}}}
+        },
+        "semantic_check": {"type": ["object", "null"]},
+        "budget": {"type": ["object", "null"]},
+        "timeout": {"type": ["number", "null"], "exclusiveMinimum": 0},
+        "max_attempts": {"type": "integer", "minimum": 1},
+        "depends_on": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": false
+    },
+    "review_issue": {
+      "type": "object",
+      "required": ["code", "severity", "claim"],
+      "properties": {
+        "code": {"type": "string"},
+        "step_id": {"type": ["string", "null"]},
+        "severity": {"enum": ["blocker", "warning"]},
+        "claim": {"type": "string"},
+        "evidence_needed": {"type": "string"}
+      }
+    }
+  }
+}
