@@ -103,9 +103,21 @@ Optional keys: "type", "required": false with "default", "then": ["first", "len"
 {"join": ","}, {"pick": "<key>"}]. A step sees data ONLY through its inputs.
 
 Checks available: __CHECKS__.
+A "target" is an output field of the step, optionally with a path: "items[*].level" (every item),
+"items[0].name", "meta.window.from". A missing part of the path fails the check.
 - {"kind": "not_empty", "target": <output field>}
 - {"kind": "has_fields", "target": <output field holding a list of objects>, "fields": [<key>, ...]}
-A check must be able to FAIL on a wrong result; "not_empty" alone is a weak check.
+- {"kind": "count", "target": <list/string/object>, "min": n, "max": n, "equals": n,
+  "same_count_as": <another target>} (give at least one of the four)
+- {"kind": "compare", "target": <path>, "op": eq|ne|gt|ge|lt|le|in|not_in|contains|starts_with|
+  ends_with|exists, "value": <literal> OR "other": <another target>} ("in"/"not_in" take a list;
+  "exists" takes neither; with [*] every item must pass, and an empty match fails unless
+  "allow_empty": true)
+- {"kind": "unique", "target": <path>, e.g. "items[*].id"} (no duplicate values)
+- {"kind": "sorted", "target": <list>, "key": <field of each item, optional>, "order": "asc"|"desc"}
+A check must be able to FAIL on a wrong result; "not_empty" alone is a weak check. Prefer checks that
+tie the answer to something known: a count that must equal the size of the input, a value from a
+fixed set, an order, no duplicates, a number inside a range.
 
 Do NOT use: skills, mcp, artifacts, semantic_check, budget, timeout (not supported yet)."""
 

@@ -101,6 +101,11 @@ project aims to follow [Semantic Versioning](https://semver.org/).
     returns the reply, and this repeats for at most `max_question_rounds` (3). With no `ask`,
     after the budget, or on an empty reply it must write the brief and list gaps as
     ambiguities. The talk is kept in `DesignResult.dialogue`.
+  - Check primitives: `count`, `compare` (12 operators, value or another field),
+    `unique`, `sorted`, on top of `not_empty` and `has_fields`. A target may be a path
+    (`items[*].level`, `items[0].name`); a missing path part fails, an empty `[*]` match
+    fails unless `allow_empty`. Parameters are validated in `validate_plan` (`bad_check`).
+    No regex and no `command_succeeds` on purpose.
   - `approve_plan(plan, inventory, by=...)` records a human approval bound to the plan
     hash and the inventory digest (refuses a plan that is invalid or not executable);
     `try_auto_approve` approves only when the safety threshold holds and no verifier

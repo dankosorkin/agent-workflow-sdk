@@ -30,6 +30,7 @@ from typing import Any
 from agentflow.prebuilt import artifact_key
 from agentflow.workflow.bindings import TYPES, find_cycle, validate_bindings
 from agentflow.workflow.capabilities import PERMISSIONS
+from agentflow.workflow.checks import validate_check
 from agentflow.workflow.inventory import inventory_digest, resolve_backend
 from agentflow.workflow.issues import Issue, has_errors
 
@@ -156,6 +157,10 @@ def _check_step_shape(s: Any, index: int, issues: list[Issue]) -> bool:
         not isinstance(c, dict) or not isinstance(c.get("kind"), str) for c in checks
     ):
         err("bad_checks", "'checks' must be a list of objects, each with a string 'kind'")
+    elif isinstance(outputs, dict):
+        for c in checks:
+            for problem in validate_check(c, outputs):
+                err("bad_check", f"{c['kind']}: {problem}")
     attempts = s.get("max_attempts", 3)
     if not _is_int(attempts) or attempts < 1:
         err("bad_field", "'max_attempts' must be an integer >= 1")
