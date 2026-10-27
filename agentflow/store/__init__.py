@@ -23,11 +23,12 @@ from typing import TYPE_CHECKING
 
 from agentflow.store.base import Item, Store
 from agentflow.store.memory import MemoryStore
+from agentflow.store.sqlite import SqliteStore
 
 if TYPE_CHECKING:  # for type checkers only; the runtime import is lazy below
     from agentflow.store.postgres import PostgresStore
 
-__all__ = ["Item", "Store", "MemoryStore", "PostgresStore"]
+__all__ = ["Item", "Store", "MemoryStore", "SqliteStore", "PostgresStore"]
 
 
 def __getattr__(name: str):

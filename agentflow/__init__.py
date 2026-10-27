@@ -96,7 +96,7 @@ from agentflow.state import (
     merge,
     union,
 )
-from agentflow.store import Item, MemoryStore, Store
+from agentflow.store import Item, MemoryStore, SqliteStore, Store
 from agentflow.telemetry import JsonlTelemetry, MultiHooks
 
 __version__ = "0.6.0"
@@ -165,6 +165,7 @@ __all__ = [
     "Item",
     "Store",
     "MemoryStore",
+    "SqliteStore",
     "PostgresStore",
     # control plane
     "RunStatus",

@@ -12,22 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""MemoryStore contract: get/put/delete, namespace search, TTL expiry."""
+"""Store contract, run against every offline backend (memory and SQLite):
+get/put/delete, namespace search, TTL expiry, conditional ``if_absent`` writes."""
 
 from __future__ import annotations
 
 import asyncio
 
 import pytest
-from agentflow import Item, MemoryStore, Store
+from agentflow import Item, MemoryStore, SqliteStore, Store
 
 
-def _store():
-    return MemoryStore()
+@pytest.fixture(params=["memory", "sqlite"])
+def store(request, tmp_path):
+    if request.param == "memory":
+        return MemoryStore()
+    return SqliteStore(tmp_path / "store.db")
 
 
-async def test_put_get_roundtrip():
-    s = _store()
+async def test_put_get_roundtrip(store):
+    s = store
     item = await s.put(("users", "u1", "mem"), "name", "Ada")
     assert isinstance(item, Item)
     got = await s.get(("users", "u1", "mem"), "name")
@@ -35,17 +39,17 @@ async def test_put_get_roundtrip():
     assert got.created_at and got.updated_at
 
 
-async def test_conforms_to_protocol():
-    assert isinstance(_store(), Store)
+async def test_conforms_to_protocol(store):
+    assert isinstance(store, Store)
 
 
-async def test_get_missing_returns_none():
-    s = _store()
+async def test_get_missing_returns_none(store):
+    s = store
     assert await s.get(("nope",), "x") is None
 
 
-async def test_put_upsert_preserves_created_at():
-    s = _store()
+async def test_put_upsert_preserves_created_at(store):
+    s = store
     first = await s.put(("ns",), "k", 1)
     await asyncio.sleep(0.01)
     second = await s.put(("ns",), "k", 2)
@@ -54,16 +58,16 @@ async def test_put_upsert_preserves_created_at():
     assert second.updated_at >= first.updated_at
 
 
-async def test_delete():
-    s = _store()
+async def test_delete(store):
+    s = store
     await s.put(("ns",), "k", 1)
     assert await s.delete(("ns",), "k") is True
     assert await s.delete(("ns",), "k") is False
     assert await s.get(("ns",), "k") is None
 
 
-async def test_search_by_prefix_ordered():
-    s = _store()
+async def test_search_by_prefix_ordered(store):
+    s = store
     await s.put(("users", "u1"), "b", 2)
     await s.put(("users", "u1"), "a", 1)
     await s.put(("users", "u2"), "a", 3)
@@ -76,16 +80,16 @@ async def test_search_by_prefix_ordered():
     ]
 
 
-async def test_search_pagination():
-    s = _store()
+async def test_search_pagination(store):
+    s = store
     for i in range(5):
         await s.put(("ns",), f"k{i}", i)
     page = await s.search(("ns",), limit=2, offset=2)
     assert [i.key for i in page] == ["k2", "k3"]
 
 
-async def test_list_namespaces():
-    s = _store()
+async def test_list_namespaces(store):
+    s = store
     await s.put(("users", "u1"), "a", 1)
     await s.put(("users", "u2"), "a", 1)
     await s.put(("orgs", "o1"), "a", 1)
@@ -93,8 +97,8 @@ async def test_list_namespaces():
     assert ("orgs", "o1") in await s.list_namespaces()
 
 
-async def test_ttl_expiry_hides_item():
-    s = _store()
+async def test_ttl_expiry_hides_item(store):
+    s = store
     await s.put(("ns",), "k", "v", ttl=0.05)
     assert (await s.get(("ns",), "k")).value == "v"
     await asyncio.sleep(0.08)
@@ -104,8 +108,8 @@ async def test_ttl_expiry_hides_item():
     assert ("ns",) not in await s.list_namespaces()
 
 
-async def test_empty_namespace_rejected():
-    s = _store()
+async def test_empty_namespace_rejected(store):
+    s = store
     with pytest.raises(ValueError):
         await s.put(("",), "k", 1)
     with pytest.raises(ValueError):
@@ -115,16 +119,16 @@ async def test_empty_namespace_rejected():
 # --- conditional write: put(if_absent=True) ---
 
 
-async def test_if_absent_first_write_succeeds():
-    s = _store()
+async def test_if_absent_first_write_succeeds(store):
+    s = store
     item = await s.put(("claims",), "k", {"status": "in_flight"}, if_absent=True)
     assert item.value == {"status": "in_flight"}
 
 
-async def test_if_absent_second_write_conflicts():
+async def test_if_absent_second_write_conflicts(store):
     from agentflow import StoreConflict
 
-    s = _store()
+    s = store
     await s.put(("claims",), "k", 1, if_absent=True)
     with pytest.raises(StoreConflict) as ei:
         await s.put(("claims",), "k", 2, if_absent=True)
@@ -134,26 +138,26 @@ async def test_if_absent_second_write_conflicts():
     assert (await s.get(("claims",), "k")).value == 1
 
 
-async def test_if_absent_ignores_unconditional_write():
+async def test_if_absent_ignores_unconditional_write(store):
     # A normal put still overwrites; if_absent only guards when set.
-    s = _store()
+    s = store
     await s.put(("ns",), "k", 1, if_absent=True)
     await s.put(("ns",), "k", 2)  # unconditional, no conflict
     assert (await s.get(("ns",), "k")).value == 2
 
 
-async def test_if_absent_reclaims_expired_key():
+async def test_if_absent_reclaims_expired_key(store):
     # An expired item counts as absent, so its key can be claimed again.
-    s = _store()
+    s = store
     await s.put(("ns",), "k", "old", ttl=0.05, if_absent=True)
     await asyncio.sleep(0.08)
     item = await s.put(("ns",), "k", "new", if_absent=True)  # no conflict
     assert item.value == "new"
 
 
-async def test_if_absent_resets_created_at_on_reclaim():
+async def test_if_absent_resets_created_at_on_reclaim(store):
     # Reclaiming an expired key is a fresh insert, not an upsert.
-    s = _store()
+    s = store
     first = await s.put(("ns",), "k", 1, ttl=0.05, if_absent=True)
     await asyncio.sleep(0.08)
     second = await s.put(("ns",), "k", 2, if_absent=True)
