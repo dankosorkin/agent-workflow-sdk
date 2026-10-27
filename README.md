@@ -328,7 +328,7 @@ Capability matrix — how the policy is applied:
 | --- | --- |
 | `KiroBackend` | Runtime gate — ACP `session/request_permission` is resolved by the policy per tool call (`Interactive`/`Callback` ask a human; `ToolAllowlist` filters). |
 | `CodexBackend` | Translated to a launch flag — the policy sets Codex's `--sandbox` when you don't set it yourself: `AllowAll` → `workspace-write`, `DenyAll`/`ToolAllowlist` → `read-only`. No per-tool runtime gate. |
-| `ClaudeCodeBackend` | Translated to launch flags — `ToolAllowlist` → `--allowed-tools`, `DenyAll` → `--permission-mode plan` (read-only), when you don't set those yourself. No per-tool runtime gate. |
+| `ClaudeCodeBackend` | Translated to launch flags — `ToolAllowlist` → `--allowed-tools`, `DenyAll` → `--permission-mode plan` (read-only), `AllowAll` → `--permission-mode acceptEdits` (file edits; not `bypassPermissions`), when you don't set those yourself. No per-tool runtime gate. |
 
 For the one-shot CLI agents the policy is a best-effort *upfront* mapping to
 their own controls, not our runtime interception — an explicit `sandbox=` /

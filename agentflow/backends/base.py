@@ -189,6 +189,18 @@ class BaseAgentBackend(_AsyncResource):
     def prompt(self, text: str, *, session: str | None = None) -> AsyncIterator[BackendEvent]:
         return self.invoke(TextRequest(text), session=session)  # type: ignore[attr-defined]
 
+    async def reset_session(self) -> None:
+        """Forget the conversation so the next turn starts fresh, keeping the backend open.
+
+        An agent backend that carries a conversation between turns (a resumable
+        session id, a persistent session) overrides this, so one instance can be
+        reused for unrelated tasks without one task's context leaking into the next.
+        This default is for a backend with nothing to forget, so it does nothing.
+        Not part of the :class:`AgentBackend` protocol: a custom backend that lacks it
+        still satisfies the protocol.
+        """
+        return None
+
 
 class BaseLLMBackend(_AsyncResource):
     """Mixin implementing :meth:`chat` on top of :meth:`invoke`.

@@ -149,18 +149,19 @@ class KiroBackend(BaseAgentBackend):
                 proc.stdin.close()
             # The v3 engine often does not exit on stdin close (it waits on its
             # own idle timeout), so don't block for seconds hoping it will.
-            # Give it a short grace to exit cleanly, then signal the whole
-            # process group (SIGTERM, then SIGKILL) so the CLI's child process
+            # Give it a short grace to exit cleanly, then escalate by intent:
+            # ask it to terminate, then force-kill. On POSIX both operations
+            # target the whole process group so the CLI's child process
             # (kiro-cli-chat) is reaped too, not just the parent. Each phase
             # has a brief window so close() returns promptly.
             try:
                 await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
             except TimeoutError:
-                self._signal_group(proc, signal.SIGTERM)
+                self._terminate(proc)
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
                 except TimeoutError:
-                    self._signal_group(proc, signal.SIGKILL)
+                    self._kill(proc)
         finally:
             if self._reader_task:
                 self._reader_task.cancel()
@@ -169,22 +170,80 @@ class KiroBackend(BaseAgentBackend):
             self._proc = None
             self._fail_pending(BackendTransportError("backend closed"))
 
-    @staticmethod
-    def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
-        """Send ``sig`` to the child's whole process group, if possible.
+    async def reset_session(self, *, delete_previous: bool = False) -> None:
+        """Start a fresh ACP session on the same process; the next turn will use it.
 
-        The child was started with ``start_new_session=True`` so it leads its
-        own group; signalling ``-pgid`` reaches its descendants too. Falls back
-        to signalling just the process where process groups aren't available
-        (e.g. Windows) or the group has already gone. Never raises.
+        Re-runs the session setup done by :meth:`start` (``session/new``, then the
+        agent mode on engine v3 or the model on v2), so the agent has no memory of
+        earlier turns. The process is reused, which is cheaper than a new backend.
+
+        By default the previous session is left alone: no ``session/close`` or
+        ``session/delete`` is sent. Against kiro-cli 2.26 that costs the process no
+        memory or file descriptors, but every session is a persisted record on disk
+        (under ``~/.kiro/sessions``) that survives ``close()``, so a long pipeline
+        that resets per step accumulates them. Pass ``delete_previous=True`` to
+        delete the previous session with ``session/delete`` once the new one is
+        ready; its history is then gone, so keep the default if you want to inspect
+        a finished step's conversation afterwards. The new session is created
+        FIRST, so a failure to create it leaves the old session intact and in use.
+        If the delete itself fails (for example an older kiro-cli without
+        ``session/delete``) the error propagates, but the new session is already
+        active and the old one is simply left behind.
+
+        Raises :class:`BackendError` before ``start()`` or while a turn is in
+        progress.
         """
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
-            pgid = os.getpgid(proc.pid)
-            os.killpg(pgid, sig)
-            return
-        # Fallback: signal the process directly.
+        if self._proc is None or self._session_id is None:
+            raise BackendError("KiroBackend.start() was not called")
+        if self._turn_queue is not None:
+            raise BackendError("cannot reset the session while a turn is in progress")
+        previous = self._session_id
+        await self._create_session()
+        if self.model and self.engine != "v3":
+            await self._set_model(self.model)
+        if delete_previous:
+            await self._request("session/delete", {"sessionId": previous})
+
+    @classmethod
+    def _terminate(cls, proc: asyncio.subprocess.Process) -> None:
+        """Ask the child (and, on POSIX, its whole group) to terminate. Never raises.
+
+        POSIX: ``SIGTERM`` to the process group. Windows: ``proc.terminate()``,
+        which is already a hard ``TerminateProcess`` there — there is no softer
+        step, so the following :meth:`_kill` is a harmless repeat on Windows.
+        """
+        cls._stop(proc, hard=False)
+
+    @classmethod
+    def _kill(cls, proc: asyncio.subprocess.Process) -> None:
+        """Force-kill the child (and, on POSIX, its whole group). Never raises.
+
+        POSIX: ``SIGKILL`` to the process group. Windows: ``proc.kill()``.
+
+        Known limitation (Windows): only the direct child is killed. A grandchild
+        such as ``kiro-cli-chat`` can outlive it; reaping it needs
+        ``taskkill /F /T`` or a Job Object, which is deliberately left out.
+        """
+        cls._stop(proc, hard=True)
+
+    @staticmethod
+    def _stop(proc: asyncio.subprocess.Process, *, hard: bool) -> None:
+        """Stop ``proc`` by intent, never reading a platform-specific name unguarded.
+
+        The child was started with ``start_new_session=True`` so on POSIX it
+        leads its own process group and signalling the group reaches its
+        descendants. Where process groups or the signal don't exist (Windows),
+        or the group has already gone, fall back to signalling just the process.
+        """
+        killpg = getattr(os, "killpg", None)
+        getpgid = getattr(os, "getpgid", None)
+        sig = getattr(signal, "SIGKILL" if hard else "SIGTERM", None)
+        if killpg is not None and getpgid is not None and sig is not None:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
+                killpg(getpgid(proc.pid), sig)
+                return
         with contextlib.suppress(ProcessLookupError, OSError):
-            if sig == signal.SIGKILL:
+            if hard:
                 proc.kill()
             else:
                 proc.terminate()
@@ -206,6 +265,7 @@ class KiroBackend(BaseAgentBackend):
         queue: asyncio.Queue[BackendEvent | _Sentinel] = asyncio.Queue()
         self._turn_text = ""
         self._turn_queue = queue
+        turn_session = self._session_id
 
         # Fire the prompt request; its response resolves the turn.
         response_future = self._send_request(
@@ -240,13 +300,43 @@ class KiroBackend(BaseAgentBackend):
                     # policy's ctx.interrupt (and its InterruptError) propagate
                     # out through this generator to the runtime.
                     await self._resolve_permission(item)
+                if isinstance(item, TurnEnd):
+                    # The turn is over the moment its terminal event exists. Free
+                    # the backend NOW, not when this generator is finalised: a
+                    # consumer that stops reading at TurnEnd (``return`` or ``break``
+                    # inside ``async for``) leaves the generator suspended, and the
+                    # next prompt() or reset_session() would otherwise fail with
+                    # "a turn is already in progress".
+                    self._release_turn(queue)
                 yield item
         finally:
-            self._turn_queue = None
             # If we exit the loop early (e.g. an interrupt raised out of the
             # generator), unblock the reader so it doesn't hang on an answer.
-            self._cancel_pending_permissions()
+            # _release_turn is a no-op when the turn was already released at
+            # TurnEnd, so a generator finalised late (garbage collection) cannot
+            # disturb a LATER turn that is now using the backend.
+            if self._turn_queue is queue:
+                # Closed BEFORE TurnEnd: the agent is still working on a turn
+                # nobody reads any more (it keeps editing files and spending
+                # tokens). Tell it to stop. Best-effort: the process may be gone.
+                self._cancel_turn(turn_session)
+            self._release_turn(queue)
             await self._drain_finisher(finisher)
+
+    def _cancel_turn(self, session_id: str | None) -> None:
+        """Send the ACP ``session/cancel`` notification (no response is expected)."""
+        if session_id is None:
+            return
+        with contextlib.suppress(BackendTransportError, OSError, RuntimeError):
+            self._write(
+                {"jsonrpc": "2.0", "method": "session/cancel", "params": {"sessionId": session_id}}
+            )
+
+    def _release_turn(self, queue: asyncio.Queue[BackendEvent | _Sentinel]) -> None:
+        """Mark the turn that owns ``queue`` as finished. Only the owner may do this."""
+        if self._turn_queue is queue:
+            self._turn_queue = None
+            self._cancel_pending_permissions()
 
     async def _resolve_permission(self, req: PermissionRequest) -> None:
         future = self._perm_answers.get(req.id)

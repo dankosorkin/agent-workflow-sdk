@@ -92,6 +92,9 @@ class CLIExecBackend(BaseAgentBackend):
         self.cwd = Path(cwd)
         self.timeout = timeout
         self._session_id: str | None = None
+        # Bumped by reset_session(); a turn that STARTED before a reset must not
+        # resurrect the old session id when it finishes.
+        self._session_epoch = 0
 
     # ------------------------------------------------------------------
     # Subclass hooks
@@ -127,6 +130,17 @@ class CLIExecBackend(BaseAgentBackend):
     async def close(self) -> None:
         return None
 
+    async def reset_session(self) -> None:
+        """Forget the remembered session id: the next turn starts a fresh conversation.
+
+        One-shot CLI agents resume the previous turn's session by default, so a
+        reused instance would carry one task's context into the next. An explicit
+        ``session=`` passed to a call is still honoured. A turn already running
+        when this is called does not bring the old session back when it ends.
+        """
+        self._session_id = None
+        self._session_epoch += 1
+
     # ------------------------------------------------------------------
     # One turn
     # ------------------------------------------------------------------
@@ -140,6 +154,7 @@ class CLIExecBackend(BaseAgentBackend):
             )
 
         session_id = session or self._session_id
+        epoch = self._session_epoch
         self._stdin_text = None
         cmd = self.build_command(request.text, session_id)
         stdin_text = self._stdin_text
@@ -175,8 +190,9 @@ class CLIExecBackend(BaseAgentBackend):
         finally:
             await self._reap(proc)
 
-        # Persist the session id the subclass captured for the next turn.
-        if acc.session_id:
+        # Persist the session id the subclass captured for the next turn — unless
+        # the session was reset while this turn was running.
+        if acc.session_id and epoch == self._session_epoch:
             self._session_id = acc.session_id
 
         yield TurnEnd(

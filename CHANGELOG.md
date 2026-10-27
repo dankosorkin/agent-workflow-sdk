@@ -40,6 +40,30 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   the Nth answer, and the sequence survives a crash replay. Round-tripped by
   every checkpoint backend and redacted alongside `state`/`interrupt_payload`.
 
+- `SqliteStore` (`agentflow.store`, also exported from `agentflow`): a durable
+  `Store` in a single SQLite file, with no server and no extra. Same contract as
+  `MemoryStore` and `PostgresStore`, including TTL and the atomic `put(...,
+  if_absent=True)` / `StoreConflict` claim (the write lock is taken before the
+  existence check, so independent store objects or processes sharing the file get
+  exactly one winner). With it a single machine keeps `IdempotentOp` markers,
+  `skip_if_done` caches and `ScoreCache` across a restart without PostgreSQL.
+  Namespace segments may not contain `NUL`; a non-JSON value raises `StoreError`.
+  `tests/test_store.py` now runs the shared contract against both offline backends.
+- `reset_session()` on agent backends: forget the conversation so the next turn
+  starts fresh without creating a new backend object. `CLIExecBackend` (Codex,
+  Claude Code) clears the remembered session id, which they otherwise resume on the
+  next turn, so a reused instance leaked one task's context into the next; a turn
+  already running when it is called does not bring the old session back. `KiroBackend`
+  opens a new ACP session on the same process (reapplying the agent mode or model);
+  it raises `BackendError` before `start()` or during a turn. By default the previous
+  session is left alone: kiro-cli keeps each session as a record on disk, so a
+  pipeline that resets per step accumulates them (no memory or file descriptors are
+  held). `reset_session(delete_previous=True)` deletes the previous session with ACP
+  `session/delete` once the new one is ready, so a failure to create the new session
+  leaves the old one intact; if the delete itself fails the error propagates but the
+  new session is already active. `BaseAgentBackend` provides a no-op default; the method
+  is not part of the `AgentBackend` protocol, so custom backends without it still conform.
+
 ### Fixed
 
 - Worker crash recovery resumes any unfinished run from its saved checkpoint
@@ -81,6 +105,32 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   the child from its own checkpoint instead of re-invoking it from START, so the
   child's already-completed first step is not repeated
   (invocation-ownership bug 5).
+- `KiroBackend` is released at `TurnEnd`, not when the event stream is finalised. A
+  consumer that stopped reading at `TurnEnd` (`return`/`break` inside `async for`)
+  left the suspended generator holding the turn, so the next `prompt()` or
+  `reset_session()` failed with "a turn is already in progress". A generator that
+  is finalised late (garbage collection) can no longer take a later turn's event
+  routing or cancel its pending permission answers: cleanup now acts only on the
+  turn the generator owns. Stopping BEFORE `TurnEnd` still leaves the turn in
+  progress, because the agent is still working.
+- Closing a `KiroBackend` event stream before `TurnEnd` (`aclose()`, an exception in
+  the consumer, task cancellation) now sends the ACP `session/cancel` notification
+  for that turn's session. Previously the agent kept running an unread turn (editing
+  files, spending tokens) until the next prompt. Best-effort: nothing is sent if the
+  process is gone, after a normal `TurnEnd`, or from a late-finalised generator whose
+  turn was already released.
+- `ClaudeCodeBackend(permission=AllowAll())` now actually allows edits: with no
+  explicit `allowed_tools` / `permission_mode` it launches with
+  `--permission-mode acceptEdits` (headless `claude -p` refused every write with no
+  flag at all). This is not `bypassPermissions`: shell commands still need an
+  explicit `allowed_tools`. Explicit settings still win; `Interactive`/`Callback`
+  add no flag.
+- `KiroBackend.close()` no longer raises `AttributeError` on Windows, where
+  `signal.SIGKILL`, `os.killpg` and `os.getpgid` do not exist. Shutdown now
+  escalates by intent (`_terminate`, then `_kill`) instead of by signal number:
+  POSIX still signals the whole process group; on Windows it falls back to
+  `proc.terminate()` / `proc.kill()`. Known limitation: on Windows only the direct
+  child is killed, so a grandchild such as `kiro-cli-chat` may outlive it.
 
 The interrupt answer-delivery path (`interrupt_answers`) is unchanged this
 release.

@@ -106,7 +106,11 @@ class ClaudeCodeBackend(CLIExecBackend):
         # Explicit tool flags win; otherwise derive them from the permission
         # policy. Claude Code has no per-tool runtime gate we can hook, so a
         # ToolAllowlist maps to --allowed-tools and a deny-all policy maps to
-        # the read-only "plan" permission mode (no edits/commands).
+        # the read-only "plan" permission mode (no edits/commands). AllowAll maps
+        # to "acceptEdits": headless ``claude -p`` refuses writes with no flag at all,
+        # and acceptEdits lets it edit files without opening the shell. It is
+        # deliberately NOT bypassPermissions: commands outside the working set still
+        # need an explicit ``allowed_tools``/``permission_mode`` from the caller.
         allowed = list(self.allowed_tools)
         permission_mode = self.permission_mode
         if not allowed and permission_mode is None:
@@ -115,6 +119,8 @@ class ClaudeCodeBackend(CLIExecBackend):
                 allowed = sorted(intent.allowlist)
             elif intent.deny_all:
                 permission_mode = "plan"
+            elif intent.allow_all:
+                permission_mode = "acceptEdits"
 
         if allowed:
             cmd += ["--allowed-tools", " ".join(allowed)]

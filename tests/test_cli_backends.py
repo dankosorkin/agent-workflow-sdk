@@ -258,3 +258,132 @@ def test_claude_explicit_tools_win_over_policy():
     cmd = ClaudeCodeBackend(allowed_tools=["Bash"], permission=DenyAll()).build_command("hi", None)
     assert cmd[cmd.index("--allowed-tools") + 1] == "Bash"
     assert "--permission-mode" not in cmd
+
+
+# --- reset_session: reuse one instance without leaking the previous conversation ---
+
+
+def _capture_exec(monkeypatch, lines=CODEX_LINES):
+    """Fake subprocess spawner that records every argv it is asked to start."""
+    argvs: list[list[str]] = []
+
+    async def fake_exec(*args, **kwargs):
+        argvs.append(list(args))
+        return _FakeProc(lines)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    return argvs
+
+
+async def _drain(backend, text, **kw):
+    return [e async for e in backend.prompt(text, **kw)]
+
+
+async def test_next_turn_resumes_the_previous_session_by_default(monkeypatch):
+    # The behaviour reset_session exists to switch off.
+    argvs = _capture_exec(monkeypatch)
+    backend = CodexBackend(permission=AllowAll())
+    await _drain(backend, "one")
+    await _drain(backend, "two")
+    assert "resume" not in argvs[0]
+    assert argvs[1][-3:] == ["resume", "01a0ebda-5b74-7c51", "two"]
+
+
+async def test_reset_session_makes_the_next_turn_start_fresh(monkeypatch):
+    argvs = _capture_exec(monkeypatch)
+    backend = CodexBackend(permission=AllowAll())
+    await _drain(backend, "one")
+    await backend.reset_session()
+    assert backend._session_id is None
+    await _drain(backend, "two")
+    assert "resume" not in argvs[1]  # a brand-new conversation, no leaked context
+    await _drain(backend, "three")
+    assert argvs[2][-3:] == ["resume", "01a0ebda-5b74-7c51", "three"]  # and it resumes again
+
+
+async def test_reset_session_works_for_claude_code_too(monkeypatch):
+    argvs = _capture_exec(monkeypatch, CLAUDE_LINES)
+    backend = ClaudeCodeBackend(permission=AllowAll())
+    await _drain(backend, "one")
+    await backend.reset_session()
+    await _drain(backend, "two")
+    assert "--resume" not in argvs[1]
+
+
+async def test_explicit_session_is_still_honoured_after_reset(monkeypatch):
+    argvs = _capture_exec(monkeypatch)
+    backend = CodexBackend(permission=AllowAll())
+    await backend.reset_session()
+    await _drain(backend, "x", session="chosen-by-caller")
+    assert argvs[0][-3:] == ["resume", "chosen-by-caller", "x"]
+
+
+async def test_reset_during_a_running_turn_is_not_undone_when_it_ends(monkeypatch):
+    """A turn that began before the reset must not bring its old session id back."""
+    release = asyncio.Event()
+
+    class _GatedStdout(_FakeStdout):
+        async def readline(self) -> bytes:
+            await release.wait()
+            return await super().readline()
+
+    class _GatedProc(_FakeProc):
+        def __init__(self, lines):
+            super().__init__(lines)
+            self.stdout = _GatedStdout(lines)
+
+    async def fake_exec(*args, **kwargs):
+        return _GatedProc(CODEX_LINES)
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    backend = CodexBackend(permission=AllowAll())
+
+    running = asyncio.create_task(_drain(backend, "slow"))
+    await asyncio.sleep(0.01)  # the turn has started and is waiting on the process
+    await backend.reset_session()
+    release.set()
+    await running
+
+    assert backend._session_id is None
+
+
+async def test_agent_backend_default_reset_is_a_noop():
+    from agentflow.backends.base import BaseAgentBackend
+
+    class Stateless(BaseAgentBackend):
+        async def start(self):
+            return None
+
+        async def close(self):
+            return None
+
+        async def invoke(self, request, *, session=None):
+            if False:
+                yield None
+
+    await Stateless(permission=AllowAll()).reset_session()  # nothing to forget, must not raise
+
+
+def test_claude_allow_all_maps_to_accept_edits_never_bypass():
+    cmd = ClaudeCodeBackend(permission=AllowAll()).build_command("hi", None)
+    assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
+    assert "--allowed-tools" not in cmd
+    assert "--allow-dangerously-skip-permissions" not in cmd
+    assert "bypassPermissions" not in cmd
+
+
+def test_claude_allow_all_yields_to_explicit_settings():
+    by_mode = ClaudeCodeBackend(permission_mode="plan", permission=AllowAll())
+    cmd = by_mode.build_command("hi", None)
+    assert cmd[cmd.index("--permission-mode") + 1] == "plan"
+    by_tools = ClaudeCodeBackend(allowed_tools=["Read"], permission=AllowAll())
+    cmd = by_tools.build_command("hi", None)
+    assert cmd[cmd.index("--allowed-tools") + 1] == "Read"
+    assert "--permission-mode" not in cmd
+
+
+def test_claude_interactive_policy_adds_no_permission_flags():
+    from agentflow.backends.base import Interactive
+
+    cmd = ClaudeCodeBackend(permission=Interactive()).build_command("hi", None)
+    assert "--permission-mode" not in cmd and "--allowed-tools" not in cmd

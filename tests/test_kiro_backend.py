@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
 
 import pytest
 from agentflow.backends.base import AllowAll, DenyAll
@@ -301,6 +303,397 @@ async def test_close_terminates_then_kills_on_timeout(fake_proc, monkeypatch):
     monkeypatch.setattr(asyncio, "wait_for", _fast_wait_for)
     await backend.close()
     assert fake_proc.returncode == -9  # kill() was reached
+
+
+async def _started(fake_proc) -> KiroBackend:
+    backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())
+    setup = asyncio.create_task(_drive_setup(fake_proc))
+    await backend.start()
+    await setup
+    return backend
+
+
+def _force_timeouts(fake_proc, monkeypatch) -> None:
+    """proc.wait() never returns and every wait_for in close() times out at once."""
+
+    async def _never() -> int:
+        await asyncio.sleep(3600)
+        return 0
+
+    async def _fast_wait_for(coro, timeout):
+        coro.close()
+        raise TimeoutError
+
+    monkeypatch.setattr(fake_proc, "wait", _never)
+    monkeypatch.setattr(asyncio, "wait_for", _fast_wait_for)
+
+
+def _record_process_calls(fake_proc, monkeypatch) -> list[str]:
+    calls: list[str] = []
+    real_terminate, real_kill = fake_proc.terminate, fake_proc.kill
+
+    def terminate() -> None:
+        calls.append("terminate")
+        real_terminate()
+
+    def kill() -> None:
+        calls.append("kill")
+        real_kill()
+
+    monkeypatch.setattr(fake_proc, "terminate", terminate)
+    monkeypatch.setattr(fake_proc, "kill", kill)
+    return calls
+
+
+async def test_close_without_posix_signals_escalates_terminate_then_kill(fake_proc, monkeypatch):
+    """Windows shape: no os.killpg / os.getpgid / signal.SIGKILL. close() must not
+    read a missing attribute, and must fall back to proc.terminate() then proc.kill()."""
+    backend = await _started(fake_proc)
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    _force_timeouts(fake_proc, monkeypatch)
+    monkeypatch.delattr(os, "killpg", raising=False)
+    monkeypatch.delattr(os, "getpgid", raising=False)
+    monkeypatch.delattr(signal, "SIGKILL", raising=False)
+
+    await backend.close()  # would raise AttributeError before the fix
+
+    assert calls == ["terminate", "kill"]
+    assert fake_proc.returncode == -9
+
+
+async def test_close_signals_the_process_group_on_posix(fake_proc, monkeypatch):
+    """With process groups available the signals go to the group, not the process."""
+    backend = await _started(fake_proc)
+    fake_proc.pid = 4242
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    _force_timeouts(fake_proc, monkeypatch)
+    sent: list[tuple[int, int]] = []
+    monkeypatch.setattr(os, "getpgid", lambda pid: pid + 1, raising=False)
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: sent.append((pgid, sig)), raising=False)
+    monkeypatch.setattr(signal, "SIGTERM", signal.SIGTERM, raising=False)
+    monkeypatch.setattr(signal, "SIGKILL", getattr(signal, "SIGKILL", 9), raising=False)
+
+    await backend.close()
+
+    assert sent == [(4243, signal.SIGTERM), (4243, signal.SIGKILL)]
+    assert calls == []  # the group path handled it; no per-process fallback
+
+
+async def test_close_falls_back_to_process_when_group_is_gone(fake_proc, monkeypatch):
+    backend = await _started(fake_proc)
+    fake_proc.pid = 4242
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    _force_timeouts(fake_proc, monkeypatch)
+
+    def _gone(pid):
+        raise ProcessLookupError
+
+    monkeypatch.setattr(os, "getpgid", _gone, raising=False)
+    monkeypatch.setattr(os, "killpg", lambda pgid, sig: None, raising=False)
+
+    await backend.close()  # must not raise
+
+    assert calls == ["terminate", "kill"]
+
+
+async def test_close_is_idempotent(fake_proc):
+    backend = await _started(fake_proc)
+    await backend.close()
+    await backend.close()  # second close: no process left, must not raise
+    assert backend._proc is None
+
+
+async def test_close_does_not_signal_a_process_that_already_exited(fake_proc, monkeypatch):
+    backend = await _started(fake_proc)
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    fake_proc.returncode = 0  # exited on its own; wait() returns immediately
+
+    await backend.close()
+
+    assert calls == []
+
+
+async def _answer_nth(
+    proc, method: str, n: int, result: dict | None = None, *, error: dict | None = None
+) -> None:
+    """Reply to the n-th client request of ``method`` (1-based), with a result or an error.
+
+    Fails loudly if that request is never sent, instead of hanging the suite.
+    """
+    deadline = asyncio.get_running_loop().time() + 2.0
+    while True:
+        matching = [m for m in proc.stdin.lines if m.get("method") == method]
+        if len(matching) >= n:
+            reply = {"error": error} if error is not None else {"result": result or {}}
+            proc.stdout.feed({"jsonrpc": "2.0", "id": matching[n - 1]["id"], **reply})
+            return
+        if asyncio.get_running_loop().time() > deadline:
+            raise AssertionError(f"the client never sent request #{n} of {method!r}")
+        await asyncio.sleep(0.001)
+
+
+async def test_reset_session_opens_a_new_session_and_the_next_turn_uses_it(fake_proc):
+    backend = await _started(fake_proc)
+    assert backend._session_id == "sess-1"
+
+    answer = asyncio.create_task(_answer_nth(fake_proc, "session/new", 2, {"sessionId": "sess-2"}))
+    await backend.reset_session()
+    await answer
+    assert backend._session_id == "sess-2"
+
+    async def _drive_turn() -> None:
+        prompt = await fake_proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt")
+        assert prompt["params"]["sessionId"] == "sess-2"  # the fresh session, not sess-1
+        fake_proc.stdout.feed(
+            {"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}
+        )
+
+    driver = asyncio.create_task(_drive_turn())
+    events = [e async for e in backend.prompt("hello")]
+    await driver
+    assert isinstance(events[-1], TurnEnd)
+    await backend.close()
+
+
+async def test_reset_session_reapplies_the_model_on_engine_v2(fake_proc):
+    backend = KiroBackend("fake-agent", engine="v2", model="m-1", permission=AllowAll())
+    setup = asyncio.create_task(_drive_setup(fake_proc))
+    first_model = asyncio.create_task(_answer_nth(fake_proc, "session/set_model", 1, {}))
+    await backend.start()  # engine v2 with a model also sends session/set_model
+    await setup
+    await first_model
+
+    answer = asyncio.create_task(_answer_nth(fake_proc, "session/new", 2, {"sessionId": "sess-2"}))
+    reset = asyncio.create_task(backend.reset_session())
+    await answer
+    await _answer_nth(fake_proc, "session/set_model", 2, {})
+    await reset
+
+    models = [m for m in fake_proc.stdin.lines if m.get("method") == "session/set_model"]
+    assert [m["params"]["sessionId"] for m in models] == ["sess-1", "sess-2"]
+    assert all(m["params"]["modelId"] == "m-1" for m in models)
+    await backend.close()
+
+
+async def test_reset_session_before_start_is_an_error():
+    backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())
+    with pytest.raises(BackendError, match="start"):
+        await backend.reset_session()
+
+
+async def test_reset_session_during_a_turn_is_an_error_and_keeps_the_session(fake_proc):
+    backend = await _started(fake_proc)
+    consumer = asyncio.create_task(_collect(backend.prompt("hello")))
+    prompt = await fake_proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt")
+
+    with pytest.raises(BackendError, match="in progress"):
+        await backend.reset_session()
+    assert backend._session_id == "sess-1"
+    sent = [m for m in fake_proc.stdin.lines if m.get("method") == "session/new"]
+    assert len(sent) == 1  # no second session/new was sent
+
+    fake_proc.stdout.feed(
+        {"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}
+    )
+    await consumer
+    await backend.close()
+
+
+async def _collect(aiter):
+    return [e async for e in aiter]
+
+
+async def _return_at(aiter, kind):
+    """Read a turn only up to the first event of ``kind`` and walk away, like
+    ``for ev in ...: if isinstance(ev, TurnEnd): return ev``. The generator is NOT drained."""
+    async for ev in aiter:
+        if isinstance(ev, kind):
+            return ev
+    return None
+
+
+async def _soon(awaitable):
+    """Bound an await so that a regression fails the test instead of hanging the suite."""
+    return await asyncio.wait_for(awaitable, timeout=2)
+
+
+def _methods(proc) -> list[str]:
+    return [m["method"] for m in proc.stdin.lines if "method" in m]
+
+
+async def test_stopping_at_turn_end_does_not_block_the_next_turn(fake_proc):
+    """The turn is over at TurnEnd. A consumer that returns there, without draining the
+    generator, must be able to start the next turn at once."""
+    backend = await _started(fake_proc)
+    for n in (1, 2):
+        answer = asyncio.create_task(
+            _answer_nth(fake_proc, "session/prompt", n, {"stopReason": "end_turn"})
+        )
+        end = await _return_at(backend.prompt(f"turn {n}"), TurnEnd)  # no await in between turns
+        await answer
+        assert isinstance(end, TurnEnd) and end.stop_reason == "end_turn"
+    await backend.close()
+
+
+async def test_reset_session_right_after_stopping_at_turn_end(fake_proc):
+    backend = await _started(fake_proc)
+    answer = asyncio.create_task(
+        _answer_nth(fake_proc, "session/prompt", 1, {"stopReason": "end_turn"})
+    )
+    await _return_at(backend.prompt("hi"), TurnEnd)
+    await answer
+
+    new = asyncio.create_task(_answer_nth(fake_proc, "session/new", 2, {"sessionId": "sess-2"}))
+    await backend.reset_session()  # was: BackendError("... a turn is already in progress")
+    await new
+    assert backend._session_id == "sess-2"
+    await backend.close()
+
+
+async def test_a_late_finalised_generator_cannot_disturb_a_later_turn(fake_proc):
+    """Turn one's generator is abandoned at TurnEnd and finalised only AFTER turn two has
+    started. Its cleanup must not take over turn two's event routing."""
+    backend = await _started(fake_proc)
+    first = backend.prompt("one")
+    answer = asyncio.create_task(
+        _answer_nth(fake_proc, "session/prompt", 1, {"stopReason": "end_turn"})
+    )
+    async for ev in first:
+        if isinstance(ev, TurnEnd):
+            break  # abandoned, still not finalised
+    await answer
+
+    second_events: list = []
+
+    async def run_second() -> None:
+        async for ev in backend.prompt("two"):
+            second_events.append(ev)
+
+    second = asyncio.create_task(run_second())
+    prompt_two = await _soon(
+        fake_proc.stdin.wait_for(
+            lambda m: (
+                m.get("method") == "session/prompt" and m["params"]["prompt"][0]["text"] == "two"
+            )
+        )
+    )
+
+    await first.aclose()  # the late finalisation, while turn two is in flight
+
+    fake_proc.stdout.feed(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "hello"}}
+            },
+        }
+    )
+    fake_proc.stdout.feed(
+        {"jsonrpc": "2.0", "id": prompt_two["id"], "result": {"stopReason": "end_turn"}}
+    )
+    await asyncio.wait_for(second, timeout=2)
+
+    assert [e.text for e in second_events if isinstance(e, TextChunk)] == ["hello"]
+    assert isinstance(second_events[-1], TurnEnd)
+    await backend.close()
+
+
+async def test_stopping_before_turn_end_still_leaves_the_turn_in_progress(fake_proc):
+    """Only TurnEnd frees the backend: if the consumer walks away mid-turn the agent is
+    still working, and starting another turn on the same session is refused."""
+    backend = await _started(fake_proc)
+    first = backend.prompt("one")
+    consumer = asyncio.create_task(_return_at(first, TextChunk))
+    await fake_proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt")
+    fake_proc.stdout.feed(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "partial"}}
+            },
+        }
+    )
+    assert isinstance(await consumer, TextChunk)  # walked away mid-turn
+
+    with pytest.raises(BackendError, match="in progress"):
+        async for _ in backend.prompt("two"):
+            pass
+    await first.aclose()
+    await backend.close()
+
+
+async def test_reset_session_keeps_the_previous_session_by_default(fake_proc):
+    backend = await _started(fake_proc)
+    answer = asyncio.create_task(_answer_nth(fake_proc, "session/new", 2, {"sessionId": "sess-2"}))
+    await backend.reset_session()
+    await answer
+    assert "session/delete" not in _methods(fake_proc)
+    await backend.close()
+
+
+async def test_reset_session_delete_previous_deletes_after_the_new_one_exists(fake_proc):
+    backend = await _started(fake_proc)
+    new = asyncio.create_task(_answer_nth(fake_proc, "session/new", 2, {"sessionId": "sess-2"}))
+    gone = asyncio.create_task(_answer_nth(fake_proc, "session/delete", 1, {}))
+    await _soon(backend.reset_session(delete_previous=True))
+    await new
+    await gone
+
+    assert backend._session_id == "sess-2"
+    methods = _methods(fake_proc)
+    assert methods.index("session/delete") > len(methods) - 1 - methods[::-1].index("session/new")
+    deletes = [m for m in fake_proc.stdin.lines if m.get("method") == "session/delete"]
+    assert [d["params"]["sessionId"] for d in deletes] == ["sess-1"]  # the OLD session only
+    await backend.close()
+
+
+async def test_delete_previous_comes_after_set_model_on_engine_v2(fake_proc):
+    backend = KiroBackend("fake-agent", engine="v2", model="m-1", permission=AllowAll())
+    setup = asyncio.create_task(_drive_setup(fake_proc))
+    first_model = asyncio.create_task(_answer_nth(fake_proc, "session/set_model", 1, {}))
+    await backend.start()
+    await setup
+    await first_model
+
+    tasks = [
+        asyncio.create_task(_answer_nth(fake_proc, "session/new", 2, {"sessionId": "sess-2"})),
+        asyncio.create_task(_answer_nth(fake_proc, "session/set_model", 2, {})),
+        asyncio.create_task(_answer_nth(fake_proc, "session/delete", 1, {})),
+    ]
+    await _soon(backend.reset_session(delete_previous=True))
+    await asyncio.gather(*tasks)
+
+    assert _methods(fake_proc)[-3:] == ["session/new", "session/set_model", "session/delete"]
+    await backend.close()
+
+
+async def test_delete_failure_propagates_but_the_new_session_is_already_active(fake_proc):
+    backend = await _started(fake_proc)
+    new = asyncio.create_task(_answer_nth(fake_proc, "session/new", 2, {"sessionId": "sess-2"}))
+    refused = asyncio.create_task(
+        _answer_nth(fake_proc, "session/delete", 1, error={"code": -32601, "message": "nope"})
+    )
+    with pytest.raises(BackendTransportError, match="RPC error"):
+        await _soon(backend.reset_session(delete_previous=True))
+    await new
+    await refused
+    assert backend._session_id == "sess-2"  # the reset itself had succeeded
+    await backend.close()
+
+
+async def test_failed_session_creation_keeps_the_old_session_and_deletes_nothing(fake_proc):
+    backend = await _started(fake_proc)
+    refused = asyncio.create_task(
+        _answer_nth(fake_proc, "session/new", 2, error={"code": -32000, "message": "busy"})
+    )
+    with pytest.raises(BackendTransportError, match="RPC error"):
+        await _soon(backend.reset_session(delete_previous=True))
+    await refused
+    assert backend._session_id == "sess-1"  # still usable
+    assert "session/delete" not in _methods(fake_proc)  # the old session was not touched
+    await backend.close()
 
 
 async def test_turn_rpc_failure_yields_error_event(fake_proc):
@@ -756,3 +1149,123 @@ def test_extract_tool_name_v3_and_fallbacks():
 
     # nothing recognizable -> empty string (no crash)
     assert _extract_tool_name({}) == ""
+
+
+def _cancels(proc) -> list[dict]:
+    return [m for m in proc.stdin.lines if m.get("method") == "session/cancel"]
+
+
+async def _walk_away_mid_turn(fake_proc, backend):
+    gen = backend.prompt("one")
+    consumer = asyncio.create_task(_return_at(gen, TextChunk))
+    await _soon(fake_proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt"))
+    fake_proc.stdout.feed(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "partial"}}
+            },
+        }
+    )
+    assert isinstance(await _soon(consumer), TextChunk)
+    return gen
+
+
+async def test_closing_the_generator_before_turn_end_cancels_the_agent_turn(fake_proc):
+    backend = await _started(fake_proc)
+    gen = await _walk_away_mid_turn(fake_proc, backend)
+    assert _cancels(fake_proc) == []  # merely walking away is not a close
+
+    await _soon(gen.aclose())
+
+    [cancel] = _cancels(fake_proc)
+    assert cancel["params"] == {"sessionId": backend._session_id}
+    assert "id" not in cancel  # a notification: no response is awaited
+    await backend.close()
+
+
+async def test_the_backend_is_free_again_after_the_cancelling_close(fake_proc):
+    backend = await _started(fake_proc)
+    gen = await _walk_away_mid_turn(fake_proc, backend)
+    await _soon(gen.aclose())
+
+    answer = asyncio.create_task(
+        _answer_nth(fake_proc, "session/prompt", 2, {"stopReason": "end_turn"})
+    )
+    end = await _soon(_return_at(backend.prompt("two"), TurnEnd))
+    await answer
+    assert isinstance(end, TurnEnd)
+    await backend.close()
+
+
+async def test_no_cancel_after_a_normal_turn_end(fake_proc):
+    backend = await _started(fake_proc)
+    answer = asyncio.create_task(
+        _answer_nth(fake_proc, "session/prompt", 1, {"stopReason": "end_turn"})
+    )
+    gen = backend.prompt("one")
+    await _soon(_return_at(gen, TurnEnd))
+    await answer
+    await gen.aclose()  # finalised after TurnEnd
+    assert _cancels(fake_proc) == []
+    await backend.close()
+
+
+async def test_a_late_finalised_generator_does_not_cancel_a_later_turn(fake_proc):
+    backend = await _started(fake_proc)
+    first = backend.prompt("one")
+    answer = asyncio.create_task(
+        _answer_nth(fake_proc, "session/prompt", 1, {"stopReason": "end_turn"})
+    )
+    await _soon(_return_at(first, TurnEnd))
+    await answer
+
+    second = asyncio.create_task(_collect(backend.prompt("two")))
+    prompt_two = await _soon(
+        fake_proc.stdin.wait_for(
+            lambda m: (
+                m.get("method") == "session/prompt" and m["params"]["prompt"][0]["text"] == "two"
+            )
+        )
+    )
+    await first.aclose()  # turn two is in flight; turn one's cleanup must not touch it
+    assert _cancels(fake_proc) == []
+
+    fake_proc.stdout.feed(
+        {"jsonrpc": "2.0", "id": prompt_two["id"], "result": {"stopReason": "end_turn"}}
+    )
+    await _soon(second)
+    await backend.close()
+
+
+async def test_cancel_is_best_effort_when_the_process_is_gone(fake_proc):
+    backend = await _started(fake_proc)
+    gen = await _walk_away_mid_turn(fake_proc, backend)
+    backend._proc = None  # transport gone: the write would raise
+    await _soon(gen.aclose())  # must not raise
+    assert _cancels(fake_proc) == []
+
+
+async def test_a_raised_error_inside_the_consumer_also_cancels(fake_proc):
+    backend = await _started(fake_proc)
+
+    async def consume() -> None:
+        async for ev in backend.prompt("one"):
+            if isinstance(ev, TextChunk):
+                raise RuntimeError("consumer blew up")
+
+    task = asyncio.create_task(consume())
+    await _soon(fake_proc.stdin.wait_for(lambda m: m.get("method") == "session/prompt"))
+    fake_proc.stdout.feed(
+        {
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {"update": {"sessionUpdate": "agent_message_chunk", "content": {"text": "x"}}},
+        }
+    )
+    with pytest.raises(RuntimeError):
+        await _soon(task)
+    await asyncio.sleep(0)  # let the async generator's finalizer run
+    assert len(_cancels(fake_proc)) == 1
+    await backend.close()
