@@ -67,3 +67,36 @@ def step(plan: dict[str, Any], sid: str) -> dict[str, Any]:
 
 def clone(v):
     return copy.deepcopy(v)
+
+
+def approve(plan: dict[str, Any], inventory: dict[str, Any]) -> dict[str, Any]:
+    from agentflow.workflow import inventory_digest, plan_hash
+
+    plan["approval"] = {"mode": "manual", "status": "approved", "plan_hash": plan_hash(plan)}
+    plan["provenance"] = {"inventory_digest": inventory_digest(inventory)}
+    return plan
+
+
+class FakeRunner:
+    """Scripted stand-in for the agent: one list of answers per step id, consumed in order."""
+
+    def __init__(self, scripts: dict[str, list[Any]]) -> None:
+        self.scripts = {k: list(v) for k, v in scripts.items()}
+        self.calls: list[tuple[str, str]] = []
+
+    async def __call__(self, step: dict[str, Any], entry: dict[str, Any], prompt: str) -> str:
+        sid = step["id"]
+        self.calls.append((sid, prompt))
+        queue = self.scripts[sid]
+        assert queue, f"no scripted answer left for {sid}"
+        item = queue.pop(0)
+        if isinstance(item, BaseException):
+            raise item
+        return item
+
+    def count(self, sid: str) -> int:
+        return sum(1 for s, _ in self.calls if s == sid)
+
+
+GOOD_COLLECT = 'Done.\n{"logs": [{"id": 1}, {"id": 2}], "count": 2}'
+GOOD_ANALYZE = '```json\n{"findings": ["spike at 03:00"]}\n```'

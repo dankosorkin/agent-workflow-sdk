@@ -1,0 +1,491 @@
+# Copyright 2026 Daniel Sorkin
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Execute an approved plan as data through the SDK's ``add_plan_executor``.
+
+    outcome = await run_plan(plan, inventory, runner, params={"window": "24h"})
+
+One fixed engine graph runs every plan: a planner writes the plan's steps into the
+state as tasks, the plan executor runs them by readiness, and a single handler runs
+one step. Nothing is generated and the engine graph is never mutated.
+
+A step runs like this:
+
+  1. resolve its input bindings from earlier results and run parameters;
+  2. if a result for the same (agent, prompt, inputs, contract, checks) is in the
+     ``Store``, reuse it (this is how a second run skips finished work);
+  3. otherwise run the agent inside a quality-gate sub-graph on a deterministic
+     sub-thread, so the attempt counter survives a crash and a resume;
+  4. a step with ``side_effects`` runs under ``IdempotentOp``, so a crashed attempt
+     is never silently repeated.
+
+What is deliberately NOT executable yet is listed by :func:`unsupported_features`
+and refused up front, never ignored: ``may_ask``, ``semantic_check``, budgets,
+timeouts, artifacts and check kinds outside :data:`~agentflow.workflow.checks.CHECKS`.
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Awaitable, Callable, Mapping
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Annotated, Any
+
+from agentflow import END, START, Graph, last
+from agentflow.checkpoint import MemoryCheckpointer
+from agentflow.errors import BackendError, NodeError
+from agentflow.prebuilt import (
+    GateResult,
+    GateState,
+    IdempotentOp,
+    IncompleteEffectError,
+    PlanState,
+    Task,
+    TaskResult,
+    add_plan_executor,
+    add_quality_gate,
+    artifact_key,
+)
+from agentflow.store import MemoryStore, Store
+from agentflow.workflow.bindings import (
+    TYPES,
+    ancestors_of,
+    render_prompt,
+    resolve_inputs,
+    type_ok,
+)
+from agentflow.workflow.checks import CHECKS, parse_output, run_checks
+from agentflow.workflow.inventory import resolve_backend
+from agentflow.workflow.issues import Issue, has_errors
+from agentflow.workflow.plan import check_approval, plan_hash, validate_plan
+
+__all__ = [
+    "AgentRunner",
+    "PlanRefused",
+    "RunOutcome",
+    "backend_runner",
+    "build_workflow_graph",
+    "make_backend",
+    "run_plan",
+    "summarize",
+    "unsupported_features",
+]
+
+#: ``(step, backend_entry, prompt) -> the agent's final text``
+AgentRunner = Callable[[dict[str, Any], dict[str, Any], str], Awaitable[str]]
+
+CACHE_NS = ("workflow", "step_cache")
+EFFECT_NS = ("workflow", "effects")
+
+
+class PlanRefused(Exception):
+    """The plan cannot be run (invalid, unapproved, unsupported, or missing parameters)."""
+
+    def __init__(self, issues: list[Issue]) -> None:
+        self.issues = issues
+        super().__init__("; ".join(f"{i.code}: {i.message}" for i in issues))
+
+
+class _StepFailed(Exception):
+    pass
+
+
+# ---------------------------------------------------------------------------
+# What the executor cannot do yet
+# ---------------------------------------------------------------------------
+
+
+def unsupported_features(plan: dict[str, Any]) -> list[Issue]:
+    """Features a valid plan may name that this executor cannot run yet (errors)."""
+    out: list[Issue] = []
+    if plan.get("budget"):
+        out.append(Issue("unsupported_feature", "a plan-level budget is not enforced yet"))
+    for step in (plan.get("graph") or {}).get("steps") or []:
+        sid = step["id"]
+        for key in ("may_ask", "semantic_check", "budget", "timeout"):
+            if step.get(key):
+                out.append(Issue("unsupported_feature", f"'{key}' is not executable yet", step=sid))
+        if step.get("artifacts"):
+            out.append(Issue("unsupported_feature", "artifacts are not produced yet", step=sid))
+        for name, b in (step.get("inputs") or {}).items():
+            if isinstance(b, dict) and "artifact" in b:
+                out.append(
+                    Issue(
+                        "unsupported_feature",
+                        "artifact bindings need artifacts, which are not produced yet",
+                        step=sid,
+                        input=name,
+                    )
+                )
+        for check in step.get("checks") or []:
+            if check.get("kind") not in CHECKS:
+                out.append(
+                    Issue(
+                        "unsupported_check_kind",
+                        f"check kind {check.get('kind')!r} is not implemented "
+                        f"(available: {sorted(CHECKS)})",
+                        step=sid,
+                    )
+                )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Real backends
+# ---------------------------------------------------------------------------
+
+
+def make_backend(entry: dict[str, Any], step: dict[str, Any], *, cwd: Path | str = "."):
+    """Build the SDK backend for one step: the step's permission becomes the policy."""
+    from agentflow.backends import AllowAll, DenyAll, ToolAllowlist
+
+    permission = step.get("permission", "read_only")
+    if permission == "read_only":
+        policy: Any = DenyAll()
+    elif permission == "allowlist":
+        policy = ToolAllowlist(set(step.get("tools") or []))
+    elif permission == "full":
+        policy = AllowAll()
+    else:  # pragma: no cover - validate_plan rejects it first
+        raise ValueError(f"unknown permission {permission!r}")
+
+    name = entry["backend"]
+    if name == "kiro":
+        from agentflow.backends.kiro import KiroBackend
+
+        return KiroBackend(entry["agent"], cwd=cwd, permission=policy)
+    if name == "claude_code":
+        from agentflow.backends.claude_code import ClaudeCodeBackend
+
+        return ClaudeCodeBackend(agent=entry.get("agent"), cwd=cwd, permission=policy)
+    if name == "codex":
+        from agentflow.backends.codex import CodexBackend
+
+        return CodexBackend(cwd=cwd, permission=policy)
+    raise NotImplementedError(
+        f"backend {name!r} needs model configuration that an inventory entry cannot carry yet"
+    )
+
+
+def backend_runner(*, cwd: Path | str = ".") -> AgentRunner:
+    """An :data:`AgentRunner` that runs each attempt on a fresh SDK backend instance.
+
+    A fresh instance per attempt means no conversation leaks between steps or retries
+    and no concurrency limit on one instance (Kiro allows one turn at a time).
+    """
+    from agentflow.events import ErrorEvent, TextChunk, TurnEnd
+
+    async def run(step: dict[str, Any], entry: dict[str, Any], prompt: str) -> str:
+        backend = make_backend(entry, step, cwd=cwd)
+        text = ""
+        async with backend:
+            async for ev in backend.prompt(prompt):
+                if isinstance(ev, TextChunk):
+                    text += ev.text
+                elif isinstance(ev, ErrorEvent):
+                    raise BackendError(ev.message)
+                elif isinstance(ev, TurnEnd):
+                    return ev.text or text
+        return text
+
+    return run
+
+
+# ---------------------------------------------------------------------------
+# The engine graph
+# ---------------------------------------------------------------------------
+
+
+class WorkflowState(PlanState):
+    params: Annotated[dict, last]
+
+
+class StepState(GateState):
+    output: Annotated[dict, last]
+    parse_reasons: Annotated[list, last]
+    status: Annotated[str, last]
+
+
+def _cache_key(step: dict[str, Any], inputs: dict[str, Any]) -> str:
+    """What the agent sees AND what the result must satisfy: change either, miss the cache."""
+    return artifact_key(
+        {
+            "agent": step["agent"],
+            "prompt": step["prompt"],
+            "inputs": inputs,
+            "outputs": step.get("outputs") or {},
+            "checks": step.get("checks") or [],
+        }
+    )
+
+
+def _contract_block(step: dict[str, Any], feedback: str | None) -> str:
+    outputs = step.get("outputs") or {}
+    fields = ", ".join(f'"{name}": <{kind}>' for name, kind in outputs.items())
+    block = (
+        "### answer format\n"
+        f"Finish with ONE JSON object with exactly these fields: {{{fields}}}. "
+        "Put nothing after it."
+    )
+    if feedback:
+        block += f"\n\n### your previous answer was rejected\n{feedback}"
+    return block
+
+
+def _step_graph(step, entry, inputs, runner: AgentRunner, checkpointer):
+    outputs = step.get("outputs") or {}
+    checks = step.get("checks") or []
+
+    async def execute(state, ctx):
+        feedback = ((state.get("gate_results") or {}).get("check") or {}).get("feedback")
+        prompt = render_prompt(step, inputs) + "\n\n" + _contract_block(step, feedback)
+        text = await runner(step, entry, prompt)
+        fields, reasons = parse_output(text, outputs)
+        return {"output": fields or {}, "parse_reasons": reasons}
+
+    async def evaluator(state, ctx) -> GateResult:
+        reasons = list(state.get("parse_reasons") or [])
+        if not reasons:
+            _, reasons = run_checks(state["output"], checks)
+        return GateResult(passed=not reasons, reasons=reasons, feedback="; ".join(reasons) or None)
+
+    async def done(state, ctx):
+        return {"status": "passed"}
+
+    async def give_up(state, ctx):
+        return {"status": "escalated"}
+
+    g = Graph(StepState)
+    g.add_node("execute", execute)
+    g.add_node("done", done)
+    g.add_node("give_up", give_up)
+    add_quality_gate(
+        g,
+        "check",
+        evaluator,
+        on_pass="done",
+        on_fail="execute",
+        on_escalate="give_up",
+        max_attempts=int(step.get("max_attempts", 3)),
+    )
+    g.add_edge(START, "execute")
+    g.add_edge("execute", "check")
+    g.add_edge("done", END)
+    g.add_edge("give_up", END)
+    return g.compile(checkpointer=checkpointer)
+
+
+def build_workflow_graph(
+    plan: dict[str, Any],
+    inventory: dict[str, Any],
+    runner: AgentRunner,
+    *,
+    store: Store | None = None,
+    checkpointer: Any = None,
+    max_fanout: int = 4,
+):
+    """Compile the fixed engine graph that runs ``plan``. Raises :class:`PlanRefused`."""
+    problems = validate_plan(plan, inventory=inventory) + unsupported_features(plan)
+    if has_errors(problems):
+        raise PlanRefused([i for i in problems if i.severity == "error"])
+
+    store = store if store is not None else MemoryStore()
+    checkpointer = checkpointer if checkpointer is not None else MemoryCheckpointer()
+    steps = {s["id"]: s for s in plan["graph"]["steps"]}
+    entries = {sid: resolve_backend(s, inventory)[0] for sid, s in steps.items()}
+    phash = plan_hash(plan)
+    effects = IdempotentOp(store, EFFECT_NS)
+
+    async def handler(task: Task, state: Mapping[str, Any], ctx: Any) -> TaskResult:
+        step, entry = steps[task.id], entries[task.id]
+        results = {r["task_id"]: r for r in (state.get("plan") or {}).get("results") or ()}
+        inputs, problems = resolve_inputs(step, results, state.get("params") or {})
+        if problems:
+            return TaskResult(task.id, failed=True, error="; ".join(problems))
+
+        key = _cache_key(step, inputs)
+        cached = await store.get(CACHE_NS, key)
+        if cached is not None:
+            return TaskResult(task.id, output={**cached.value, "cached": True})
+
+        async def execute() -> dict[str, Any]:
+            child = _step_graph(step, entry, inputs, runner, checkpointer)
+            sub_thread = f"{ctx.thread}::step::{task.id}"  # deterministic: findable after a crash
+            cp = await checkpointer.get(sub_thread)
+            if cp is not None and cp.done:
+                final = dict(cp.state)
+            elif cp is not None:
+                final = await child.resume(sub_thread, owner_check=ctx.owner_check)
+            else:
+                final = await child.invoke({}, thread=sub_thread, owner_check=ctx.owner_check)
+            attempts = int((final.get("gate_attempts") or {}).get("check", 0))
+            if final.get("status") != "passed":
+                reasons = ((final.get("gate_results") or {}).get("check") or {}).get("reasons")
+                raise _StepFailed(f"escalated after {attempts} attempt(s): {reasons}")
+            return {"output": final["output"], "artifacts": {}, "attempts": attempts}
+
+        try:
+            if step.get("side_effects"):
+                envelope = await effects.run(f"{phash}:{task.id}:{key}", execute)
+            else:
+                envelope = await execute()
+        except _StepFailed as exc:
+            return TaskResult(task.id, failed=True, error=str(exc))
+        except IncompleteEffectError:
+            return TaskResult(
+                task.id,
+                failed=True,
+                error="an earlier attempt of this side-effecting step did not finish; "
+                "check what it did, then clear its marker or re-plan",
+            )
+        except NodeError as exc:
+            if isinstance(exc.__cause__, (BackendError, OSError, TimeoutError)):
+                return TaskResult(task.id, failed=True, error=f"backend error: {exc.__cause__}")
+            raise
+
+        await store.put(CACHE_NS, key, envelope)
+        return TaskResult(task.id, output=envelope)
+
+    async def planner(state, ctx):
+        if (state.get("plan") or {}).get("tasks"):
+            return {}
+        tasks = [
+            Task(s["id"], "agent_step", prerequisites=tuple(s.get("depends_on") or ()))
+            for s in plan["graph"]["steps"]
+        ]
+        return {"plan": {"tasks": tasks}}
+
+    async def idle(state, ctx):
+        return {}
+
+    g = Graph(WorkflowState)
+    g.add_node("planner", planner)
+    add_plan_executor(g, handlers={"agent_step": handler}, on_idle="idle", max_fanout=max_fanout)
+    g.add_node("idle", idle)
+    g.add_edge(START, "planner")
+    g.add_edge("planner", "dispatch")
+    g.add_edge("idle", END)
+    return g.compile(checkpointer=checkpointer, step_limit=4 * len(steps) + 20)
+
+
+# ---------------------------------------------------------------------------
+# Running and summarising
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class RunOutcome:
+    """The honest result of a run: what was produced, what failed, what never ran."""
+
+    status: str  # "completed" | "partial" | "failed"
+    thread: str
+    final_outputs: list[dict[str, Any]] = field(default_factory=list)  # step, field, value
+    failed: list[dict[str, str]] = field(default_factory=list)  # step, error
+    blocked: list[dict[str, Any]] = field(default_factory=list)  # step, reason
+    steps: dict[str, dict[str, Any]] = field(default_factory=dict)  # per-step status
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "status": self.status,
+            "thread": self.thread,
+            "final_outputs": self.final_outputs,
+            "failed": self.failed,
+            "blocked": self.blocked,
+            "steps": self.steps,
+        }
+
+
+def summarize(plan: dict[str, Any], final: dict[str, Any], thread: str = "") -> RunOutcome:
+    """Turn the final state into a :class:`RunOutcome`. Never reports a hollow success."""
+    steps = {s["id"]: s for s in plan["graph"]["steps"]}
+    results = {r["task_id"]: r for r in (final.get("plan") or {}).get("results") or ()}
+    deps = {sid: list(s.get("depends_on") or ()) for sid, s in steps.items()}
+    failed_ids = {sid for sid, r in results.items() if r.get("failed")}
+
+    per_step: dict[str, dict[str, Any]] = {}
+    failed, blocked = [], []
+    for sid in steps:
+        r = results.get(sid)
+        if r is None:
+            culprits = sorted(failed_ids & ancestors_of(sid, deps))
+            reason = f"blocked by failed step(s) {culprits}" if culprits else "never ran"
+            blocked.append({"step": sid, "reason": reason})
+            per_step[sid] = {"status": "blocked"}
+        elif r.get("failed"):
+            failed.append({"step": sid, "error": r.get("error") or ""})
+            per_step[sid] = {"status": "failed"}
+        else:
+            out = r.get("output") or {}
+            per_step[sid] = {
+                "status": "ok",
+                "attempts": out.get("attempts"),
+                "cached": bool(out.get("cached")),
+            }
+
+    produced = []
+    for ref in plan["final_outputs"]:
+        r = results.get(ref["step"])
+        if r is not None and not r.get("failed"):
+            fields = (r.get("output") or {}).get("output") or {}
+            if ref["field"] in fields:
+                produced.append({**ref, "value": fields[ref["field"]]})
+    if len(produced) == len(plan["final_outputs"]):
+        status = "completed"
+    elif produced:
+        status = "partial"
+    else:
+        status = "failed"
+    return RunOutcome(status, thread, produced, failed, blocked, per_step)
+
+
+async def run_plan(
+    plan: dict[str, Any],
+    inventory: dict[str, Any],
+    runner: AgentRunner,
+    *,
+    params: dict[str, Any] | None = None,
+    thread: str | None = None,
+    store: Store | None = None,
+    checkpointer: Any = None,
+    require_approval: bool = True,
+    max_fanout: int = 4,
+) -> RunOutcome:
+    """Run an approved plan and report an honest outcome.
+
+    Refuses (``PlanRefused``) a plan that is invalid, unsupported, not approved (or whose
+    approval is stale), or that lacks a declared run parameter.
+    """
+    issues: list[Issue] = []
+    if require_approval:
+        issues += check_approval(plan, inventory)
+    declared = plan.get("parameters") or {}
+    given = params or {}
+    for name, kind in declared.items():
+        if name not in given:
+            issues.append(Issue("missing_parameter", f"run parameter {name!r} is required"))
+        elif kind in TYPES and not type_ok(given[name], kind):
+            issues.append(Issue("bad_parameter", f"run parameter {name!r} must be {kind}"))
+    for name in given:
+        if name not in declared:
+            issues.append(Issue("unknown_parameter", f"run parameter {name!r} is not declared"))
+    if issues:
+        raise PlanRefused(issues)
+
+    graph = build_workflow_graph(
+        plan, inventory, runner, store=store, checkpointer=checkpointer, max_fanout=max_fanout
+    )
+    thread = thread or f"run-{uuid.uuid4().hex[:12]}"
+    final = await graph.invoke({"params": dict(given)}, thread=thread)
+    return summarize(plan, final, thread)

@@ -49,6 +49,20 @@ project aims to follow [Semantic Versioning](https://semver.org/).
     revokes an approval), `auto_approval_blockers`.
   - `plan.schema.json` (`load_schema()`): the structural JSON Schema, shipped in the
     wheel.
+  - `run_plan(plan, inventory, runner, params=...)` / `build_workflow_graph(...)`: run
+    an approved plan as data through `add_plan_executor`. Each step resolves its input
+    bindings, reuses a stored result for identical (agent, prompt, inputs, contract,
+    checks), and otherwise runs the agent inside a quality-gate sub-graph on a
+    deterministic sub-thread, so the attempt counter survives a crash and resume. A
+    `side_effects` step runs under `IdempotentOp`. The agent's answer must end with a
+    JSON object matching the step's `outputs`. The result is a `RunOutcome`
+    (`completed | partial | failed`, with failed and blocked steps listed).
+    `backend_runner(cwd=...)` runs each attempt on a fresh Kiro / Claude Code / Codex
+    backend whose policy comes from the step's `permission`.
+  - Refused up front (`PlanRefused`), never ignored: an invalid, unapproved or
+    stale-approved plan, missing or unknown run parameters, and features not
+    executable yet: `may_ask`, `semantic_check`, budgets, timeouts, artifacts, and
+    check kinds other than `not_empty` and `has_fields`.
 
 - `Checkpoint.interrupt_answers`: an ordered tuple of the human answers already
   delivered to a node's successive `interrupt` calls. A node that interrupts
