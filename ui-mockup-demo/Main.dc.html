@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Plans and launch</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E1013;font-family:'Inter',system-ui,sans-serif}
+:root{--bg:#0E1013;--panel:#161A1F;--panel2:#1B2027;--line:#262C35;--text:#E6E9ED;--muted:#9AA3AF;--accent:#7DB0FF;--ok:#63D6AA;--warn:#F2C94C;--bad:#FF9A62;--mono:'JetBrains Mono',ui-monospace,monospace}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0FF;outline-offset:2px}
+</style>
+</helmet>
+<div style="background:var(--bg);color:var(--text);min-height:1500px;display:flex;flex-direction:column">
+
+  <header style="display:flex;flex-wrap:wrap;align-items:center;gap:16px 28px;padding:14px 28px;border-bottom:1px solid var(--line);background:var(--panel)">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7DB0FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 12h4l5-5M11.5 12l5 5"/></svg>
+      agentflow
+    </div>
+    <nav style="display:flex;gap:6px;flex-wrap:wrap" aria-label="Sections">
+      <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">Plans</a>
+      <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">New plan</a>
+      <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Runs</a>
+      <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Inventory</a>
+    </nav>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
+      <span style="display:flex;align-items:center;gap:7px"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>live</span>
+      <span>inventory a72f19c</span>
+    </div>
+  </header>
+
+  <div style="display:flex;flex-wrap:wrap;flex:1;align-items:stretch">
+
+    <aside style="flex:1 1 300px;max-width:340px;min-width:260px;border-right:1px solid var(--line);padding:22px 20px;display:flex;flex-direction:column;gap:16px;box-sizing:border-box">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Plans</h2>
+        <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">{{planCount}}</span>
+      </div>
+      <label style="display:block">
+        <span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Search plans</span>
+        <input type="search" placeholder="Search by name" style="width:100%;box-sizing:border-box;height:44px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:14px">
+      </label>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <sc-for list="{{plans}}" as="p" hint-placeholder-count="3">
+          <button onClick="{{p.pick}}" aria-pressed="{{p.pressed}}" style="{{p.style}}">
+            <span style="display:flex;justify-content:space-between;gap:8px;align-items:baseline">
+              <span style="font-size:14px;font-weight:500;line-height:1.35">{{p.name}}</span>
+              <span style="font-family:var(--mono);font-size:11px;color:var(--muted);flex:none">v{{p.version}}</span>
+            </span>
+            <span style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap">
+              <span style="{{p.chip}}">{{p.statusLabel}}</span>
+              <span style="font-size:12px;color:var(--muted)">{{p.stepCount}} steps</span>
+            </span>
+          </button>
+        </sc-for>
+      </div>
+      <a href="Create.dc.html" style="margin-top:auto;display:flex;align-items:center;justify-content:center;height:44px;border-radius:10px;border:1px dashed var(--line);color:var(--muted);font-size:14px">+ New plan from a request</a>
+    </aside>
+
+    <main style="flex:999 1 620px;min-width:0;padding:28px 32px 48px;display:flex;flex-direction:column;gap:28px;box-sizing:border-box">
+
+      <section style="display:flex;flex-direction:column;gap:12px">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
+          <span style="font-family:var(--mono);font-size:12px;padding:3px 9px;border-radius:6px;background:var(--panel2);color:var(--accent)">plan v{{cur.version}}</span>
+          <span style="{{cur.chip}}">{{cur.statusLabel}}</span>
+        </div>
+        <h1 style="margin:0;font-size:28px;font-weight:600;letter-spacing:-.01em;line-height:1.2">{{cur.name}}</h1>
+        <p style="margin:0;font-size:15px;line-height:1.55;color:var(--muted);max-width:760px">{{cur.brief}}</p>
+      </section>
+
+      <!-- approval strip -->
+      <section style="{{cur.apprBox}}">
+        <div style="display:flex;flex-wrap:wrap;gap:12px 28px">
+          <div><div style="font-size:12px;color:var(--muted)">Approval</div><div style="font-size:14px;margin-top:4px">{{cur.apprText}}</div></div>
+          <div><div style="font-size:12px;color:var(--muted)">plan_hash</div><div style="font-family:var(--mono);font-size:13px;margin-top:4px">{{cur.hash}}</div></div>
+          <div><div style="font-size:12px;color:var(--muted)">inventory_digest</div><div style="font-family:var(--mono);font-size:13px;margin-top:4px">{{cur.digestText}}</div></div>
+          <div><div style="font-size:12px;color:var(--muted)">Approval mode</div><div style="font-family:var(--mono);font-size:13px;margin-top:4px">{{cur.mode}}</div></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-family:var(--mono);font-size:12px;color:var(--muted)">check_approval(plan, inventory) → {{cur.apprIssues.length}} issue(s)</div>
+          <sc-if value="{{cur.apprOk}}" hint-placeholder-val="{{ false }}"><div style="font-size:14px;line-height:1.55">Empty list: plan_hash and inventory_digest both match the approval.</div></sc-if>
+          <sc-for list="{{cur.apprIssues}}" as="i" hint-placeholder-count="1">
+            <div style="display:flex;flex-wrap:wrap;gap:8px 12px;align-items:baseline;padding:10px 12px;border-radius:10px;background:#0E1013">
+              <span style="font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:#3D2418;color:#FF9A62">{{i.code}}</span>
+              <span style="font-size:14px;line-height:1.5;flex:1 1 280px">{{i.message}}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="font-size:13.5px;line-height:1.55;color:var(--muted)">{{cur.apprNote}}</div>
+        <sc-if value="{{cur.needsApproval}}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+            <button onClick="{{approve}}" style="display:inline-flex;align-items:center;height:44px;padding:0 20px;border-radius:10px;border:0;background:#F2C94C;color:#1A1500;font-weight:600;font-size:14px;cursor:pointer">Approve this plan</button>
+            <span style="font-size:12.5px;color:var(--muted)">records a human approval bound to plan_hash and inventory_digest</span>
+          </div>
+        </sc-if>
+        <sc-if value="{{approveError}}" hint-placeholder-val="{{ false }}">
+          <div style="border:1px solid #7A3E22;border-radius:10px;padding:10px 12px;background:#2E1B12;font-size:13.5px;color:#FFC9A8;line-height:1.5">Approval refused: {{approveError}}</div>
+        </sc-if>
+      </section>
+
+      <section style="display:flex;flex-direction:column;gap:14px">
+        <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Step graph · where each step runs and with what rights</h2>
+        <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
+          <sc-for list="{{cols}}" as="c" hint-placeholder-count="3">
+            <div style="flex:1 1 230px;min-width:0;display:flex;flex-direction:column;gap:10px">
+              <div style="font-size:12px;color:var(--muted);display:flex;justify-content:space-between;padding:0 2px">
+                <span>Wave {{c.n}}</span><span>{{c.note}}</span>
+              </div>
+              <sc-for list="{{c.steps}}" as="s" hint-placeholder-count="2">
+                <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px">
+                  <div style="font-family:var(--mono);font-size:13px;font-weight:500">{{s.id}}</div>
+                  <div style="font-size:12px;color:var(--muted)">agent · <span style="color:var(--text)">{{s.agent}}</span></div>
+                  <div style="font-size:12px;color:var(--muted)">runs on · <span style="color:var(--text);font-family:var(--mono)">{{s.backend}}</span> <span style="font-size:11px">(inventory)</span></div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+                    <span style="{{s.permStyle}}">{{s.permission}}</span>
+                    <sc-for list="{{s.tools}}" as="t" hint-placeholder-count="1"><span style="font-family:var(--mono);font-size:11px;padding:3px 7px;border-radius:6px;background:var(--panel2)">{{t}}</span></sc-for>
+                  </div>
+                  <div style="font-size:12px;color:var(--muted)">{{s.deps}}</div>
+                  <div style="display:flex;gap:6px;flex-wrap:wrap">
+                    <span style="font-size:11px;padding:3px 8px;border-radius:999px;background:var(--panel2);color:var(--muted)">{{s.checks}} checks</span>
+                    <sc-if value="{{s.mayAsk}}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;padding:3px 8px;border-radius:999px;background:#1F2A3D;color:#A9C9FF">{{s.mayAskLabel}}</span></sc-if>
+                    <sc-if value="{{s.effects}}" hint-placeholder-val="{{ false }}"><span style="font-size:11px;padding:3px 8px;border-radius:999px;background:#3A2F14;color:#F2C94C">side effects</span></sc-if>
+                    <sc-for list="{{s.unsup}}" as="u" hint-placeholder-count="1"><span style="font-size:11px;padding:3px 8px;border-radius:999px;background:#3D2418;color:#FF9A62">not executable yet: {{u}}</span></sc-for>
+                  </div>
+                </div>
+              </sc-for>
+            </div>
+          </sc-for>
+        </div>
+      </section>
+
+      <div style="display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start">
+
+        <section style="flex:1 1 320px;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:14px;box-sizing:border-box">
+          <h2 style="margin:0;font-size:16px;font-weight:600">Preflight</h2>
+          <div style="font-size:13px;color:var(--muted)">1 · Is the plan valid?</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.6">validate_plan(plan, inventory) → {{issueSummary}}</div>
+          <sc-if value="{{noIssues}}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:12px;align-items:center;font-size:14px"><span style="flex:none;width:22px;height:22px;border-radius:50%;background:#16382D;color:#63D6AA;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">✓</span>No issues. The plan can be assembled.</div></sc-if>
+          <sc-for list="{{pre}}" as="r" hint-placeholder-count="2">
+            <div style="border:1px solid var(--line);border-radius:10px;padding:12px 14px;background:var(--panel2);display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                <span style="{{r.sev}}">{{r.severity}}</span>
+                <span style="font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:var(--bg)">{{r.code}}</span>
+                <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">step: {{r.step}}</span>
+              </div>
+              <div style="font-size:14px;line-height:1.5">{{r.message}}</div>
+            </div>
+          </sc-for>
+          <div style="font-size:13px;color:var(--muted);padding-top:8px;border-top:1px solid var(--line)">2 · Can this executor run it today?</div>
+          <div style="font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.6">unsupported_features(plan) → {{unsupSummary}}</div>
+          <sc-if value="{{noUnsup}}" hint-placeholder-val="{{ false }}"><div style="display:flex;gap:12px;align-items:center;font-size:14px"><span style="flex:none;width:22px;height:22px;border-radius:50%;background:#16382D;color:#63D6AA;display:inline-flex;align-items:center;justify-content:center;font-size:12px;font-weight:600">✓</span>Nothing the executor refuses.</div></sc-if>
+          <sc-for list="{{unsup}}" as="r" hint-placeholder-count="1">
+            <div style="border:1px solid #7A3E22;border-radius:10px;padding:12px 14px;background:#2E1B12;display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                <span style="{{r.sev}}">{{r.severity}}</span>
+                <span style="font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:var(--bg)">{{r.code}}</span>
+                <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">step: {{r.step}} · input: {{r.input}}</span>
+              </div>
+              <div style="font-size:14px;line-height:1.5">{{r.message}}</div>
+            </div>
+          </sc-for>
+        </section>
+
+        <section style="flex:1.4 1 400px;min-width:0;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:20px;box-sizing:border-box">
+          <h2 style="margin:0;font-size:16px;font-weight:600">Launch</h2>
+
+          <div style="display:flex;flex-direction:column;gap:12px">
+            <div style="font-size:13px;color:var(--muted)">Parameters <span style="font-family:var(--mono)">$input.*</span></div>
+            <sc-for list="{{inputs}}" as="i" hint-placeholder-count="2">
+              <label style="display:flex;flex-direction:column;gap:6px">
+                <span style="font-size:14px">{{i.label}} <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">{{i.key}}</span></span>
+                <input type="text" value="{{i.value}}" onChange="{{i.change}}" style="height:44px;box-sizing:border-box;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-family:var(--mono);font-size:13px">
+                <span style="font-size:12px;color:var(--muted)">{{i.hint}}</span>
+              </label>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:8px">
+            <div style="font-size:13px;color:var(--muted)">Rights for this run</div>
+            <div style="display:flex;flex-wrap:wrap;gap:8px">
+              <sc-for list="{{narrow}}" as="q" hint-placeholder-count="2">
+                <button onClick="{{q.pick}}" aria-pressed="{{q.pressed}}" style="{{q.style}}">{{q.label}}</button>
+              </sc-for>
+            </div>
+            <div style="font-size:13px;color:var(--muted);line-height:1.5">{{narrowHint}}</div>
+          </div>
+
+          <div style="display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:10px;background:var(--panel2);font-size:13px;line-height:1.55;color:var(--muted)">
+            <div>Backends are not chosen here. Each step runs on the first backend listed for its agent in <span style="font-family:var(--mono);color:var(--text)">inventory.json</span>.</div>
+            <div>Rights come from the approved plan and can only be narrowed for a run, never widened.</div>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:16px;border-top:1px solid var(--line)">
+            <div style="flex:1 1 140px;padding-top:16px"><div style="font-size:12px;color:var(--muted)">Attempts per step</div><div style="font-size:15px;margin-top:4px">up to 3 (gate)</div></div>
+            <div style="flex:1 1 140px;padding-top:16px"><div style="font-size:12px;color:var(--muted)">Parallelism</div><div style="font-size:15px;margin-top:4px">up to {{cur.parallel}} tasks</div></div>
+            <div style="flex:1 1 140px;padding-top:16px"><div style="font-size:12px;color:var(--muted)">A failed step</div><div style="font-size:15px;margin-top:4px">blocks its descendants only</div></div>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+            <sc-if value="{{cur.canLaunch}}" hint-placeholder-val="{{ true }}">
+              <button onClick="{{launch}}" style="display:inline-flex;align-items:center;gap:10px;height:48px;padding:0 24px;border-radius:10px;border:0;background:#7DB0FF;color:#0B1220;font-weight:600;font-size:15px;cursor:pointer">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="#0B1220" aria-hidden="true"><path d="M7 4.5v15l12-7.5z"/></svg>
+                Launch plan
+              </button>
+            </sc-if>
+            <sc-if value="{{cur.cannotLaunch}}" hint-placeholder-val="{{ false }}">
+              <button disabled style="height:48px;padding:0 24px;border-radius:10px;border:1px solid var(--line);background:var(--panel2);color:#8A93A0;font-weight:600;font-size:15px;cursor:not-allowed">Launch plan</button>
+              <span style="font-size:13px;color:var(--bad);max-width:320px;line-height:1.5">{{cur.blockReason}}</span>
+            </sc-if>
+            <button onClick="{{toggleDry}}" aria-pressed="{{dry}}" style="height:48px;padding:0 20px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:14px;cursor:pointer">Dry run (validate only)</button>
+          </div>
+          <sc-if value="{{dry}}" hint-placeholder-val="{{ false }}">
+            <div style="border-radius:10px;padding:14px 16px;background:var(--panel2);font-size:14px;line-height:1.6;display:flex;flex-direction:column;gap:6px">
+              <div style="font-weight:600">{{dryTitle}}</div>
+              <div style="font-family:var(--mono);font-size:12.5px;color:var(--muted)">validate_plan(plan, inventory) → {{issueSummary}}</div>
+              <div style="font-family:var(--mono);font-size:12.5px;color:var(--muted)">unsupported_features(plan) → {{unsupSummary}}</div>
+              <div style="font-size:13px;color:var(--muted)">Nothing was executed. Both lists are in the Preflight panel.</div>
+            </div>
+          </sc-if>
+        </section>
+      </div>
+
+      <section style="display:flex;flex-direction:column;gap:12px">
+        <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Recent runs of this plan</h2>
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow-x:auto">
+          <table style="width:100%;min-width:560px;border-collapse:collapse;font-size:14px">
+            <thead>
+              <tr style="text-align:left;color:var(--muted);font-size:12px"><th style="padding:14px 18px;font-weight:500">Run</th><th style="padding:14px 18px;font-weight:500">Outcome</th><th style="padding:14px 18px;font-weight:500">Steps done</th><th style="padding:14px 18px;font-weight:500">Blocked</th><th style="padding:14px 18px;font-weight:500">When</th></tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{runs}}" as="r" hint-placeholder-count="3">
+                <tr style="border-top:1px solid var(--line)">
+                  <td style="padding:14px 18px;font-family:var(--mono);font-size:13px"><a href="{{r.href}}" style="color:var(--accent)">{{r.id}}</a></td>
+                  <td style="padding:14px 18px"><span style="{{r.badge}}">{{r.status}}</span></td>
+                  <td style="padding:14px 18px;font-family:var(--mono);font-size:13px">{{r.steps}}</td>
+                  <td style="padding:14px 18px;font-family:var(--mono);font-size:13px;color:var(--muted)">{{r.blocked}}</td>
+                  <td style="padding:14px 18px;color:var(--muted)">{{r.when}}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+    </main>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1500}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      plans: [], sel: '', records: {}, issues: {}, runs: [],
+      narrow: 'asis', vals: {}, dry: false, loaded: false, error: '', approveError: ''
+    };
+  }
+  async componentDidMount() {
+    try {
+      const [plans, runs] = await Promise.all([AF.get('/plans'), AF.get('/runs').catch(() => [])]);
+      const sel = plans && plans.length ? plans[0].id : '';
+      this.setState({ plans: plans || [], runs: runs || [], sel, loaded: true });
+      if (sel) this.loadPlan(sel);
+    } catch (e) {
+      this.setState({ error: String(e.message || e), loaded: true });
+    }
+  }
+  async loadPlan(id) {
+    try {
+      const [rec, issues] = await Promise.all([AF.get('/plans/' + id), AF.get('/plans/' + id + '/issues').catch(() => [])]);
+      this.setState({
+        records: { ...this.state.records, [id]: rec },
+        issues: { ...this.state.issues, [id]: issues || [] }
+      });
+    } catch (e) {
+      this.setState({ error: String(e.message || e) });
+    }
+  }
+  select(id) { this.setState({ sel: id, approveError: '' }); if (!this.state.records[id]) this.loadPlan(id); }
+  async approve() {
+    const id = this.state.sel;
+    if (!id) return;
+    try {
+      const rec = await AF.post('/plans/' + id + '/approve', { by: 'local-user' });
+      this.setState({ records: { ...this.state.records, [id]: rec }, approveError: '' });
+      this.loadPlan(id);
+    } catch (e) {
+      const detail = e.detail;
+      const msg = Array.isArray(detail) ? detail.map((i) => (i.code || '') + ': ' + (i.message || '')).join('; ') : (typeof detail === 'string' ? detail : String(e.message || e));
+      this.setState({ approveError: msg });
+    }
+  }
+  async launch() {
+    const id = this.state.sel;
+    if (!id) return;
+    const prefix = id + '.';
+    const params = {};
+    Object.keys(this.state.vals).forEach((k) => { if (k.indexOf(prefix) === 0) params[k.slice(prefix.length)] = this.state.vals[k]; });
+    try {
+      const run = await AF.post('/plans/' + id + '/runs', { params });
+      window.location.href = 'Run.dc.html?run=' + encodeURIComponent(run.id);
+    } catch (e) {
+      const detail = e.detail;
+      const msg = Array.isArray(detail) ? detail.map((i) => (i.code || '') + ': ' + (i.message || '')).join('; ') : (typeof detail === 'string' ? detail : String(e.message || e));
+      this.setState({ approveError: msg });
+    }
+  }
+  _planName(rec) {
+    const p = rec && rec.plan;
+    return (p && (p.name || p.title)) || (rec && rec.id ? rec.id.replace(/^plan-/, 'plan ') : '');
+  }
+  _steps(rec) { return (rec && rec.plan && rec.plan.graph && rec.plan.graph.steps) || []; }
+  _waves(rec) {
+    // Group steps into dependency waves: wave 0 = no deps, then by longest dep chain.
+    const steps = this._steps(rec);
+    const byId = {}; steps.forEach((s) => { byId[s.id] = s; });
+    const depth = {};
+    const of = (id, seen) => {
+      if (depth[id] !== undefined) return depth[id];
+      seen = seen || {};
+      if (seen[id]) return 0;
+      seen[id] = true;
+      const deps = (byId[id] && byId[id].depends_on) || [];
+      const d = deps.length ? 1 + Math.max.apply(null, deps.map((x) => of(x, seen))) : 0;
+      depth[id] = d; return d;
+    };
+    const waves = [];
+    steps.forEach((s) => { const d = of(s.id); (waves[d] = waves[d] || []).push(s); });
+    return waves.filter(Boolean);
+  }
+  renderVals() {
+    const S = this.state;
+    const chipBase = 'font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;';
+    const ST = {
+      approved: ['approved', 'background:#16382D;color:#63D6AA;'],
+      not_approved: ['not_approved', 'background:#3A2F14;color:#F2C94C;']
+    };
+    const statusOf = (rec) => {
+      const ap = rec && rec.plan && rec.plan.approval;
+      return (ap && ap.status === 'approved') ? 'approved' : 'not_approved';
+    };
+    const plans = S.plans.map((pr) => {
+      const rec = S.records[pr.id] || pr;
+      const st = statusOf(rec), on = pr.id === S.sel;
+      return {
+        name: this._planName(rec), version: (rec.plan && (rec.plan.plan_version || rec.plan.version)) || 1,
+        statusLabel: ST[st][0], chip: chipBase + ST[st][1], stepCount: this._steps(rec).length, pressed: on,
+        style: 'text-align:left;cursor:pointer;padding:14px;border-radius:12px;color:#E6E9ED;font-size:14px;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1B2027' : '#161A1F') + ';',
+        pick: () => this.select(pr.id)
+      };
+    });
+
+    const rec = S.records[S.sel] || null;
+    const plan = (rec && rec.plan) || null;
+    const permCol = { read_only: 'background:#1B2027;color:#9AA3AF;', allowlist: 'background:#1F2A3D;color:#A9C9FF;', full: 'background:#3D2418;color:#FF9A62;' };
+    const waves = this._waves(rec);
+    const cols = waves.map((w, i) => ({
+      n: i + 1, note: w.length > 1 ? ('parallel ×' + w.length) : 'sequential',
+      steps: w.map((s) => {
+        const perm = s.permission || 'read_only';
+        const deps = (s.depends_on && s.depends_on.length) ? ('← ' + s.depends_on.join(', ')) : 'start';
+        return {
+          id: s.id, agent: s.agent || '', backend: (s.backend || '(from inventory)'),
+          permission: perm, tools: s.tools || [], deps, checks: (s.checks || []).length,
+          unsup: [], effects: false, mayAsk: !!(s.may_ask || s.ask), mayAskLabel: 'may ask',
+          permStyle: 'font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;' + (permCol[perm] || permCol.read_only)
+        };
+      })
+    }));
+
+    const issues = S.issues[S.sel] || [];
+    const errs = issues.filter((i) => (i.severity || 'error') === 'error');
+    const warns = issues.filter((i) => (i.severity || '') === 'warning');
+    const unsupList = issues.filter((i) => /unsupported|reserved|not executable|budget/i.test((i.code || '') + ' ' + (i.message || '')));
+    const validationIssues = issues.filter((i) => unsupList.indexOf(i) === -1);
+    const sev = (s) => 'font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;' + ((s === 'error') ? 'background:#3D2418;color:#FF9A62;' : 'background:#3A2F14;color:#F2C94C;');
+    const pre = validationIssues.map((i) => ({ severity: i.severity || 'error', code: i.code || '', step: i.step || 'null', message: i.message || '', sev: sev(i.severity || 'error') }));
+    const unsup = unsupList.map((i) => ({ severity: i.severity || 'error', code: i.code || '', step: i.step || 'null', input: i.input == null ? 'null' : String(i.input), message: i.message || '', sev: sev('error') }));
+    const unsupSummary = unsup.length + ' issue(s)';
+    const issueSummary = issues.length + ' issue(s) (' + errs.length + ' errors, ' + warns.length + ' warnings)';
+
+    const pill = (on) => 'cursor:pointer;height:44px;padding:0 18px;border-radius:10px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#0E1013') + ';';
+    const narrow = [['asis', 'As approved'], ['ro', 'Cap everything at read_only']].map(([id, label]) => ({ label, pressed: S.narrow === id, style: pill(S.narrow === id), pick: () => this.setState({ narrow: id }) }));
+    const narrowHint = S.narrow === 'asis' ? 'Every step gets exactly the rights written in the approved plan.' : 'Steps that need to write will fail their checks and block their descendants. Use it for a safe trial run.';
+
+    const params = (plan && plan.parameters) || {};
+    const inputs = Object.keys(params).map((key) => {
+      const k = S.sel + '.' + key;
+      return { key: '$input.' + key, label: key, hint: 'type: ' + (typeof params[key] === 'string' ? params[key] : JSON.stringify(params[key])),
+        value: S.vals[k] !== undefined ? S.vals[k] : '', change: (e) => this.setState({ vals: { ...S.vals, [k]: e.target.value } }) };
+    });
+
+    const rsMap = {
+      completed: ['completed', 'background:#16382D;color:#63D6AA;'], partial: ['partial', 'background:#3A2F14;color:#F2C94C;'],
+      failed: ['failed', 'background:#3D2418;color:#FF9A62;'], running: ['running', 'background:#1F2A3D;color:#A9C9FF;'],
+      waiting: ['waiting', 'background:#3A2F14;color:#F2C94C;'], held: ['held', 'background:#3D2418;color:#FF9A62;'],
+      error: ['error', 'background:#3D2418;color:#FF9A62;'], refused: ['refused', 'background:#3D2418;color:#FF9A62;'], interrupted: ['interrupted', 'background:#3D2418;color:#FF9A62;']
+    };
+    const runs = S.runs.filter((r) => r.plan_id === S.sel).map((r) => {
+      const o = r.outcome || {}; const stepIds = Object.keys(o.steps || {});
+      const done = stepIds.filter((k) => o.steps[k].status === 'ok').length;
+      const rr = rsMap[r.status] || [r.status, 'background:#1B2027;color:#9AA3AF;'];
+      return { id: r.id, href: 'Run.dc.html?run=' + encodeURIComponent(r.id), status: rr[0],
+        badge: 'font-size:12px;padding:3px 10px;border-radius:999px;font-weight:500;' + rr[1],
+        steps: stepIds.length ? (done + ' / ' + stepIds.length) : '–', blocked: String((o.failed || []).length + (o.blocked || []).length), when: '' };
+    });
+
+    const ap = (plan && plan.approval) || null;
+    const ok = !!(ap && ap.status === 'approved');
+    const hasErrors = errs.length > 0;
+    const prov = (plan && plan.provenance) || {};
+    const boxCol = ok ? '#16382D;border:1px solid #1F5A45' : '#2A2410;border:1px solid #6B5A1E';
+    const name = this._planName(rec);
+    const st = rec ? statusOf(rec) : 'not_approved';
+
+    return {
+      plans, planCount: plans.length, cols, pre, inputs, narrow, narrowHint, runs, issueSummary,
+      noIssues: validationIssues.length === 0, unsup, unsupSummary, noUnsup: unsup.length === 0,
+      error: S.error, approveError: S.approveError,
+      approve: () => this.approve(), launch: () => this.launch(),
+      dry: S.dry, toggleDry: () => this.setState({ dry: !S.dry }),
+      dryTitle: hasErrors ? 'Dry run: the plan would be refused' : (ok ? 'Dry run: nothing in the way, the plan can be launched' : 'Dry run: the plan itself is fine but its approval is not valid'),
+      cur: {
+        name, version: (plan && (plan.plan_version || plan.version)) || 1,
+        brief: (plan && (plan.goal || (plan.brief && plan.brief.goal))) || 'Review the effective rights per step below, then approve and launch.',
+        hash: (ap && ap.plan_hash) || (prov && prov.plan_hash) || '—',
+        mode: (ap && ap.mode) || 'manual', parallel: Math.max.apply(null, [1].concat(cols.map((c) => c.steps.length))),
+        statusLabel: ST[st][0], chip: chipBase + ST[st][1],
+        apprText: ok ? ('Approved by ' + (ap.by || 'you') + (ap.at ? (', ' + ap.at) : '')) : 'Not approved yet',
+        digestText: (prov && prov.inventory_digest) || '—',
+        apprNote: ok ? 'Approval is recorded. It is re-checked against plan_hash and inventory_digest when you launch.' : 'A manual plan is not approved silently. Approve it to record a human approval bound to this plan_hash.',
+        apprIssues: [], apprOk: ok,
+        apprBox: 'border-radius:14px;padding:18px 22px;display:flex;flex-direction:column;gap:14px;background:' + boxCol + ';',
+        needsApproval: !ok, canLaunch: ok && !hasErrors, cannotLaunch: !(ok && !hasErrors),
+        blockReason: !ok ? 'The plan is not approved. Approve it first.' : (hasErrors ? (errs.length + ' validation error(s). See Preflight.') : '')
+      }
+    };
+  }
+}
+</script>
+</body>
+</html>

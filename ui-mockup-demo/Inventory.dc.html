@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Inventory</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E1013;font-family:'Inter',system-ui,sans-serif}
+:root{--bg:#0E1013;--panel:#161A1F;--panel2:#1B2027;--line:#262C35;--text:#E6E9ED;--muted:#9AA3AF;--accent:#7DB0FF;--ok:#63D6AA;--warn:#F2C94C;--bad:#FF9A62;--mono:'JetBrains Mono',ui-monospace,monospace}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0FF;outline-offset:2px}
+</style>
+</helmet>
+<div style="background:var(--bg);color:var(--text);min-height:1700px;display:flex;flex-direction:column">
+
+  <header style="display:flex;flex-wrap:wrap;align-items:center;gap:16px 28px;padding:14px 28px;border-bottom:1px solid var(--line);background:var(--panel)">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7DB0FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 12h4l5-5M11.5 12l5 5"/></svg>
+      agentflow
+    </div>
+    <nav style="display:flex;gap:6px;flex-wrap:wrap" aria-label="Sections">
+      <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Plans</a>
+      <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">New plan</a>
+      <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Runs</a>
+      <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">Inventory</a>
+    </nav>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
+      <span style="display:flex;align-items:center;gap:7px"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>live</span>
+    </div>
+  </header>
+
+  <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:24px;box-sizing:border-box">
+    <section style="display:flex;flex-wrap:wrap;gap:12px 24px;justify-content:space-between;align-items:flex-end">
+      <div style="display:flex;flex-direction:column;gap:8px;max-width:760px">
+        <h1 style="margin:0;font-size:28px;font-weight:600;letter-spacing:-.01em">Inventory</h1>
+        <p style="margin:0;font-size:15px;line-height:1.55;color:var(--muted)">Which agents exist, which backend runs each one, and which rights they may be given. A plan names agents; the backend always comes from here. Read-only by default; agents are never created automatically.</p>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+        <div style="text-align:right"><div style="font-size:12px;color:var(--muted)">inventory</div><div style="font-family:var(--mono);font-size:14px;margin-top:2px">{{digest}}</div></div>
+        <button onClick="{{toggleEdit}}" aria-pressed="{{editing}}" style="height:44px;padding:0 18px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:14px;cursor:pointer">{{editLabel}}</button>
+      </div>
+    </section>
+
+    <sc-if value="{{error}}" hint-placeholder-val="{{ false }}">
+      <div style="background:#2E1B12;border:1px solid #7A3E22;border-radius:12px;padding:14px 18px;font-size:14px;line-height:1.55;color:#FFC9A8">Could not load the inventory: {{error}}</div>
+    </sc-if>
+
+    <section style="display:flex;flex-wrap:wrap;gap:8px" aria-label="Kind">
+      <sc-for list="{{tabs}}" as="t" hint-placeholder-count="4">
+        <button onClick="{{t.pick}}" aria-pressed="{{t.pressed}}" style="{{t.style}}">{{t.label}} <span style="{{t.tagStyle}}">{{t.tag}}</span></button>
+      </sc-for>
+    </section>
+
+    <!-- agents -->
+    <sc-if value="{{showAgents}}" hint-placeholder-val="{{ true }}">
+      <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow-x:auto">
+        <table style="width:100%;min-width:900px;border-collapse:collapse;font-size:14px">
+          <thead>
+            <tr style="text-align:left;color:var(--muted);font-size:12px">
+              <th style="padding:14px 18px;font-weight:500">Agent</th><th style="padding:14px 18px;font-weight:500">Backends, first one is used</th><th style="padding:14px 18px;font-weight:500">Allowed permissions</th><th style="padding:14px 18px;font-weight:500">Description</th><th style="padding:14px 18px;font-weight:500">Used by</th>
+            </tr>
+          </thead>
+          <tbody>
+            <sc-for list="{{agents}}" as="a" hint-placeholder-count="8">
+              <tr style="border-top:1px solid var(--line);vertical-align:top;background:{{a.rowBg}}">
+                <td style="padding:14px 18px;font-family:var(--mono);font-size:13px;white-space:nowrap">{{a.name}}<sc-if value="{{a.changed}}" hint-placeholder-val="{{ false }}"><div style="font-family:'Inter',sans-serif;font-size:11px;color:#F2C94C;margin-top:4px">edited, not saved</div></sc-if></td>
+                <td style="padding:14px 18px"><div style="display:flex;flex-wrap:wrap;gap:6px">
+                  <sc-for list="{{a.backends}}" as="b" hint-placeholder-count="1"><span style="{{b.style}}">{{b.label}}</span></sc-for>
+                </div></td>
+                <td style="padding:14px 18px"><div style="display:flex;flex-wrap:wrap;gap:6px">
+                  <sc-for list="{{a.perms}}" as="p" hint-placeholder-count="2"><span style="{{p.style}}">{{p.label}}</span></sc-for>
+                </div></td>
+                <td style="padding:14px 18px;line-height:1.5;color:#C9D1DB;max-width:320px">{{a.desc}}</td>
+                <td style="padding:14px 18px;color:var(--muted);white-space:nowrap">{{a.used}}</td>
+              </tr>
+            </sc-for>
+          </tbody>
+        </table>
+      </section>
+    </sc-if>
+
+    <!-- backends -->
+    <sc-if value="{{showBackends}}" hint-placeholder-val="{{ false }}">
+      <section style="display:flex;flex-direction:column;gap:12px">
+        <div style="font-size:14px;line-height:1.55;color:var(--muted);max-width:760px">The backend catalog is fixed in code (capabilities.py). The validator checks every step against it and rejects a plan instead of silently adjusting rights.</div>
+        <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow-x:auto">
+          <table style="width:100%;min-width:900px;border-collapse:collapse;font-size:14px">
+            <thead>
+              <tr style="text-align:left;color:var(--muted);font-size:12px"><th style="padding:14px 18px;font-weight:500">Backend</th><th style="padding:14px 18px;font-weight:500">Rights enforced</th><th style="padding:14px 18px;font-weight:500">allowlist</th><th style="padding:14px 18px;font-weight:500">Agent by name</th><th style="padding:14px 18px;font-weight:500">MCP / skills</th><th style="padding:14px 18px;font-weight:500">Tool results</th><th style="padding:14px 18px;font-weight:500">Token usage</th></tr>
+            </thead>
+            <tbody>
+              <sc-for list="{{catalog}}" as="c" hint-placeholder-count="4">
+                <tr style="border-top:1px solid var(--line);vertical-align:top">
+                  <td style="padding:14px 18px;font-family:var(--mono);font-size:13px">{{c.name}}</td>
+                  <td style="padding:14px 18px;line-height:1.5;max-width:220px">{{c.how}}</td>
+                  <td style="padding:14px 18px">{{c.allow}}</td>
+                  <td style="padding:14px 18px">{{c.byname}}</td>
+                  <td style="padding:14px 18px">no / no</td>
+                  <td style="padding:14px 18px">{{c.tr}}</td>
+                  <td style="padding:14px 18px">{{c.usage}}</td>
+                </tr>
+              </sc-for>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </sc-if>
+
+    <!-- reserved -->
+    <sc-if value="{{showReserved}}" hint-placeholder-val="{{ false }}">
+      <section style="background:var(--panel);border:1px dashed #4A5360;border-radius:14px;padding:26px;display:flex;flex-direction:column;gap:14px;max-width:760px">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+          <span style="font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:#2A2F36;color:#C9D1DB">Reserved in v1</span>
+          <h2 style="margin:0;font-size:18px;font-weight:600">{{reserved.title}}</h2>
+        </div>
+        <div style="font-size:15px;line-height:1.6">{{reserved.text}}</div>
+        <div style="padding:12px 14px;border-radius:10px;background:var(--bg);font-family:var(--mono);font-size:12.5px;line-height:1.7;color:#C9D1DB">{{reserved.example}}</div>
+        <div style="font-size:13.5px;line-height:1.55;color:var(--muted)">{{reserved.why}} Nothing is listed here because nothing can be used.</div>
+      </section>
+    </sc-if>
+
+    <!-- edit panel: read-only in v1, there is no inventory-write endpoint -->
+    <sc-if value="{{editing}}" hint-placeholder-val="{{ false }}">
+      <section style="background:var(--panel);border:1px solid #3A4B66;border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between">
+          <h2 style="margin:0;font-size:18px;font-weight:600">Edit inventory</h2>
+          <span style="font-size:12.5px;color:var(--muted)">Read-only in v1 · the server exposes GET /inventory only</span>
+        </div>
+        <div style="font-size:13.5px;line-height:1.55;padding:12px 14px;border-radius:10px;background:var(--panel2);color:#C9D1DB">There is no inventory-write endpoint in this server yet. Edit the inventory file the server was started with, then restart. Any such change alters inventory_digest and revokes approvals.</div>
+
+        <div style="background:#2A2410;border:1px solid #6B5A1E;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:15px;font-weight:600;color:#F2C94C">This change will revoke 1 approved plan</div>
+          <div style="font-size:14px;line-height:1.6;color:#E6D9A8">inventory_digest a72f19c → new value. Java version audit v3 stops being approved and must be reviewed again. Dependency update v2 is already stale. Runs of revoked plans are held, finished steps keep their results.</div>
+        </div>
+      </section>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1700}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'agents', editing: false, inv: null, error: '' };
+  }
+  async componentDidMount() {
+    try {
+      const inv = await AF.get('/inventory');
+      this.setState({ inv });
+    } catch (e) {
+      this.setState({ error: String(e.message || e) });
+    }
+  }
+  _agents() {
+    const inv = this.state.inv;
+    if (!inv || !inv.agents) return [];
+    return Object.keys(inv.agents).map((name) => {
+      const a = inv.agents[name] || {};
+      const backends = (a.backends || []).map((b) => (typeof b === 'string' ? b : b.backend));
+      return { name, desc: a.description || '', perms: a.permissions || [], backends };
+    });
+  }
+  renderVals() {
+    const S = this.state;
+    const permCol = { read_only: 'background:#1B2027;color:#C9D1DB;', allowlist: 'background:#1F2A3D;color:#A9C9FF;', full: 'background:#3D2418;color:#FF9A62;' };
+    const pillBase = 'font-family:\'JetBrains Mono\',monospace;font-size:11.5px;padding:3px 9px;border-radius:6px;';
+    const rawAgents = this._agents();
+    const tabsDef = [['agents', 'Agents', ''], ['backends', 'Backends', 'catalog'], ['skills', 'Skills', 'reserved'], ['mcp', 'MCP servers', 'reserved']];
+    const tabs = tabsDef.map(([id, label, tag]) => {
+      const on = S.tab === id;
+      return { label, tag, pressed: on,
+        tagStyle: 'font-size:11px;' + (tag ? 'padding:2px 8px;border-radius:999px;background:#2A2F36;color:#C9D1DB;' : 'font-family:\'JetBrains Mono\',monospace;color:#9AA3AF;'),
+        style: 'cursor:pointer;height:40px;padding:0 16px;border-radius:999px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#161A1F') + ';',
+        pick: () => this.setState({ tab: id }) };
+    });
+    tabs[0].tag = String(rawAgents.length);
+    const agents = rawAgents.map((a) => ({
+      name: a.name, desc: a.desc, used: '', changed: false, rowBg: 'transparent',
+      backends: a.backends.map((b, i) => ({ label: b + (i === 0 ? ' · used' : ''), style: pillBase + (i === 0 ? 'background:#1F2A3D;color:#A9C9FF;' : 'background:#1B2027;color:#9AA3AF;') })),
+      perms: a.perms.map((p) => ({ label: p, style: pillBase + (permCol[p] || 'background:#1B2027;color:#C9D1DB;') }))
+    }));
+    const catalog = [
+      { name: 'kiro', how: 'runtime, on every request', allow: 'yes', byname: 'yes', tr: 'yes', usage: 'no' },
+      { name: 'claude_code', how: 'launch flags', allow: 'yes', byname: 'yes', tr: 'no', usage: 'no' },
+      { name: 'codex', how: 'sandbox only', allow: 'no, plan is rejected', byname: 'no', tr: 'partial', usage: 'yes' },
+      { name: 'ollama', how: 'by construction', allow: 'yes', byname: 'no', tr: 'no', usage: 'yes' },
+      { name: 'openai', how: 'by construction', allow: 'yes', byname: 'no', tr: 'no', usage: 'no' },
+      { name: 'anthropic', how: 'by construction', allow: 'yes', byname: 'no', tr: 'no', usage: 'no' }
+    ];
+    const reservedMap = {
+      skills: { title: 'Skills', text: 'Backends do not receive skills from the SDK in v1, so a plan cannot use them. The validator rejects a non-empty skills field with reserved_field: the SDK cannot pass it to a backend yet.', example: 'step.skills = ["x"]  →  Issue{code: "reserved_field", step: …}', why: 'Reserved so the plan format stays stable when support arrives.' },
+      mcp: { title: 'MCP servers', text: 'Backends do not pass MCP servers to agents in v1, so a plan cannot use them. The validator rejects a non-empty mcp field with reserved_field: the SDK cannot pass it to a backend yet.', example: 'step.mcp = ["x"]  →  Issue{code: "reserved_field", step: …}', why: 'Reserved so the plan format stays stable when support arrives.' }
+    };
+    return {
+      tabs, agents, catalog, error: S.error,
+      digest: this.state.inv ? Object.keys((this.state.inv.agents) || {}).length + ' agents' : '—',
+      showAgents: S.tab === 'agents', showBackends: S.tab === 'backends', showReserved: S.tab === 'skills' || S.tab === 'mcp',
+      reserved: reservedMap[S.tab] || reservedMap.skills,
+      editing: S.editing, editLabel: S.editing ? 'Close editor' : 'Edit inventory',
+      toggleEdit: () => this.setState({ editing: !S.editing })
+    };
+  }
+}
+</script>
+</body>
+</html>

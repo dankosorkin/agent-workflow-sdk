@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>All runs</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E1013;font-family:'Inter',system-ui,sans-serif}
+:root{--bg:#0E1013;--panel:#161A1F;--panel2:#1B2027;--line:#262C35;--text:#E6E9ED;--muted:#9AA3AF;--accent:#7DB0FF;--ok:#63D6AA;--warn:#F2C94C;--bad:#FF9A62;--mono:'JetBrains Mono',ui-monospace,monospace}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0FF;outline-offset:2px}
+</style>
+</helmet>
+<div style="background:var(--bg);color:var(--text);min-height:1100px;display:flex;flex-direction:column">
+
+  <header style="display:flex;flex-wrap:wrap;align-items:center;gap:16px 28px;padding:14px 28px;border-bottom:1px solid var(--line);background:var(--panel)">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7DB0FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 12h4l5-5M11.5 12l5 5"/></svg>
+      agentflow
+    </div>
+    <nav style="display:flex;gap:6px;flex-wrap:wrap" aria-label="Sections">
+      <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Plans</a>
+      <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">New plan</a>
+      <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">Runs</a>
+      <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Inventory</a>
+    </nav>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
+      <span style="display:flex;align-items:center;gap:7px"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>live</span>
+    </div>
+  </header>
+
+  <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:24px;box-sizing:border-box">
+    <section style="display:flex;flex-wrap:wrap;gap:12px;justify-content:space-between;align-items:center">
+      <h1 style="margin:0;font-size:28px;font-weight:600;letter-spacing:-.01em">Runs</h1>
+      <div style="font-size:13px;color:var(--muted)">A held, waiting or crashed run can be resumed; the approval is re-checked first.</div>
+    </section>
+
+    <section style="display:flex;flex-wrap:wrap;gap:16px">
+      <div style="flex:2 1 420px;background:#2A2410;border:1px solid #6B5A1E;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px">
+        <span style="font-size:13px;color:#D9C27A">Needs your attention</span>
+        <span style="font-size:30px;font-weight:600">{{attention}}</span>
+        <div style="display:flex;flex-wrap:wrap;gap:8px;font-size:12px">
+          <sc-for list="{{attChips}}" as="c" hint-placeholder-count="3">
+            <span style="{{c.style}}">{{c.label}}</span>
+          </sc-for>
+          <sc-if value="{{noAtt}}" hint-placeholder-val="{{ false }}"><span style="color:var(--muted)">nothing waiting</span></sc-if>
+        </div>
+      </div>
+      <div style="flex:1 1 220px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:13px;color:var(--muted)">Running now</span>
+        <span style="font-size:30px;font-weight:600">{{runningNow}}</span>
+        <span style="font-size:12px;color:var(--muted)">active runs</span>
+      </div>
+      <div style="flex:1 1 220px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:6px">
+        <span style="font-size:13px;color:var(--muted)">Finished</span>
+        <span style="font-size:30px;font-weight:600">{{finishedCount}}</span>
+        <span style="font-size:12px;color:var(--muted)">{{finishedBreakdown}}</span>
+      </div>
+    </section>
+
+    <section style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        <sc-for list="{{filters}}" as="f" hint-placeholder-count="6">
+          <button onClick="{{f.pick}}" aria-pressed="{{f.pressed}}" style="{{f.style}}">{{f.label}} <span style="color:var(--muted);font-family:var(--mono);font-size:12px">{{f.count}}</span></button>
+        </sc-for>
+      </div>
+      <label style="margin-left:auto;flex:0 1 280px;min-width:200px">
+        <span style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)">Search runs</span>
+        <input type="search" placeholder="Search run id or plan" style="width:100%;box-sizing:border-box;height:44px;padding:0 14px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font-size:14px">
+      </label>
+    </section>
+
+    <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;overflow-x:auto">
+      <table style="width:100%;min-width:900px;border-collapse:collapse;font-size:14px">
+        <thead>
+          <tr style="text-align:left;color:var(--muted);font-size:12px">
+            <th style="padding:14px 18px;font-weight:500">Run</th><th style="padding:14px 18px;font-weight:500">Plan</th><th style="padding:14px 18px;font-weight:500">Status</th><th style="padding:14px 18px;font-weight:500">Detail</th><th style="padding:14px 18px;font-weight:500">Steps done</th><th style="padding:14px 18px;font-weight:500">Blocked</th><th style="padding:14px 18px;font-weight:500">Started</th>
+          </tr>
+        </thead>
+        <tbody>
+          <sc-for list="{{rows}}" as="r" hint-placeholder-count="8">
+            <tr style="border-top:1px solid var(--line);vertical-align:top">
+              <td style="padding:14px 18px;font-family:var(--mono);font-size:13px"><a href="{{r.href}}" style="color:var(--accent)">{{r.id}}</a></td>
+              <td style="padding:14px 18px">{{r.plan}} <span style="font-family:var(--mono);font-size:11px;color:var(--muted)">v{{r.v}}</span></td>
+              <td style="padding:14px 18px"><span style="{{r.badge}}">{{r.label}}</span></td>
+              <td style="padding:14px 18px;color:var(--muted);line-height:1.5;max-width:280px">{{r.detail}}</td>
+              <td style="padding:14px 18px;font-family:var(--mono);font-size:13px">{{r.steps}}</td>
+              <td style="padding:14px 18px;font-family:var(--mono);font-size:13px;color:var(--muted)">{{r.blocked}}</td>
+              <td style="padding:14px 18px;color:var(--muted);white-space:nowrap">{{r.when}}</td>
+            </tr>
+          </sc-for>
+        </tbody>
+      </table>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1100}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { filter: 'all', runs: [], plans: {}, loaded: false, error: '' };
+    // label, badge-style, group
+    this.ST = {
+      waiting: ['waiting', 'background:#3A2F14;color:#F2C94C;', 'att'],
+      held: ['held', 'background:#3D2418;color:#FF9A62;', 'att'],
+      error: ['error', 'background:#3D2418;color:#FF9A62;', 'att'],
+      refused: ['refused', 'background:#3D2418;color:#FF9A62;', 'att'],
+      interrupted: ['interrupted', 'background:#3D2418;color:#FF9A62;', 'att'],
+      running: ['running', 'background:#1F2A3D;color:#A9C9FF;', 'run'],
+      completed: ['completed', 'background:#16382D;color:#63D6AA;', 'completed'],
+      partial: ['partial', 'background:#3A2F14;color:#F2C94C;', 'partial'],
+      failed: ['failed', 'background:#3D2418;color:#FF9A62;', 'failed']
+    };
+    // Statuses that need a human, in the order they should surface.
+    this.ATTENTION = ['waiting', 'held', 'error', 'refused', 'interrupted'];
+  }
+  async componentDidMount() {
+    try {
+      const [runs, plans] = await Promise.all([AF.get('/runs'), AF.get('/plans').catch(() => [])]);
+      const byId = {};
+      (plans || []).forEach((p) => { byId[p.id] = p; });
+      this.setState({ runs: runs || [], plans: byId, loaded: true });
+    } catch (e) {
+      this.setState({ error: String(e.message || e), loaded: true });
+    }
+  }
+  _st(status) { return this.ST[status] || [status, 'background:#1B2027;color:#9AA3AF;', 'other']; }
+  _group(r) { return this._st(r.status)[2]; }
+  _planName(r) {
+    const p = this.state.plans[r.plan_id];
+    const g = p && p.plan && p.plan.graph;
+    return (p && p.plan && p.plan.name) || (r.plan_id || '').replace(/^plan-/, 'plan ');
+  }
+  _stepsDone(r) {
+    const steps = (r.outcome && r.outcome.steps) || null;
+    if (!steps) return '–';
+    const ids = Object.keys(steps);
+    const ok = ids.filter((k) => steps[k].status === 'ok').length;
+    return ok + ' / ' + ids.length;
+  }
+  _blocked(r) {
+    const o = r.outcome || {};
+    return String((o.failed || []).length + (o.blocked || []).length);
+  }
+  _detail(r) {
+    const o = r.outcome || {};
+    if (r.status === 'waiting' && o.question) return 'question: ' + (o.question.step ? o.question.step + ' · ' : '') + (o.question.prompt || o.question.text || 'awaiting an answer');
+    if (r.status === 'held') return 'approval no longer valid; resume re-checks it';
+    if (r.status === 'error') return r.error || 'run error';
+    if (r.status === 'refused') return 'refused: ' + ((r.issues || []).map((i) => i.code).join(', ') || 'approval invalid');
+    if (r.status === 'interrupted') return r.error || 'interrupted; resume to continue';
+    if (r.status === 'partial') {
+      const nc = (o.needs_clarification || []).length;
+      return nc ? 'partial, needs_clarification (' + nc + ')' : 'partial: ' + (o.final_outputs || []).length + ' final output(s)';
+    }
+    if (r.status === 'completed') return (o.final_outputs || []).length + ' final output(s)';
+    if (r.status === 'failed') return 'failed: ' + ((o.failed || []).map((f) => f.step).join(', ') || 'no final outputs');
+    if (r.status === 'running') return 'in progress';
+    return '';
+  }
+  renderVals() {
+    const F = this.state.filter, all = this.state.runs;
+    const order = (s) => { const i = this.ATTENTION.indexOf(s); return i === -1 ? 99 : i; };
+    const sorted = all.slice().sort((a, b) => order(a.status) - order(b.status));
+    const defs = [['all', 'All'], ['att', 'Needs attention'], ['run', 'Running'], ['completed', 'Completed'], ['partial', 'Partial'], ['failed', 'Failed']];
+    const filters = defs.map(([id, label]) => {
+      const on = F === id;
+      return {
+        label, count: id === 'all' ? all.length : all.filter((r) => this._group(r) === id).length, pressed: on,
+        style: 'cursor:pointer;height:40px;padding:0 16px;border-radius:999px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#161A1F') + ';',
+        pick: () => this.setState({ filter: id })
+      };
+    });
+    const rows = sorted.filter((r) => F === 'all' || this._group(r) === F).map((r) => {
+      const st = this._st(r.status);
+      return {
+        id: r.id, href: 'Run.dc.html?run=' + encodeURIComponent(r.id), plan: this._planName(r),
+        v: (this.state.plans[r.plan_id] && this.state.plans[r.plan_id].plan && this.state.plans[r.plan_id].plan.version) || '',
+        label: st[0], detail: this._detail(r), steps: this._stepsDone(r), blocked: this._blocked(r), when: '',
+        badge: 'font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;white-space:nowrap;' + st[1]
+      };
+    });
+    const att = all.filter((r) => this._group(r) === 'att');
+    const attCounts = {};
+    att.forEach((r) => { attCounts[r.status] = (attCounts[r.status] || 0) + 1; });
+    const attChips = Object.keys(attCounts).map((s) => ({
+      label: attCounts[s] + ' ' + s, style: 'padding:3px 10px;border-radius:999px;' + this._st(s)[1]
+    }));
+    const running = all.filter((r) => r.status === 'running').length;
+    const finished = all.filter((r) => ['completed', 'partial', 'failed'].includes(r.status));
+    const fc = (s) => finished.filter((r) => r.status === s).length;
+    return {
+      filters, rows, attention: att.length, attChips, noAtt: att.length === 0,
+      runningNow: running, finishedCount: finished.length,
+      finishedBreakdown: fc('completed') + ' completed · ' + fc('partial') + ' partial · ' + fc('failed') + ' failed'
+    };
+  }
+}
+</script>
+</body>
+</html>

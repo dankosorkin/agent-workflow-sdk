@@ -42,6 +42,15 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   `GET /designs/{id}/events` and `GET /runs/{id}/events`, stream the full record
   on every change and close at a terminal/paused status; `GET` records remain the
   source of truth and fallback, and an unknown id still yields 404.
+- The five `ui-mockup-demo/` screens (New plan, Plans, Run, Runs, Inventory) are
+  now wired to the live API over `fetch` and SSE instead of hardcoded mock data,
+  with no build step: a small `window.AF` helper (`get`/`post`/`stream`) was added
+  to `support.js`, and each screen's `DCLogic` component drives its state from real
+  `WorkflowService` responses — Create designs a plan end to end and streams design
+  progress, Plans lists plans and can approve and launch, Run shows live run progress
+  over SSE (with a GET-polling fallback) and can answer a waiting run and resume a held
+  one, Runs lists runs attention-first, and Inventory renders real agents and backends.
+  The "fictional mock data" banners were removed from every screen and the launcher.
 - `agentflow.workflow`: the building blocks of a workflow-from-request layer, kept
   out of the engine (nothing in `agentflow` imports it; a test enforces that, and
   that it needs no third-party package). Import it explicitly:

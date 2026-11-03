@@ -1,0 +1,508 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>New plan from request</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E1013;font-family:'Inter',system-ui,sans-serif}
+:root{--bg:#0E1013;--panel:#161A1F;--panel2:#1B2027;--line:#262C35;--text:#E6E9ED;--muted:#9AA3AF;--accent:#7DB0FF;--ok:#63D6AA;--warn:#F2C94C;--bad:#FF9A62;--mono:'JetBrains Mono',ui-monospace,monospace}
+a{color:inherit;text-decoration:none}
+button,input,textarea{font-family:inherit}
+button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{outline:2px solid #7DB0FF;outline-offset:2px}
+</style>
+</helmet>
+<div style="background:var(--bg);color:var(--text);min-height:1900px;display:flex;flex-direction:column">
+
+  <header style="display:flex;flex-wrap:wrap;align-items:center;gap:16px 28px;padding:14px 28px;border-bottom:1px solid var(--line);background:var(--panel)">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7DB0FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 12h4l5-5M11.5 12l5 5"/></svg>
+      agentflow
+    </div>
+    <nav style="display:flex;gap:6px;flex-wrap:wrap" aria-label="Sections">
+      <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Plans</a>
+      <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">New plan</a>
+      <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Runs</a>
+      <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Inventory</a>
+    </nav>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
+      <span style="display:flex;align-items:center;gap:7px"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>live</span>
+    </div>
+  </header>
+
+  <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:24px;box-sizing:border-box;max-width:1100px;width:100%;margin:0 auto">
+
+    <section style="display:flex;flex-direction:column;gap:8px">
+      <h1 style="margin:0;font-size:28px;font-weight:600;letter-spacing:-.01em">New plan from a request</h1>
+      <p style="margin:0;font-size:15px;line-height:1.55;color:var(--muted);max-width:760px">Describe the task. Designer agents draft a plan, a validator and a verifier check it, and you approve the effective rights. Nothing is executed before you approve and launch.</p>
+    </section>
+
+    <sc-if value="{{error}}" hint-placeholder-val="{{ false }}">
+      <div style="background:#2E1B12;border:1px solid #7A3E22;border-radius:12px;padding:12px 16px;font-size:14px;line-height:1.5;color:#FFC9A8">{{error}}</div>
+    </sc-if>
+
+    <!-- phase A -->
+    <sc-if value="{{notStarted}}" hint-placeholder-val="{{ false }}">
+      <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:22px">
+        <label style="display:flex;flex-direction:column;gap:8px">
+          <span style="font-size:14px;font-weight:500">Request</span>
+          <textarea rows="5" value="{{request}}" onChange="{{onRequest}}" placeholder="Describe the task in plain language." style="resize:vertical;box-sizing:border-box;padding:14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;line-height:1.55"></textarea>
+        </label>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:13px;color:var(--muted)">Approval mode</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <sc-for list="{{modes}}" as="m" hint-placeholder-count="2">
+              <button onClick="{{m.pick}}" aria-pressed="{{m.pressed}}" style="{{m.style}}">{{m.label}}</button>
+            </sc-for>
+          </div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.5">{{modeHint}}</div>
+        </div>
+
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <div style="font-size:13px;color:var(--muted)">Design rounds, <span style="font-family:var(--mono)">max_design_rounds</span></div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <sc-for list="{{rounds}}" as="n" hint-placeholder-count="4">
+              <button onClick="{{n.pick}}" aria-pressed="{{n.pressed}}" style="{{n.style}}">{{n.label}}</button>
+            </sc-for>
+          </div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.5">Default 3. When the limit is reached with open remarks, the plan goes to you with those remarks. It is never accepted silently and the loop never runs on.</div>
+        </div>
+
+        <div style="padding:14px;border-radius:10px;background:var(--panel2);font-size:13px;line-height:1.55;color:var(--muted)">
+          Designer agents <span style="font-family:var(--mono);color:var(--text)">wf-orchestrator</span>, <span style="font-family:var(--mono);color:var(--text)">wf-creator</span> and <span style="font-family:var(--mono);color:var(--text)">wf-verifier</span> run on the backend set for them in the inventory, without tools. They see names, descriptions and allowed permissions of inventory agents, not paths or keys.
+        </div>
+
+        <div><button onClick="{{start}}" style="height:48px;padding:0 24px;border-radius:10px;border:0;background:#7DB0FF;color:#0B1220;font-weight:600;font-size:15px;cursor:pointer">Generate plan</button></div>
+      </section>
+    </sc-if>
+
+    <!-- phase B -->
+    <sc-if value="{{started}}" hint-placeholder-val="{{ true }}">
+
+      <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 22px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+        <div style="font-size:14px;line-height:1.5;color:var(--muted);max-width:700px">“{{requestShort}}” · approval <span style="font-family:var(--mono);color:var(--text)">{{S_mode}}</span> · <span style="font-family:var(--mono);color:var(--text)">max_design_rounds {{S_rounds}}</span></div>
+        <button onClick="{{reset}}" style="height:40px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:13px;cursor:pointer">Edit request</button>
+      </section>
+
+      <!-- live status -->
+      <section style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel2)">
+        <span style="{{statusChip}}">{{statusLabel}}</span>
+        <span style="font-size:13px;color:var(--muted)">design <span style="font-family:var(--mono);color:var(--text)">{{designId}}</span></span>
+      </section>
+
+      <!-- question from the orchestrator -->
+      <sc-if value="{{asking}}" hint-placeholder-val="{{ false }}">
+        <section style="background:var(--panel);border:1px solid #3A4B66;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:14px">
+          <h2 style="margin:0;font-size:16px;font-weight:600">The orchestrator has a question</h2>
+          <sc-for list="{{questions}}" as="q" hint-placeholder-count="1">
+            <div style="font-size:14px;line-height:1.55">{{q}}</div>
+          </sc-for>
+          <textarea rows="3" value="{{answer}}" onChange="{{onAnswer}}" placeholder="Your answer" style="resize:vertical;box-sizing:border-box;padding:12px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px;line-height:1.55"></textarea>
+          <div><button onClick="{{sendAnswer}}" style="height:44px;padding:0 20px;border-radius:10px;border:0;background:#7DB0FF;color:#0B1220;font-weight:600;font-size:14px;cursor:pointer">Send answer</button></div>
+        </section>
+      </sc-if>
+
+      <!-- converged: link to the plan -->
+      <sc-if value="{{converged}}" hint-placeholder-val="{{ false }}">
+        <section style="background:#16382D;border:1px solid #1F5A45;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:12px">
+          <h2 style="margin:0;font-size:16px;font-weight:600;color:#BDEFDD">Plan ready</h2>
+          <div style="font-size:14px;line-height:1.55;color:#BDEFDD">The design converged. Plan <span style="font-family:var(--mono)">{{planId}}</span> is waiting for your review and approval.</div>
+          <div><a href="{{planHref}}" style="display:inline-block;height:44px;line-height:44px;padding:0 20px;border-radius:10px;background:#7DB0FF;color:#0B1220;font-weight:600;font-size:14px">Review and approve in Plans →</a></div>
+        </section>
+      </sc-if>
+
+      <!-- design failed with no plan -->
+      <sc-if value="{{designFailed}}" hint-placeholder-val="{{ false }}">
+        <section style="background:#2E1B12;border:1px solid #7A3E22;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:10px">
+          <h2 style="margin:0;font-size:16px;font-weight:600;color:#FFC9A8">Design did not produce a usable plan</h2>
+          <div style="font-size:14px;line-height:1.55;color:#E6E9ED">{{failReason}}</div>
+        </section>
+      </sc-if>
+
+      <!-- brief -->
+      <sc-if value="{{hasBrief}}" hint-placeholder-val="{{ true }}">
+      <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:14px">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+          <span style="width:26px;height:26px;border-radius:50%;background:#16382D;color:#63D6AA;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600">✓</span>
+          <h2 style="margin:0;font-size:16px;font-weight:600">1 · Brief</h2>
+          <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">wf-orchestrator</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:16px">
+          <div style="flex:1 1 240px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Goal</div><div style="font-size:14px;line-height:1.55">{{brief.goal}}</div></div>
+          <div style="flex:1 1 240px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Constraints</div><div style="font-size:14px;line-height:1.55">{{brief.constraints}}</div></div>
+          <div style="flex:1 1 240px"><div style="font-size:12px;color:var(--muted);margin-bottom:6px">Ambiguities</div><div style="font-size:14px;line-height:1.55">{{brief.ambiguities}}</div></div>
+        </div>
+      </section>
+      </sc-if>
+
+      <!-- design loop -->
+      <sc-if value="{{hasRounds}}" hint-placeholder-val="{{ true }}">
+      <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+            <span style="{{loop.dot}}">{{loop.mark}}</span>
+            <h2 style="margin:0;font-size:16px;font-weight:600">2 · Design ⇄ verify</h2>
+          </div>
+          <span style="{{loop.chip}}">{{loop.label}}</span>
+        </div>
+        <sc-for list="{{passes}}" as="p" hint-placeholder-count="2">
+          <div style="border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:16px;display:flex;flex-direction:column;gap:12px">
+            <div style="font-size:14px;font-weight:500">Round {{p.n}} of {{S_rounds}}</div>
+            <sc-for list="{{p.rows}}" as="r" hint-placeholder-count="3">
+              <div style="display:flex;gap:12px;align-items:flex-start">
+                <span style="{{r.badge}}">{{r.mark}}</span>
+                <div style="font-size:13.5px;line-height:1.5"><span style="font-family:var(--mono);font-size:12.5px">{{r.who}}</span> <span style="color:var(--muted)">· {{r.what}}</span></div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-for>
+        <div style="font-size:13px;color:var(--muted);line-height:1.5">Order inside a round: designer, then the deterministic validator, then the verifier. Invalid plans never cost a verifier call. A <span style="font-family:var(--mono)">blocker</span> sends the plan back to the designer with the remarks, a <span style="font-family:var(--mono)">warning</span> is only shown to you.</div>
+
+        <sc-if value="{{limitHit}}" hint-placeholder-val="{{ false }}">
+          <div style="background:#2E1B12;border:1px solid #7A3E22;border-radius:12px;padding:16px 18px;font-size:14px;line-height:1.55">
+            <span style="font-weight:600;color:#FFC9A8">Round limit exhausted.</span> The plan is now with you together with {{openCount}} open remarks. Read them below before you decide.
+          </div>
+        </sc-if>
+      </section>
+      </sc-if>
+
+      <!-- executability error -->
+      <sc-if value="{{notExecutable}}" hint-placeholder-val="{{ false }}">
+        <section style="background:#2E1B12;border:1px solid #7A3E22;border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:14px">
+          <h2 style="margin:0;font-size:16px;font-weight:600;color:#FFC9A8">Stopped before approval: the plan cannot run on any available backend</h2>
+          <div style="font-size:14px;line-height:1.55;color:#E6E9ED">You are never asked to approve a plan that cannot be executed. <span style="font-family:var(--mono)">validate_plan(plan, inventory)</span> returned {{execErrors.length}} errors:</div>
+          <sc-for list="{{execErrors}}" as="e" hint-placeholder-count="3">
+            <div style="display:flex;flex-direction:column;gap:8px;padding:12px 14px;border-radius:10px;background:#1F1410">
+              <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                <span style="font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;background:#3D2418;color:#FF9A62">{{e.severity}}</span>
+                <span style="font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:#3D2418;color:#FF9A62">{{e.code}}</span>
+                <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">step: {{e.step}} · input: {{e.input}}</span>
+              </div>
+              <div style="font-size:13.5px;line-height:1.5">{{e.message}}</div>
+              <sc-if value="{{e.suggest}}" hint-placeholder-val="{{ false }}"><div style="font-size:13px;line-height:1.5;padding:10px 12px;border-radius:8px;background:#0E1013"><span style="color:var(--muted)">Shown to you as text only:</span> {{e.suggest}}</div></sc-if>
+            </div>
+          </sc-for>
+          <div style="font-size:13px;color:var(--muted);line-height:1.5">Agents are never created automatically. Change the request or the inventory (agent permissions or backends), then generate again.</div>
+        </section>
+      </sc-if>
+
+      <!-- review & approval -->
+      <sc-if value="{{reviewable}}" hint-placeholder-val="{{ true }}">
+      <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:20px">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+          <span style="width:26px;height:26px;border-radius:50%;background:#3A2F14;color:#F2C94C;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600">!</span>
+          <h2 style="margin:0;font-size:16px;font-weight:600">3 · Review effective rights</h2>
+        </div>
+
+        <div style="display:flex;flex-wrap:wrap;gap:12px 32px;padding:14px 16px;border-radius:10px;background:var(--panel2)">
+          <div><div style="font-size:12px;color:var(--muted)">plan_hash (what you approve)</div><div style="font-family:var(--mono);font-size:14px;margin-top:4px">{{planHash}}</div></div>
+          <div><div style="font-size:12px;color:var(--muted)">inventory_digest</div><div style="font-family:var(--mono);font-size:14px;margin-top:4px">a72f19c</div></div>
+          <div><div style="font-size:12px;color:var(--muted)">skills / mcp</div><div style="font-family:var(--mono);font-size:14px;margin-top:4px">empty (reserved)</div></div>
+        </div>
+
+        <!-- auto threshold -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+            <div style="font-size:14px;font-weight:500">Auto-approval threshold</div>
+            <span style="{{auto.chip}}">{{auto.label}}</span>
+          </div>
+          <sc-if value="{{auto.fallback}}" hint-placeholder-val="{{ false }}">
+            <div style="background:#2A2410;border:1px solid #6B5A1E;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.55;color:#E6D9A8">Mode <span style="font-family:var(--mono)">auto</span> was requested but fell back to <span style="font-family:var(--mono)">manual</span>. Reason: {{auto.reason}}</div>
+          </sc-if>
+          <sc-for list="{{auto.items}}" as="a" hint-placeholder-count="4">
+            <div style="display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.5"><span style="{{a.badge}}">{{a.mark}}</span><span>{{a.text}}</span></div>
+          </sc-for>
+        </div>
+
+        <!-- per step -->
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:14px;font-weight:500">Per step: backend, rights, commands and data bindings</div>
+          <sc-for list="{{steps}}" as="s" hint-placeholder-count="5">
+            <div style="border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel2);display:flex;flex-direction:column;gap:12px">
+              <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline">
+                <span style="font-family:var(--mono);font-size:14px;font-weight:500">{{s.id}}</span>
+                <span style="font-size:13px;color:var(--muted)">agent {{s.agent}} · backend <span style="font-family:var(--mono);color:var(--text)">{{s.backend}}</span></span>
+                <span style="{{s.permStyle}}">{{s.permission}}</span>
+                <sc-if value="{{s.isFull}}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;font-weight:600;color:#FF9A62">full access, needs your explicit approval</span></sc-if>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+                <span style="font-size:12px;color:var(--muted)">tools</span>
+                <sc-for list="{{s.tools}}" as="t" hint-placeholder-count="1"><span style="font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:var(--bg)">{{t}}</span></sc-for>
+                <sc-if value="{{s.noTools}}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--muted)">none</span></sc-if>
+                <sc-if value="{{s.mayAsk}}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;padding:3px 9px;border-radius:999px;background:#1F2A3D;color:#A9C9FF;margin-left:6px">{{s.mayAskLabel}}</span></sc-if>
+              </div>
+              <sc-if value="{{s.hasCmds}}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-direction:column;gap:6px">
+                  <div style="font-size:12px;color:var(--muted)">Commands (argv, never a shell string)</div>
+                  <sc-for list="{{s.cmds}}" as="c" hint-placeholder-count="1">
+                    <div style="font-family:var(--mono);font-size:12.5px;line-height:1.6;padding:10px 12px;border-radius:8px;background:var(--bg);overflow-x:auto;white-space:pre">argv   {{c.argv}}
+cwd    {{c.cwd}}
+allow  {{c.allow}}</div>
+                  </sc-for>
+                </div>
+              </sc-if>
+              <div style="display:flex;flex-direction:column;gap:4px">
+                <div style="font-size:12px;color:var(--muted)">Data bindings</div>
+                <sc-for list="{{s.binds}}" as="b" hint-placeholder-count="2">
+                  <div style="font-family:var(--mono);font-size:12.5px;line-height:1.55">{{b.name}} <span style="color:var(--muted)">←</span> {{b.src}} <sc-if value="{{b.via}}" hint-placeholder-val="{{ false }}"><span style="font-family:'Inter',sans-serif;font-size:11px;padding:2px 8px;border-radius:999px;background:#3A2F14;color:#F2C94C;margin-left:6px">indirect, via ancestor {{b.via}}</span></sc-if></div>
+                </sc-for>
+              </div>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- data flow -->
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div style="font-size:14px;font-weight:500">Data flow <span style="color:var(--muted);font-weight:400">· who feeds whom, from <span style="font-family:var(--mono)">dataflow(steps)</span></span></div>
+          <div style="overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel2)">
+            <div style="position:relative;width:1058px;height:300px">
+              <!-- arrows: gap 1 -->
+              <svg width="55" height="8" viewBox="0 0 55 8" preserveAspectRatio="none" style="position:absolute;left:194px;top:154px;width:55px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 0 4 L 55 4"></path></svg>
+              <svg width="8" height="48" viewBox="0 0 8 48" preserveAspectRatio="none" style="position:absolute;left:245px;top:110px;width:8px;height:48px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 4 0 L 4 48"></path></svg>
+              <svg width="8" height="48" viewBox="0 0 8 48" preserveAspectRatio="none" style="position:absolute;left:245px;top:158px;width:8px;height:48px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 4 0 L 4 48"></path></svg>
+              <svg width="54" height="8" viewBox="0 0 54 8" preserveAspectRatio="none" style="position:absolute;left:249px;top:106px;width:54px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#7DB0FF" stroke="none" style="stroke: none; fill: #7DB0FF; fill: context-stroke"/></marker></defs><path d="M 0 4 L 50 4" marker-end="url(#dc-arrow-head-filled-1)"></path></svg>
+              <svg width="54" height="8" viewBox="0 0 54 8" preserveAspectRatio="none" style="position:absolute;left:249px;top:202px;width:54px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#7DB0FF" stroke="none" style="stroke: none; fill: #7DB0FF; fill: context-stroke"/></marker></defs><path d="M 0 4 L 50 4" marker-end="url(#dc-arrow-head-filled-2)"></path></svg>
+              <!-- arrows: gap 2 -->
+              <svg width="55" height="8" viewBox="0 0 55 8" preserveAspectRatio="none" style="position:absolute;left:474px;top:106px;width:55px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 0 4 L 55 4"></path></svg>
+              <svg width="55" height="8" viewBox="0 0 55 8" preserveAspectRatio="none" style="position:absolute;left:474px;top:202px;width:55px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 0 4 L 55 4"></path></svg>
+              <svg width="8" height="96" viewBox="0 0 8 96" preserveAspectRatio="none" style="position:absolute;left:525px;top:110px;width:8px;height:96px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 4 0 L 4 96"></path></svg>
+              <svg width="54" height="8" viewBox="0 0 54 8" preserveAspectRatio="none" style="position:absolute;left:529px;top:154px;width:54px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#7DB0FF" stroke="none" style="stroke: none; fill: #7DB0FF; fill: context-stroke"/></marker></defs><path d="M 0 4 L 50 4" marker-end="url(#dc-arrow-head-filled-3)"></path></svg>
+              <!-- arrow: gap 3 -->
+              <svg width="109" height="8" viewBox="0 0 109 8" preserveAspectRatio="none" style="position:absolute;left:754px;top:154px;width:109px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#7DB0FF" stroke="none" style="stroke: none; fill: #7DB0FF; fill: context-stroke"/></marker></defs><path d="M 0 4 L 105 4" marker-end="url(#dc-arrow-head-filled-4)"></path></svg>
+              <!-- indirect arrow over the top: collect_repos -> classify -->
+              <svg width="8" height="108" viewBox="0 0 8 108" preserveAspectRatio="none" style="position:absolute;left:105px;top:24px;width:8px;height:108px;overflow:visible;fill:none;stroke:#F2C94C;stroke-width:2;stroke-dasharray:6 6;stroke-linecap:round;stroke-linejoin:round"><path d="M 4 0 L 4 108"></path></svg>
+              <svg width="560" height="8" viewBox="0 0 560 8" preserveAspectRatio="none" style="position:absolute;left:109px;top:20px;width:560px;height:8px;overflow:visible;fill:none;stroke:#F2C94C;stroke-width:2;stroke-dasharray:6 6;stroke-linecap:round;stroke-linejoin:round"><path d="M 0 4 L 560 4"></path></svg>
+              <svg width="8" height="107" viewBox="0 0 8 107" preserveAspectRatio="none" style="position:absolute;left:665px;top:24px;width:8px;height:107px;overflow:visible;fill:none;stroke:#F2C94C;stroke-width:2;stroke-dasharray:6 6;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#F2C94C" stroke="none" style="stroke: none; fill: #F2C94C; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 103" marker-end="url(#dc-arrow-head-filled-5)"></path></svg>
+              <!-- cards -->
+              <div style="position:absolute;left:24px;top:132px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">collect_repos</b><br>repo-scanner</span></div>
+              <div style="position:absolute;left:304px;top:84px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">detect_java</b><br>java-inspector</span></div>
+              <div style="position:absolute;left:304px;top:180px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">read_builds</b><br>build-reader</span></div>
+              <div style="position:absolute;left:584px;top:132px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">classify</b><br>migration-analyst</span></div>
+              <div style="position:absolute;left:864px;top:132px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">write_report</b><br>report-writer</span></div>
+              <!-- labels -->
+              <div style="position:absolute;left:254px;top:82px;width:44px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">repos</div>
+              <div style="position:absolute;left:254px;top:218px;width:44px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">repos</div>
+              <div style="position:absolute;left:483px;top:82px;width:36px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">java</div>
+              <div style="position:absolute;left:477px;top:218px;width:48px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">builds</div>
+              <div style="position:absolute;left:791px;top:130px;width:36px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">rows</div>
+              <div style="position:absolute;left:250px;top:36px;width:300px;font-size:13px;line-height:16px;color:#F2C94C">root · indirect, via ancestor collect_repos</div>
+              <!-- legend -->
+              <svg width="40" height="8" viewBox="0 0 40 8" preserveAspectRatio="none" style="position:absolute;left:24px;top:266px;width:40px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round"><path d="M 0 4 L 40 4"></path></svg>
+              <div style="position:absolute;left:72px;top:262px;width:200px;font-size:13px;line-height:16px;color:#9AA3AF">direct, step is in depends_on</div>
+              <svg width="40" height="8" viewBox="0 0 40 8" preserveAspectRatio="none" style="position:absolute;left:330px;top:266px;width:40px;height:8px;overflow:visible;fill:none;stroke:#F2C94C;stroke-width:2;stroke-dasharray:6 6;stroke-linecap:round"><path d="M 0 4 L 40 4"></path></svg>
+              <div style="position:absolute;left:378px;top:262px;width:260px;font-size:13px;line-height:16px;color:#9AA3AF">indirect, <span style="font-family:'JetBrains Mono',monospace">direct: false</span>, through an ancestor</div>
+            </div>
+          </div>
+          <div style="background:var(--bg);border-radius:10px;overflow-x:auto">
+            <table style="width:100%;min-width:520px;border-collapse:collapse;font-family:var(--mono);font-size:12.5px">
+              <thead><tr style="text-align:left;color:var(--muted)"><th style="padding:10px 14px;font-weight:500">from</th><th style="padding:10px 14px;font-weight:500">to</th><th style="padding:10px 14px;font-weight:500">input</th><th style="padding:10px 14px;font-weight:500">direct</th></tr></thead>
+              <tbody>
+                <sc-for list="{{edges}}" as="e" hint-placeholder-count="6">
+                  <tr style="border-top:1px solid var(--line)"><td style="padding:8px 14px">{{e.from}}</td><td style="padding:8px 14px">{{e.to}}</td><td style="padding:8px 14px">{{e.input}}</td><td style="{{e.style}}">{{e.direct}}</td></tr>
+                </sc-for>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- verifier issues -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:14px;font-weight:500">Verifier remarks still open <span style="color:var(--muted);font-weight:400">· {{issues.length}}</span></div>
+          <sc-if value="{{noIssues}}" hint-placeholder-val="{{ false }}"><div style="font-size:13.5px;color:var(--muted)">No open remarks.</div></sc-if>
+          <sc-for list="{{issues}}" as="i" hint-placeholder-count="2">
+            <div style="border:1px solid var(--line);border-left:0;border-radius:12px;padding:14px 16px;background:var(--panel2);display:flex;flex-direction:column;gap:8px">
+              <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
+                <span style="{{i.sev}}">{{i.severity}}</span>
+                <span style="font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:var(--bg)">{{i.code}}</span>
+                <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">{{i.step}}</span>
+              </div>
+              <div style="font-size:14px;line-height:1.55">{{i.claim}}</div>
+              <div style="font-size:13px;line-height:1.5;color:var(--muted)">Evidence needed: {{i.evidence}}</div>
+              <sc-if value="{{i.suggest}}" hint-placeholder-val="{{ false }}"><div style="font-size:13px;line-height:1.5;padding:10px 12px;border-radius:8px;background:var(--bg)"><span style="color:var(--muted)">Suggestion, text only:</span> {{i.suggest}}</div></sc-if>
+            </div>
+          </sc-for>
+        </div>
+
+        <!-- designer text -->
+        <div style="border:1px dashed #4A5360;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
+          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#2A2F36;color:#C9D1DB">Designer’s description</span><span style="font-size:12px;color:var(--muted)">not confirmed, written by a model</span></div>
+          <div style="font-size:13.5px;line-height:1.6;color:#B7BFCA">“Scans the repositories, detects each service’s Java version, rates migration effort and writes a short report with a table per service. Only the report file is written.”</div>
+          <div style="font-size:12.5px;color:var(--muted)">Compare it with the rights above. Only the rights above are enforced.</div>
+        </div>
+
+        <!-- decision -->
+        <sc-if value="{{canDecide}}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-direction:column;gap:14px;padding-top:6px;border-top:1px solid var(--line)">
+            <sc-if value="{{limitHit}}" hint-placeholder-val="{{ false }}">
+              <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.5;padding-top:14px"><input type="checkbox" checked="{{ack}}" onChange="{{toggleAck}}" style="width:20px;height:20px;margin-top:1px"><span>I have read the {{openCount}} open remarks and accept them.</span></label>
+            </sc-if>
+            <label style="display:flex;flex-direction:column;gap:6px">
+              <span style="font-size:13px;color:var(--muted)">Note for the designer (used by Reject)</span>
+              <textarea rows="2" placeholder="e.g. the report must be read-only, send it to stdout" style="resize:vertical;box-sizing:border-box;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px"></textarea>
+            </label>
+            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+              <button onClick="{{approve}}" style="{{approveStyle}}">Approve plan {{planHash}}</button>
+              <button onClick="{{reset}}" style="height:48px;padding:0 20px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:14px;cursor:pointer">Reject with note</button>
+            </div>
+            <div style="font-size:13px;color:var(--muted);line-height:1.5">There is no manual plan editing in v1. A rejection sends your note back to the designer for a new round, then validator and verifier run again. If nobody answers, the run stops as <span style="font-family:var(--mono)">awaiting_approval</span>. Approval becomes void if the plan or the inventory changes.</div>
+          </div>
+        </sc-if>
+        <sc-if value="{{saved}}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#16382D;border:1px solid #1F5A45;border-radius:12px;padding:14px 18px">
+            <span style="font-size:14px;color:#BDEFDD;line-height:1.5">Approved <span style="font-family:var(--mono)">java-version-audit</span> v1 · plan_hash {{planHash}} · inventory_digest a72f19c.</span>
+            <a href="Main.dc.html" style="display:inline-flex;align-items:center;height:44px;padding:0 20px;border-radius:10px;background:#63D6AA;color:#06241A;font-weight:600;font-size:14px">Open plan and launch →</a>
+          </div>
+        </sc-if>
+      </section>
+      </sc-if>
+    </sc-if>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      started: false, mode: 'manual', rounds: 3,
+      request: 'Find all services in ~/Development/services that run Java older than 21, rate each by migration effort, and give me a report I can hand to the team lead.',
+      designId: '', record: null, answer: '', error: ''
+    };
+    this._close = null;
+  }
+  componentWillUnmount() { if (this._close) { this._close(); this._close = null; } }
+  onDesign(rec) {
+    this.setState({ record: rec });
+    const terminal = ['done', 'failed', 'interrupted'];
+    if (terminal.includes(rec.status) && this._close) { this._close(); this._close = null; }
+  }
+  async start() {
+    const request = (this.state.request || '').trim();
+    if (!request) { this.setState({ error: 'The request is empty.' }); return; }
+    try {
+      const d = await AF.post('/designs', { request, mode: this.state.mode, max_rounds: this.state.rounds });
+      this.setState({ started: true, designId: d.id, record: d, error: '' });
+      if (this._close) this._close();
+      this._close = AF.stream('/designs/' + d.id + '/events', (rec) => this.onDesign(rec));
+    } catch (e) {
+      this.setState({ error: String(e.message || e) });
+    }
+  }
+  async sendAnswer() {
+    const id = this.state.designId, answer = (this.state.answer || '').trim();
+    if (!id || !answer) return;
+    try {
+      await AF.post('/designs/' + id + '/answer', { answer });
+      this.setState({ answer: '' });
+      if (!this._close) this._close = AF.stream('/designs/' + id + '/events', (rec) => this.onDesign(rec));
+    } catch (e) {
+      this.setState({ error: String(e.message || e) });
+    }
+  }
+  reset() {
+    if (this._close) { this._close(); this._close = null; }
+    this.setState({ started: false, designId: '', record: null, answer: '', error: '' });
+  }
+  renderVals() {
+    const S = this.state, rec = S.record, R = S.rounds;
+    const pill = (on) => 'cursor:pointer;height:44px;padding:0 18px;border-radius:10px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#0E1013') + ';';
+    const modes = [['manual', 'manual (default)'], ['auto', 'auto']].map(([id, label]) => ({ label, pressed: S.mode === id, style: pill(S.mode === id), pick: () => this.setState({ mode: id }) }));
+    const modeHint = S.mode === 'manual' ? 'You review effective rights and approve the plan hash.' : 'Skips the review only if the plan passes the rights threshold. Otherwise it falls back to manual and says why.';
+    const rounds = [2, 3, 4, 5].map((n) => ({ label: String(n), pressed: S.rounds === n, style: pill(S.rounds === n), pick: () => this.setState({ rounds: n }) }));
+
+    const status = rec ? rec.status : '';
+    const result = (rec && rec.result) || null;
+    const resStatus = result ? result.status : '';
+    const asking = status === 'asking';
+    const converged = status === 'done';
+    // failed: distinguish round_limit / not_executable (rendered specially) from a plain failure.
+    const notExecutable = status === 'failed' && resStatus === 'not_executable';
+    const limitHit = status === 'failed' && resStatus === 'round_limit';
+    const designFailed = status === 'failed' && !notExecutable && !limitHit;
+    const interrupted = status === 'interrupted';
+
+    const chip = (bg, fg) => 'font-size:12px;font-weight:600;padding:3px 10px;border-radius:999px;background:' + bg + ';color:' + fg + ';';
+    const statusMap = {
+      designing: ['designing…', chip('#1F2A3D', '#A9C9FF')],
+      asking: ['waiting for your answer', chip('#3A2F14', '#F2C94C')],
+      done: ['converged', chip('#16382D', '#63D6AA')],
+      failed: [notExecutable ? 'not executable' : (limitHit ? 'round limit exhausted' : 'failed'), chip('#3D2418', '#FF9A62')],
+      interrupted: ['interrupted', chip('#3D2418', '#FF9A62')]
+    };
+    const sm = statusMap[status] || ['starting…', chip('#1B2027', '#9AA3AF')];
+
+    // Brief / rounds from the design result.
+    const brief = (result && result.brief) || null;
+    const briefVals = brief ? {
+      goal: brief.goal || '—',
+      constraints: Array.isArray(brief.constraints) ? brief.constraints.join('; ') : (brief.constraints || '—'),
+      ambiguities: Array.isArray(brief.ambiguities) ? brief.ambiguities.join('; ') : (brief.ambiguities || '—')
+    } : { goal: '', constraints: '', ambiguities: '' };
+
+    const bdg = (ok) => 'flex:none;width:20px;height:20px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;' + (ok ? 'background:#16382D;color:#63D6AA;' : 'background:#3D2418;color:#FF9A62;');
+    const resultRounds = (result && result.rounds) || [];
+    const passes = resultRounds.map((rd, i) => {
+      const rowsOut = [];
+      const blockers = (rd.issues || rd.remarks || []).filter((x) => (x.severity || '') === 'blocker').length;
+      rowsOut.push({ who: 'wf-creator', what: 'drafted a plan', mark: '✓', badge: bdg(true) });
+      rowsOut.push({ who: 'validator', what: (rd.mechanical_errors || rd.errors || 0) ? 'errors' : 'no errors', mark: (rd.mechanical_errors || rd.errors || 0) ? '✕' : '✓', badge: bdg(!(rd.mechanical_errors || rd.errors || 0)) });
+      rowsOut.push({ who: 'wf-verifier', what: blockers ? (blockers + ' blocker(s)') : 'no blockers', mark: blockers ? '✕' : '✓', badge: bdg(!blockers) });
+      return { n: rd.round || (i + 1), rows: rowsOut };
+    });
+    const loop = converged
+      ? { mark: '✓', dot: bdg(true), chip: 'font-size:12px;font-weight:500;color:#63D6AA;', label: 'Converged in ' + passes.length + ' round(s)' }
+      : (limitHit
+        ? { mark: '!', dot: 'flex:none;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;background:#3D2418;color:#FF9A62;', chip: 'font-size:12px;font-weight:500;color:#FF9A62;', label: 'Round limit exhausted' }
+        : { mark: '·', dot: 'flex:none;width:26px;height:26px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;background:#1F2A3D;color:#A9C9FF;', chip: 'font-size:12px;font-weight:500;color:#A9C9FF;', label: status === 'designing' ? 'in progress' : (status || '') });
+
+    // Executability errors come from result.mechanical (the validator findings on the last plan).
+    const mech = (result && result.mechanical) || [];
+    const execErrors = mech.filter((i) => (i.severity || 'error') === 'error').map((i) => ({
+      severity: i.severity || 'error', code: i.code || '', step: i.step || 'null', input: i.input == null ? 'null' : String(i.input),
+      message: i.message || '', suggest: i.suggestion || i.suggest || ''
+    }));
+
+    // Open verifier remarks (shown under round-limit).
+    const openIssues = (result && (result.issues || [])) || [];
+    const issues = openIssues.map((i) => ({
+      code: i.code || '', severity: i.severity || 'warning', step: i.step || '—',
+      claim: i.message || i.claim || '', evidence: i.evidence || '', suggest: i.suggestion || i.suggest || '',
+      sev: 'font-size:11px;font-weight:600;padding:3px 9px;border-radius:999px;' + ((i.severity === 'blocker') ? 'background:#3D2418;color:#FF9A62;' : 'background:#3A2F14;color:#F2C94C;')
+    }));
+
+    const questions = (asking && rec.question && rec.question.questions) ? rec.question.questions : [];
+    const failReason = (rec && (rec.error || (result && result.reason))) || 'The design stopped without a usable plan.';
+
+    const rShort = (S.request || '').length > 120 ? (S.request || '').slice(0, 117) + '…' : (S.request || '');
+
+    return {
+      notStarted: !S.started, started: S.started, S_mode: S.mode, S_rounds: R,
+      modes, modeHint, rounds,
+      request: S.request, requestShort: rShort,
+      onRequest: (e) => this.setState({ request: e.target.value }),
+      start: () => this.start(), reset: () => this.reset(),
+      error: S.error,
+      designId: S.designId, statusLabel: sm[0], statusChip: sm[1],
+      asking, questions, answer: S.answer,
+      onAnswer: (e) => this.setState({ answer: e.target.value }),
+      sendAnswer: () => this.sendAnswer(),
+      converged, planId: (rec && rec.plan_id) || '', planHref: 'Main.dc.html',
+      designFailed: designFailed || interrupted, failReason,
+      hasBrief: !!brief, brief: briefVals,
+      hasRounds: passes.length > 0, passes, loop, limitHit, openCount: issues.length,
+      notExecutable, execErrors, issues, noIssues: issues.length === 0,
+      // The hardcoded per-step/dataflow/approval panel is not driven by live data; approval lives on the Plans screen.
+      reviewable: false
+    };
+  }
+}
+</script>
+</body>
+</html>
