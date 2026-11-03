@@ -34,6 +34,14 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `agentflow.server.workflow_app` now serves the bundled UI as static files from
+  the same FastAPI app: `GET /` redirects to `/ui/index.html` and the mockup
+  under `ui-mockup-demo/` is mounted at `/ui` (mounted last so it never shadows
+  the API). `create_workflow_app` and `serve` gained a `ui_dir` parameter
+  (defaults to the repo's `ui-mockup-demo/`). Two Server-Sent Events endpoints,
+  `GET /designs/{id}/events` and `GET /runs/{id}/events`, stream the full record
+  on every change and close at a terminal/paused status; `GET` records remain the
+  source of truth and fallback, and an unknown id still yields 404.
 - `agentflow.workflow`: the building blocks of a workflow-from-request layer, kept
   out of the engine (nothing in `agentflow` imports it; a test enforces that, and
   that it needs no third-party package). Import it explicitly:

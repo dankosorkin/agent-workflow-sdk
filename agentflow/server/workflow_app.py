@@ -19,8 +19,11 @@ on ``127.0.0.1`` only. This module does not use ``from __future__ import annotat
 because FastAPI resolves endpoint annotations at runtime.
 """
 
+import asyncio
+import json
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from agentflow.workflow.runner import PlanRefused
@@ -29,11 +32,19 @@ from agentflow.workflow.service import Conflict, NotFound, WorkflowService
 __all__ = ["create_workflow_app", "serve"]
 
 
-def create_workflow_app(service: WorkflowService, *, cors_origins: list[str] | None = None):
+def create_workflow_app(
+    service: WorkflowService,
+    *,
+    cors_origins: list[str] | None = None,
+    ui_dir: Path | None = None,
+):
     """The FastAPI app over ``service``. Needs the ``server`` extra."""
+    ui_dir = ui_dir or (Path(__file__).resolve().parents[2] / "ui-mockup-demo")
     try:
         from fastapi import FastAPI, HTTPException
         from fastapi.middleware.cors import CORSMiddleware
+        from fastapi.responses import RedirectResponse, StreamingResponse
+        from fastapi.staticfiles import StaticFiles
         from pydantic import BaseModel, Field
     except ModuleNotFoundError as exc:  # pragma: no cover - import-time guard
         raise ModuleNotFoundError(
@@ -134,6 +145,62 @@ def create_workflow_app(service: WorkflowService, *, cors_origins: list[str] | N
     async def resume_run(run_id: str) -> dict[str, Any]:
         return call(service.resume_run, run_id)
 
+    async def _design_events(design_id: str) -> AsyncIterator[str]:
+        terminal = {"done", "failed", "interrupted"}
+        last: str | None = None
+        while True:
+            record = call(service.get_design, design_id)
+            payload = json.dumps(record)
+            if payload != last:
+                last = payload
+                yield f"data: {payload}\n\n"
+            if record["status"] in terminal:
+                return
+            await asyncio.sleep(0.1)
+
+    @app.get("/designs/{design_id}/events")
+    async def design_events(design_id: str) -> Any:
+        call(service.get_design, design_id)  # 404 before streaming for unknown id
+        return StreamingResponse(_design_events(design_id), media_type="text/event-stream")
+
+    async def _run_events(run_id: str) -> AsyncIterator[str]:
+        # Stream only while running; emit the terminal/paused record then stop so
+        # the client can switch to its answer/resume controls.
+        terminal = {
+            "completed",
+            "partial",
+            "failed",
+            "refused",
+            "error",
+            "interrupted",
+            "waiting",
+            "held",
+        }
+        last: str | None = None
+        while True:
+            record = call(service.get_run, run_id)
+            payload = json.dumps(record)
+            if payload != last:
+                last = payload
+                yield f"data: {payload}\n\n"
+            if record["status"] in terminal:
+                return
+            await asyncio.sleep(0.1)
+
+    @app.get("/runs/{run_id}/events")
+    async def run_events(run_id: str) -> Any:
+        call(service.get_run, run_id)  # 404 before streaming for unknown id
+        return StreamingResponse(_run_events(run_id), media_type="text/event-stream")
+
+    # Serve the UI from the same app. Mount LAST so it never shadows API routes.
+    if ui_dir.exists():
+
+        @app.get("/")
+        async def index() -> Any:
+            return RedirectResponse("/ui/index.html")
+
+        app.mount("/ui", StaticFiles(directory=str(ui_dir), html=True), name="ui")
+
     return app
 
 
@@ -142,10 +209,13 @@ def serve(
     *,
     port: int = 8765,
     cors_origins: list[str] | None = None,
+    ui_dir: Path | None = None,
 ) -> None:
     """Run the service on ``127.0.0.1`` (never another address: there is no auth)."""
     import uvicorn
 
     uvicorn.run(
-        create_workflow_app(service, cors_origins=cors_origins), host="127.0.0.1", port=port
+        create_workflow_app(service, cors_origins=cors_origins, ui_dir=ui_dir),
+        host="127.0.0.1",
+        port=port,
     )
