@@ -34,6 +34,30 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Workflow environment: choose the backend per request and run each plan on that backend's
+  generic agent shaped by a role. `agentflow.workflow.environment` has the built-in roles
+  (`researcher`, `analyst`, `writer`, `coder`, `reviewer`; overridable by
+  `.agentflow/roles/*.md`), `build_inventory`, `Environment` and the `strict` / `track` / `auto`
+  modes: the extension files a plan relies on are part of the inventory digest (strict revokes
+  the approval when one changes; track keeps the snapshot and warns). Every run gets its own git
+  worktree on its own branch (`agentflow/<run_id>`) with the project's uncommitted extension
+  files copied in; a non-git project is used in place and the run says so.
+  `WorkflowService(environment=...)`, `start_design(backend=, extensions=, mode=)`.
+- `agentflow.workflow.extensions`: read-only discovery of a backend's steering, skills and
+  `AGENTS.md` / `CLAUDE.md` (names, descriptions, hashes, never content), `available_backends()`,
+  and `probe_backend()`, a canary check that runs the real agent in a temporary directory and
+  proves whether it applies those files. Endpoints `GET /backends`,
+  `GET /backends/{name}/extensions`, `POST`/`GET /backends/{name}/probe`, `GET /environment`;
+  a Backends screen in the UI. Verified on Kiro, Claude Code and Codex.
+- Live process: an activity log per design and run (which role or step started, finished,
+  failed, how long), a once-a-second heartbeat on the SSE streams, and every event inside an
+  agent call (text, tool calls and results, permission requests, usage) stored under
+  `GET /designs/{id}/agent-stream` and `GET /runs/{id}/agent-stream`. `collect_text` reports to
+  an observer set with `observing(...)`; the observer cannot change the call and its errors are
+  ignored. Create and Run show "Working: ... N s", the heartbeat and an Agent output panel.
+- Create can reopen a design from the URL (`?design=<id>`) and lists earlier designs; Plans shows
+  an empty state instead of a dead Approve button.
+
 - `agentflow.server.workflow_app` now serves the bundled UI as static files from
   the same FastAPI app: `GET /` redirects to `/ui/index.html` and the mockup
   under `ui-mockup-demo/` is mounted at `/ui` (mounted last so it never shadows
@@ -170,6 +194,14 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   leaves the old one intact; if the delete itself fails the error propagates but the
   new session is already active. `BaseAgentBackend` provides a no-op default; the method
   is not part of the `AgentBackend` protocol, so custom backends without it still conform.
+
+### Changed
+
+- Kiro steps may grant `disclose_context` (the permission Kiro asks before loading a skill) even
+  under `read_only`; without it a skill the agent found could not be used.
+- The UI no longer carries leftover mock data or controls the server ignores (approval mode and
+  design rounds on Create, "cap at read_only" on Plans), and the Run screen stops polling once a
+  run has finished or paused.
 
 ### Fixed
 

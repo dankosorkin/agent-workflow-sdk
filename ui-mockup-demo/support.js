@@ -363,10 +363,67 @@ window.AF = {
     if (!r.ok) throw Object.assign(new Error(r.status + ' ' + p), { status: r.status, detail: await r.json().catch(() => null) });
     return r.json();
   },
-  stream(p, onRecord, onError) {
+  stream(p, onRecord, onError, onTick) {
     const es = new EventSource(this.base + p);
     es.onmessage = (e) => { try { onRecord(JSON.parse(e.data)); } catch (err) { /* ignore keepalive/parse */ } };
+    // The server sends a heartbeat once a second while nothing changes (a model is thinking).
+    es.addEventListener('tick', () => { if (onTick) onTick(Date.now()); });
     es.onerror = (e) => { es.close(); if (onError) onError(e); };
     return () => es.close();
+  },
+  // What the agents did inside their calls: text, tool calls, permissions, usage. Entries carry
+  // a `seq`; pass the last one seen as `after` to continue without repeats.
+  agentStream(p, after, onEntry, onError) {
+    const es = new EventSource(this.base + p + '?after=' + (after || 0));
+    es.onmessage = (e) => { try { onEntry(JSON.parse(e.data)); } catch (err) { /* ignore */ } };
+    es.onerror = (e) => { es.close(); if (onError) onError(e); };
+    return () => es.close();
+  },
+  agentRows(entries) {
+    const clock = (t) => { const d = new Date(t); return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':'); };
+    const j = (v) => { if (v == null) return ''; if (typeof v === 'string') return v; try { return JSON.stringify(v); } catch (e) { return String(v); } };
+    const use = (u) => u ? ['in ' + u.input_tokens, 'out ' + u.output_tokens, u.total_tokens != null ? 'total ' + u.total_tokens : '', u.cost_usd != null ? '$' + u.cost_usd : ''].filter(Boolean).join(' · ') : '';
+    return (entries || []).map((e) => {
+      const who = e.step ? e.step + (e.attempt > 1 ? '#' + e.attempt : '') + (e.backend ? ' · ' + e.backend : '') : (e.role || '') + (e.n > 1 ? '#' + e.n : '');
+      let name = e.type, text = '', color = '#C9D1DB';
+      if (e.type === 'text') { name = 'says'; text = e.text; color = '#E6E9ED'; }
+      else if (e.type === 'tool_call') { name = 'tool.call'; text = (e.title || e.name) + (e.args && Object.keys(e.args).length ? '  ' + j(e.args) : ''); color = '#A9C9FF'; }
+      else if (e.type === 'tool_result') { name = 'tool.' + e.status; text = j(e.content); color = e.status === 'error' ? '#FF9A62' : '#63D6AA'; }
+      else if (e.type === 'permission') { name = 'permission'; text = e.tool + (e.options && e.options.length ? ' · options: ' + e.options.join(', ') : '') + (e.detail && Object.keys(e.detail).length ? '  ' + j(e.detail) : ''); color = '#F2C94C'; }
+      else if (e.type === 'usage') { name = 'usage'; text = use(e); color = '#9AA3AF'; }
+      else if (e.type === 'turn_end') { name = 'turn.end'; text = [e.stop_reason ? 'stop: ' + e.stop_reason : '', use(e.usage), e.text || ''].filter(Boolean).join(' · '); color = '#9AA3AF'; }
+      else if (e.type === 'error') { name = 'error'; text = e.message + (e.detail && Object.keys(e.detail).length ? '  ' + j(e.detail) : ''); color = '#FF9A62'; }
+      else if (e.type === 'gate') { name = 'gate'; text = e.gate + ' ' + e.phase + (e.attempt ? ' · attempt ' + e.attempt : ''); color = '#F2C94C'; }
+      else { name = e.name || e.type; text = e.repr || ''; }
+      return { seq: e.seq, t: clock(e.t), who, name, text, color };
+    });
+  },
+  // Turn a record's activity log into display rows and "what is happening right now".
+  // Observation only: it reads rec.events and never decides anything.
+  activity(rec, now) {
+    const ev = (rec && rec.events) || [];
+    const clock = (t) => { const d = new Date(t); return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':'); };
+    const secs = (x) => (x.seconds != null ? ' in ' + x.seconds + ' s' : '');
+    const open = {};
+    const rows = ev.map((x) => {
+      let name, text, color = '#C9D1DB';
+      if (x.kind === 'stage') {
+        const key = 'stage:' + x.role + ':' + x.n;
+        name = 'designer.' + x.state; text = x.role + (x.n > 1 ? ' (call ' + x.n + ')' : '');
+        if (x.state === 'started') { open[key] = { label: x.role, t: x.t }; color = '#7DB0FF'; }
+        else { delete open[key]; color = x.state === 'finished' ? '#63D6AA' : '#FF9A62'; text += secs(x) + (x.error ? ' · ' + x.error : ''); }
+      } else if (x.kind === 'step') {
+        const key = 'step:' + x.step + ':' + x.attempt;
+        name = 'step.' + x.state; text = x.step + ' · ' + (x.backend || '') + (x.attempt > 1 ? ' · attempt ' + x.attempt : '');
+        if (x.state === 'started') { open[key] = { label: x.step + ' on ' + (x.backend || ''), t: x.t }; color = '#7DB0FF'; }
+        else { delete open[key]; color = x.state === 'finished' ? '#63D6AA' : '#FF9A62'; text += secs(x) + (x.error ? ' · ' + x.error : ''); }
+      } else {
+        name = x.kind + '.' + x.state; text = x.questions ? x.questions + ' question(s) for you' : (x.error || '');
+        color = ['done', 'completed'].includes(x.state) ? '#63D6AA' : (['failed', 'error'].includes(x.state) ? '#FF9A62' : (x.state === 'asking' ? '#F2C94C' : '#7DB0FF'));
+      }
+      return { t: clock(x.t), name, text, color };
+    });
+    const cur = Object.values(open).sort((a, b) => b.t - a.t)[0] || null;
+    return { rows, current: cur ? { label: cur.label, seconds: Math.max(0, Math.round((now - cur.t) / 1000)) } : null };
   }
 };

@@ -1,0 +1,20 @@
+{
+  "agents": {
+    "researcher": {
+      "description": "reads code and files, never writes",
+      "permissions": ["read_only"],
+      "backends": [
+        {"backend": "claude_code", "agent": null},
+        {"backend": "codex", "agent": null}
+      ]
+    },
+    "reviewer": {
+      "description": "reviews a result and answers with a structured verdict",
+      "permissions": ["read_only"],
+      "backends": [
+        {"backend": "codex", "agent": null},
+        {"backend": "claude_code", "agent": null}
+      ]
+    }
+  }
+}

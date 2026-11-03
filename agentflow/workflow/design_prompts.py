@@ -57,7 +57,7 @@ def _json(value: Any) -> str:
 
 def inventory_for_designers(inventory: dict[str, Any]) -> dict[str, Any]:
     """What a designer may see: names, descriptions and allowed permissions. No paths, no backends."""
-    return {
+    view: dict[str, Any] = {
         "agents": {
             name: {
                 "description": agent.get("description", ""),
@@ -66,6 +66,17 @@ def inventory_for_designers(inventory: dict[str, Any]) -> dict[str, Any]:
             for name, agent in sorted((inventory.get("agents") or {}).items())
         }
     }
+    extensions = (inventory.get("context") or {}).get("extensions") or []
+    if extensions:
+        view["extensions"] = {
+            "note": "The agent loads these itself. Name one in a step prompt when that step "
+            "should use it (for example 'use the api-design skill'); nothing is pasted for you.",
+            "items": [
+                {"kind": e["kind"], "name": e["name"], "description": e.get("description", "")}
+                for e in extensions
+            ],
+        }
+    return view
 
 
 _ROLE_DESCRIPTIONS = {

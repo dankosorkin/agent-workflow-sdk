@@ -29,6 +29,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
       <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Plans</a>
       <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">New plan</a>
       <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Runs</a>
+      <a href="Backends.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Backends</a>
       <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">Inventory</a>
     </nav>
     <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
@@ -136,8 +137,8 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
         <div style="font-size:13.5px;line-height:1.55;padding:12px 14px;border-radius:10px;background:var(--panel2);color:#C9D1DB">There is no inventory-write endpoint in this server yet. Edit the inventory file the server was started with, then restart. Any such change alters inventory_digest and revokes approvals.</div>
 
         <div style="background:#2A2410;border:1px solid #6B5A1E;border-radius:12px;padding:16px 18px;display:flex;flex-direction:column;gap:12px">
-          <div style="font-size:15px;font-weight:600;color:#F2C94C">This change will revoke 1 approved plan</div>
-          <div style="font-size:14px;line-height:1.6;color:#E6D9A8">inventory_digest a72f19c → new value. Java version audit v3 stops being approved and must be reviewed again. Dependency update v2 is already stale. Runs of revoked plans are held, finished steps keep their results.</div>
+          <div style="font-size:15px;font-weight:600;color:#F2C94C">{{revokeTitle}}</div>
+          <div style="font-size:14px;line-height:1.6;color:#E6D9A8">{{revokeText}}</div>
         </div>
       </section>
     </sc-if>
@@ -148,12 +149,13 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { tab: 'agents', editing: false, inv: null, error: '' };
+    this.state = { tab: 'agents', editing: false, inv: null, plans: [], error: '' };
   }
   async componentDidMount() {
     try {
       const inv = await AF.get('/inventory');
-      this.setState({ inv });
+      const plans = await AF.get('/plans').catch(() => []);
+      this.setState({ inv, plans: plans || [] });
     } catch (e) {
       this.setState({ error: String(e.message || e) });
     }
@@ -181,8 +183,16 @@ class Component extends DCLogic {
         pick: () => this.setState({ tab: id }) };
     });
     tabs[0].tag = String(rawAgents.length);
+    const plans = S.plans || [];
+    const usedBy = {};
+    plans.forEach((p) => (((p.plan || {}).graph || {}).steps || []).forEach((st) => { usedBy[st.agent] = (usedBy[st.agent] || 0) + 1; }));
+    const approved = plans.filter((p) => ((p.plan || {}).approval || {}).status === 'approved');
+    const revokeTitle = approved.length === 0 ? 'No approved plan depends on this inventory' : 'This change will revoke ' + approved.length + ' approved plan' + (approved.length === 1 ? '' : 's');
+    const revokeText = approved.length === 0
+      ? 'inventory_digest changes with any edit. Nothing is approved right now, so nothing would be revoked.'
+      : 'inventory_digest changes with any edit, and each approval is bound to it: ' + approved.map((p) => p.id).join(', ') + ' would have to be approved again. Runs of revoked plans are held; finished steps keep their results.';
     const agents = rawAgents.map((a) => ({
-      name: a.name, desc: a.desc, used: '', changed: false, rowBg: 'transparent',
+      name: a.name, desc: a.desc, used: usedBy[a.name] ? usedBy[a.name] + ' plan(s)' : '—', changed: false, rowBg: 'transparent',
       backends: a.backends.map((b, i) => ({ label: b + (i === 0 ? ' · used' : ''), style: pillBase + (i === 0 ? 'background:#1F2A3D;color:#A9C9FF;' : 'background:#1B2027;color:#9AA3AF;') })),
       perms: a.perms.map((p) => ({ label: p, style: pillBase + (permCol[p] || 'background:#1B2027;color:#C9D1DB;') }))
     }));
@@ -203,7 +213,7 @@ class Component extends DCLogic {
       digest: this.state.inv ? Object.keys((this.state.inv.agents) || {}).length + ' agents' : '—',
       showAgents: S.tab === 'agents', showBackends: S.tab === 'backends', showReserved: S.tab === 'skills' || S.tab === 'mcp',
       reserved: reservedMap[S.tab] || reservedMap.skills,
-      editing: S.editing, editLabel: S.editing ? 'Close editor' : 'Edit inventory',
+      revokeTitle, revokeText, editing: S.editing, editLabel: S.editing ? 'Close editor' : 'Edit inventory',
       toggleEdit: () => this.setState({ editing: !S.editing })
     };
   }

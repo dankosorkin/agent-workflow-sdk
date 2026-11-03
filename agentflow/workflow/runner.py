@@ -49,7 +49,9 @@ and refused up front, never ignored: ``semantic_check``, budgets, timeouts, arti
 from __future__ import annotations
 
 import uuid
-from collections.abc import Awaitable, Callable, Mapping
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextlib import contextmanager, suppress
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any
@@ -91,11 +93,16 @@ __all__ = [
     "build_workflow_graph",
     "collect_text",
     "make_backend",
+    "in_workspace",
+    "observing",
     "resume_plan",
     "run_plan",
     "summarize",
     "unsupported_features",
 ]
+
+#: The Kiro permission that lets an agent load a skill. Harmless: it only reads.
+KIRO_SKILL_PERMISSION = "disclose_context"
 
 #: ``(step, backend_entry, prompt) -> the agent's final text``
 AgentRunner = Callable[[dict[str, Any], dict[str, Any], str], Awaitable[str]]
@@ -196,8 +203,16 @@ def make_backend(entry: dict[str, Any], step: dict[str, Any], *, cwd: Path | str
 
     name = entry["backend"]
     if name == "kiro":
+        from agentflow.backends import ToolAllowlist
         from agentflow.backends.kiro import KiroBackend
 
+        # Kiro asks ``disclose_context`` before it loads a skill's instructions into the model.
+        # It writes nothing, so every Kiro step may grant it; without it a skill the agent found
+        # is silently unusable (the agent answers that it "could not retrieve" it).
+        if permission == "read_only":
+            policy = ToolAllowlist({KIRO_SKILL_PERMISSION})
+        elif permission == "allowlist":
+            policy = ToolAllowlist({*(step.get("tools") or []), KIRO_SKILL_PERMISSION})
         return KiroBackend(entry["agent"], cwd=cwd, permission=policy)
     if name == "claude_code":
         from agentflow.backends.claude_code import ClaudeCodeBackend
@@ -212,13 +227,49 @@ def make_backend(entry: dict[str, Any], step: dict[str, Any], *, cwd: Path | str
     )
 
 
+#: Receives every event of the turn being collected (text, tool calls, permissions, usage...).
+#: Observation only: it cannot change the prompt or the result, and an error in it is ignored.
+_observer: ContextVar[Callable[[Any], None] | None] = ContextVar(
+    "agentflow_workflow_observer", default=None
+)
+
+
+@contextmanager
+def observing(callback: Callable[[Any], None]) -> Iterator[None]:
+    """Within this block, :func:`collect_text` reports each backend event to ``callback``."""
+    token = _observer.set(callback)
+    try:
+        yield
+    finally:
+        _observer.reset(token)
+
+
+#: The directory the agents of the current run work in, when it is not the one the runner was
+#: built with (a run's own worktree). Read when a step starts, so a run cannot leak into another.
+_workspace: ContextVar[Path | str | None] = ContextVar("agentflow_workflow_workspace", default=None)
+
+
+@contextmanager
+def in_workspace(path: Path | str) -> Iterator[None]:
+    """Within this block, :func:`backend_runner` runs its agents in ``path``."""
+    token = _workspace.set(path)
+    try:
+        yield
+    finally:
+        _workspace.reset(token)
+
+
 async def collect_text(backend: Any, prompt: str) -> str:
     """Run one turn on ``backend`` (started and closed here) and return the agent's final text."""
     from agentflow.events import ErrorEvent, TextChunk, TurnEnd
 
+    observer = _observer.get()
     text = ""
     async with backend:
         async for ev in backend.prompt(prompt):
+            if observer is not None:
+                with suppress(Exception):  # observation must never break the run
+                    observer(ev)
             if isinstance(ev, TextChunk):
                 text += ev.text
             elif isinstance(ev, ErrorEvent):
@@ -236,7 +287,7 @@ def backend_runner(*, cwd: Path | str = ".") -> AgentRunner:
     """
 
     async def run(step: dict[str, Any], entry: dict[str, Any], prompt: str) -> str:
-        return await collect_text(make_backend(entry, step, cwd=cwd), prompt)
+        return await collect_text(make_backend(entry, step, cwd=_workspace.get() or cwd), prompt)
 
     return run
 

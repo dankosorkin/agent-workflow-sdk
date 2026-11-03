@@ -32,7 +32,9 @@ Flow::
 
 Limits, stated plainly: a design in progress is not saved (a restart marks it
 ``interrupted``; ask again); a run interrupted by a restart is continued with ``resume``;
-clients poll the ``GET`` routes (there is no event stream yet).
+clients poll the ``GET`` routes or follow the SSE streams. While a design or a run is working the
+service keeps a small activity log (``events(id)``): which role or step started, how long it took,
+whether it failed. It is observation only; nothing in it feeds back into the design or the run.
 
 This module is the logic and needs no web framework; the HTTP adapter is
 ``agentflow.server.workflow_app`` (the ``server`` extra).
@@ -44,17 +46,31 @@ import sqlite3
 import time
 import uuid
 from collections.abc import Callable
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 
 from agentflow.checkpoint.sqlite import SqliteCheckpointer
+from agentflow.events import (
+    ErrorEvent,
+    GateEvent,
+    PermissionRequest,
+    TextChunk,
+    ToolCall,
+    ToolResult,
+    TurnEnd,
+    Usage,
+)
 from agentflow.store.sqlite import SqliteStore
 from agentflow.workflow.design import DesignerRunner, approve_plan, design_plan
+from agentflow.workflow.environment import MODES, Environment, drift, resolve_mode
 from agentflow.workflow.issues import Issue
 from agentflow.workflow.plan import validate_plan
 from agentflow.workflow.runner import (
     AgentRunner,
     PlanRefused,
+    in_workspace,
+    observing,
     resume_plan,
     run_plan,
     unsupported_features,
@@ -71,6 +87,10 @@ class Conflict(RuntimeError):
     """The request is valid but not possible in the current state."""
 
 
+#: Most agent events kept per design or run (oldest dropped). A safety net, not a policy.
+_AGENT_EVENT_CAP = 5000
+
+
 class _Records:
     """Small JSON document table. One connection, used from the event loop only."""
 
@@ -80,7 +100,35 @@ class _Records:
             "CREATE TABLE IF NOT EXISTS docs (kind TEXT, id TEXT, data TEXT, updated REAL,"
             " PRIMARY KEY (kind, id))"
         )
+        self._db.execute(
+            "CREATE TABLE IF NOT EXISTS agent_events (owner TEXT, seq INTEGER, t INTEGER,"
+            " data TEXT, PRIMARY KEY (owner, seq))"
+        )
         self._db.commit()
+
+    def append_event(self, owner: str, data: dict[str, Any]) -> None:
+        row = self._db.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 FROM agent_events WHERE owner = ?", (owner,)
+        ).fetchone()
+        seq = row[0]
+        self._db.execute(
+            "INSERT INTO agent_events VALUES (?, ?, ?, ?)",
+            (owner, seq, int(time.time() * 1000), json.dumps(data, default=str)),
+        )
+        if seq > _AGENT_EVENT_CAP:  # a safety net only; truncation policy comes later
+            self._db.execute(
+                "DELETE FROM agent_events WHERE owner = ? AND seq <= ?",
+                (owner, seq - _AGENT_EVENT_CAP),
+            )
+        self._db.commit()
+
+    def list_events(self, owner: str, after: int = 0, limit: int = 1000) -> list[dict[str, Any]]:
+        rows = self._db.execute(
+            "SELECT seq, t, data FROM agent_events"
+            " WHERE owner = ? AND seq > ? ORDER BY seq LIMIT ?",
+            (owner, after, limit),
+        ).fetchall()
+        return [{"seq": r[0], "t": r[1], **json.loads(r[2])} for r in rows]
 
     def put(self, kind: str, doc: dict[str, Any]) -> None:
         self._db.execute(
@@ -105,6 +153,55 @@ class _Records:
         self._db.close()
 
 
+def _usage_dict(u: Usage | None) -> dict[str, Any] | None:
+    if u is None:
+        return None
+    return {
+        "input_tokens": u.input_tokens,
+        "output_tokens": u.output_tokens,
+        "total_tokens": u.total_tokens,
+        "cost_usd": u.cost_usd,
+    }
+
+
+def _describe(ev: Any, *, streamed_text: bool) -> dict[str, Any]:
+    """One backend event as a plain dict for the agent log. Everything is kept, nothing is cut."""
+    if isinstance(ev, ToolCall):
+        return {
+            "type": "tool_call",
+            "id": ev.id,
+            "name": ev.name,
+            "title": ev.title,
+            "args": ev.args,
+        }
+    if isinstance(ev, ToolResult):
+        return {"type": "tool_result", "id": ev.id, "status": ev.status, "content": ev.content}
+    if isinstance(ev, PermissionRequest):
+        return {
+            "type": "permission",
+            "id": ev.id,
+            "tool": ev.tool,
+            "options": [o.name for o in ev.options],
+            "detail": ev.detail,
+        }
+    if isinstance(ev, Usage):
+        return {"type": "usage", **(_usage_dict(ev) or {})}
+    if isinstance(ev, TurnEnd):
+        out: dict[str, Any] = {
+            "type": "turn_end",
+            "stop_reason": ev.stop_reason,
+            "usage": _usage_dict(ev.usage),
+        }
+        if not streamed_text and ev.text:  # the backend sent the answer only as a whole
+            out["text"] = ev.text
+        return out
+    if isinstance(ev, ErrorEvent):
+        return {"type": "error", "message": ev.message, "detail": ev.detail}
+    if isinstance(ev, GateEvent):
+        return {"type": "gate", "gate": ev.gate, "phase": ev.phase, "attempt": ev.attempt}
+    return {"type": "event", "name": type(ev).__name__, "repr": repr(ev)}
+
+
 def _new_id(prefix: str) -> str:
     return f"{prefix}-{uuid.uuid4().hex[:10]}"
 
@@ -121,6 +218,7 @@ class WorkflowService:
         runner: AgentRunner,
         named_agents: bool = True,
         max_rounds: int = 3,
+        environment: Environment | None = None,
     ) -> None:
         self.dir = Path(data_dir)
         self.dir.mkdir(parents=True, exist_ok=True)
@@ -131,6 +229,7 @@ class WorkflowService:
         self._designer = designer
         self._runner = runner
         self._named_agents = named_agents
+        self._env = environment
         self._max_rounds = max_rounds
         self._tasks: set[asyncio.Task[Any]] = set()
         self._pending: dict[str, asyncio.Future[str]] = {}  # design id -> awaited user reply
@@ -163,11 +262,175 @@ class WorkflowService:
     def inventory(self) -> dict[str, Any]:
         return self._inventory_source()
 
+    def _inventory_for(self, record: dict[str, Any]) -> dict[str, Any]:
+        """The inventory a plan is judged against. A plan designed for a chosen backend carries
+        its own snapshot: ``strict`` re-reads the files (so an edit revokes the approval),
+        ``track`` keeps the snapshot and only reports drift."""
+        snap = record.get("inventory")
+        if snap is None or self._env is None:
+            return self._inventory_source()
+        ctx = record["context"]
+        if resolve_mode(ctx["mode"], record["plan"]) == "strict":
+            return self._env.inventory_for(ctx["backend"], ctx["selection"])
+        return snap
+
+    def environment_info(self) -> dict[str, Any]:
+        return {
+            "enabled": self._env is not None,
+            "project": str(self._env.project) if self._env else None,
+        }
+
+    # -- activity ----------------------------------------------------------------------
+
+    def _emit(self, owner_id: str, kind: str, **data: Any) -> None:
+        """Append one entry to the activity log of a design or run (newest 500 are kept)."""
+        doc = self._records.get("events", owner_id) or {"id": owner_id, "items": []}
+        doc["items"].append({"t": int(time.time() * 1000), "kind": kind, **data})
+        doc["items"] = doc["items"][-500:]
+        self._records.put("events", doc)
+
+    def events(self, owner_id: str) -> list[dict[str, Any]]:
+        """The activity log of a design or run, oldest first (empty when there is none)."""
+        return (self._records.get("events", owner_id) or {}).get("items", [])
+
+    def agent_events(
+        self, owner_id: str, after: int = 0, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        """What the agents did inside their calls (text, tools, permissions, usage), in order."""
+        return self._records.list_events(owner_id, after, limit)
+
+    def _agent_observer(self, owner_id: str, **labels: Any) -> Any:
+        """A callback for :func:`observing` that logs every backend event under ``labels``.
+
+        Consecutive text chunks are joined (flushed at least every half second) so a long answer
+        is a few rows, not thousands. Never raises into the agent call.
+        """
+        buf: list[str] = []
+        state = {"last": time.monotonic(), "streamed": False}
+
+        def flush() -> None:
+            if buf:
+                self._records.append_event(
+                    owner_id, {**labels, "type": "text", "text": "".join(buf)}
+                )
+                buf.clear()
+
+        def observe(ev: Any) -> None:
+            if isinstance(ev, TextChunk):
+                buf.append(ev.text)
+                state["streamed"] = True
+                if time.monotonic() - state["last"] >= 0.5:
+                    flush()
+                    state["last"] = time.monotonic()
+                return
+            flush()
+            state["last"] = time.monotonic()
+            self._records.append_event(
+                owner_id, {**labels, **_describe(ev, streamed_text=state["streamed"])}
+            )
+
+        observe.flush = flush  # type: ignore[attr-defined]
+        return observe
+
+    def _watched_designer(self, design_id: str, designer: DesignerRunner) -> DesignerRunner:
+        counts: dict[str, int] = {}
+
+        async def run(role: str, prompt: str) -> str:
+            counts[role] = n = counts.get(role, 0) + 1
+            self._emit(design_id, "stage", role=role, n=n, state="started")
+            t0 = time.monotonic()
+            observer = self._agent_observer(design_id, role=role, n=n)
+            try:
+                with observing(observer):
+                    out = await designer(role, prompt)
+                observer.flush()
+            except BaseException as exc:
+                observer.flush()
+                self._emit(
+                    design_id,
+                    "stage",
+                    role=role,
+                    n=n,
+                    state="failed",
+                    seconds=round(time.monotonic() - t0, 1),
+                    error=type(exc).__name__,
+                )
+                raise
+            self._emit(
+                design_id,
+                "stage",
+                role=role,
+                n=n,
+                state="finished",
+                seconds=round(time.monotonic() - t0, 1),
+                chars=len(out),
+            )
+            return out
+
+        return run
+
+    def _watched_runner(self, run_id: str, inventory: dict[str, Any] | None = None) -> AgentRunner:
+        counts: dict[str, int] = {}
+
+        async def run(step: dict[str, Any], entry: dict[str, Any], prompt: str) -> str:
+            sid = step["id"]
+            counts[sid] = n = counts.get(sid, 0) + 1
+            where = {"step": sid, "attempt": n, "backend": entry.get("backend")}
+            self._emit(run_id, "step", state="started", **where)
+            t0 = time.monotonic()
+            observer = self._agent_observer(
+                run_id, step=sid, attempt=n, backend=entry.get("backend")
+            )
+            try:
+                preamble = (
+                    ((inventory or {}).get("agents") or {})
+                    .get(step.get("agent"), {})
+                    .get("preamble")
+                )
+                task = f"{preamble}\n\n{prompt}" if preamble else prompt
+                with observing(observer):
+                    out = await self._runner(step, entry, task)
+                observer.flush()
+            except BaseException as exc:
+                observer.flush()
+                self._emit(
+                    run_id,
+                    "step",
+                    state="failed",
+                    seconds=round(time.monotonic() - t0, 1),
+                    error=type(exc).__name__,
+                    **where,
+                )
+                raise
+            self._emit(
+                run_id,
+                "step",
+                state="finished",
+                seconds=round(time.monotonic() - t0, 1),
+                chars=len(out) if isinstance(out, str) else None,
+                **where,
+            )
+            return out
+
+        return run
+
     # -- design ------------------------------------------------------------------------
 
-    def start_design(self, request: str) -> dict[str, Any]:
+    def start_design(
+        self,
+        request: str,
+        *,
+        backend: str | None = None,
+        extensions: list[dict[str, str]] | None = None,
+        mode: str = "auto",
+    ) -> dict[str, Any]:
+        """Start designing a plan. With ``backend`` the plan is built from that backend's generic
+        agent and roles, and from the ``extensions`` (steering, skills, instructions) the user
+        picked; without it the service-wide inventory and designer are used."""
         if not request.strip():
             raise ValueError("the request is empty")
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
         design: dict[str, Any] = {
             "id": _new_id("design"),
             "request": request,
@@ -177,7 +440,18 @@ class WorkflowService:
             "result": None,
             "plan_id": None,
             "error": None,
+            "backend": None,
         }
+        if backend is not None:
+            if self._env is None:
+                raise ValueError("choosing a backend needs an environment; none is configured")
+            selection = [{"kind": e["kind"], "name": e["name"]} for e in extensions or []]
+            design.update(
+                backend=backend,
+                selection=selection,
+                mode=mode,
+                inventory=self._env.inventory_for(backend, selection),  # ValueError if unknown
+            )
         self._records.put("design", design)
         self._spawn(self._design(design["id"]))
         return design
@@ -192,18 +466,25 @@ class WorkflowService:
             self._pending[design_id] = future
             design.update(status="asking", question={"questions": questions})
             self._records.put("design", design)
+            self._emit(design_id, "design", state="asking", questions=len(questions))
             try:
                 return await future
             finally:
                 self._pending.pop(design_id, None)
 
+        self._emit(design_id, "design", state="started")
+        if design.get("backend") and self._env is not None:
+            designer, named = self._env.designer_for(design["backend"])
+            inventory = design["inventory"]
+        else:
+            designer, named, inventory = self._designer, self._named_agents, self.inventory()
         try:
             result = await design_plan(
                 design["request"],
-                self.inventory(),
-                self._designer,
+                inventory,
+                self._watched_designer(design_id, designer),
                 max_rounds=self._max_rounds,
-                named_agents=self._named_agents,
+                named_agents=named,
                 ask=ask,
             )
         except asyncio.CancelledError:
@@ -211,6 +492,7 @@ class WorkflowService:
         except Exception as exc:
             design.update(status="failed", question=None, error=f"{type(exc).__name__}: {exc}")
             self._records.put("design", design)
+            self._emit(design_id, "design", state="failed", error=type(exc).__name__)
             return
         design.update(
             status="done" if result.plan is not None else "failed",
@@ -221,9 +503,17 @@ class WorkflowService:
         )
         if result.plan is not None:
             plan = {"id": _new_id("plan"), "design_id": design_id, "plan": result.plan}
+            if design.get("backend"):
+                plan["inventory"] = design["inventory"]
+                plan["context"] = {
+                    "backend": design["backend"],
+                    "selection": design["selection"],
+                    "mode": design["mode"],
+                }
             self._records.put("plan", plan)
             design["plan_id"] = plan["id"]
         self._records.put("design", design)
+        self._emit(design_id, "design", state="done" if result.plan is not None else "failed")
 
     def get_design(self, design_id: str) -> dict[str, Any]:
         design = self._records.get("design", design_id)
@@ -257,14 +547,17 @@ class WorkflowService:
 
     def check_plan(self, plan_id: str) -> list[Issue]:
         """Everything that would stop this plan from being approved or run now."""
-        plan = self.get_plan(plan_id)["plan"]
-        return validate_plan(plan, inventory=self.inventory()) + unsupported_features(plan)
+        record = self.get_plan(plan_id)
+        plan = record["plan"]
+        return validate_plan(plan, inventory=self._inventory_for(record)) + unsupported_features(
+            plan
+        )
 
     def approve(self, plan_id: str, by: str) -> dict[str, Any]:
         if not by.strip():
             raise ValueError("'by' must name who approves")
         record = self.get_plan(plan_id)
-        record["plan"] = approve_plan(record["plan"], self.inventory(), by=by)
+        record["plan"] = approve_plan(record["plan"], self._inventory_for(record), by=by)
         self._records.put("plan", record)
         return record
 
@@ -279,41 +572,73 @@ class WorkflowService:
             "status": "running",
             "outcome": None,
             "issues": [],
+            "warnings": [],
+            "workspace": None,
             "error": None,
         }
         self._records.put("run", run)
-        self._spawn(self._run(run["id"], record["plan"], first=True))
+        self._spawn(self._run(run["id"], record, first=True))
         return run
 
     async def _run(
-        self, run_id: str, plan: dict[str, Any], *, first: bool, answer: Any = None
+        self, run_id: str, record: dict[str, Any], *, first: bool, answer: Any = None
     ) -> None:
         run = self._records.get("run", run_id)
         assert run is not None
+        plan = record["plan"]
+        context = record.get("context")
+
+        def inventory_now() -> dict[str, Any]:
+            return self._inventory_for(record)
+
         common: dict[str, Any] = {
             "store": self._store,
             "checkpointer": self._checkpointer,
             "ask_mode": "interrupt",
-            "inventory_source": self._inventory_source,
+            "inventory_source": inventory_now,
         }
+        self._emit(run_id, "run", state="started" if first else "resumed")
         try:
-            if first:
-                outcome = await run_plan(
-                    plan,
-                    self.inventory(),
-                    self._runner,
-                    params=run["params"],
-                    thread=run_id,
-                    **common,
+            inventory = inventory_now()
+            runner = self._watched_runner(run_id, inventory)
+            workspace = run.get("workspace")
+            if workspace is None and context and self._env is not None:
+                workspace = await asyncio.to_thread(
+                    self._env.prepare_workspace, run_id, context["backend"]
                 )
-            elif answer is None:
-                outcome = await resume_plan(
-                    plan, self.inventory(), self._runner, thread=run_id, **common
+                run["workspace"] = workspace
+                self._records.put("run", run)
+                self._emit(
+                    run_id,
+                    "workspace",
+                    state=workspace["kind"],
+                    path=workspace["path"],
+                    branch=workspace.get("branch"),
+                    note=workspace["note"],
                 )
-            else:
-                outcome = await resume_plan(
-                    plan, self.inventory(), self._runner, thread=run_id, answer=answer, **common
+            if context and self._env is not None and resolve_mode(context["mode"], plan) == "track":
+                changed = drift(
+                    record["inventory"],
+                    self._env.inventory_for(context["backend"], context["selection"]),
                 )
+                if changed:
+                    run["warnings"] = [
+                        f"context changed since the plan was designed: {', '.join(changed)}"
+                    ]
+                    self._records.put("run", run)
+                    self._emit(run_id, "context", state="changed", files=changed)
+            where = in_workspace(workspace["path"]) if workspace else nullcontext()
+            with where:
+                if first:
+                    outcome = await run_plan(
+                        plan, inventory, runner, params=run["params"], thread=run_id, **common
+                    )
+                elif answer is None:
+                    outcome = await resume_plan(plan, inventory, runner, thread=run_id, **common)
+                else:
+                    outcome = await resume_plan(
+                        plan, inventory, runner, thread=run_id, answer=answer, **common
+                    )
         except asyncio.CancelledError:
             raise
         except PlanRefused as exc:
@@ -323,6 +648,7 @@ class WorkflowService:
         else:
             run.update(status=outcome.status, outcome=outcome.to_dict(), issues=[], error=None)
         self._records.put("run", run)
+        self._emit(run_id, "run", state=run["status"])
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         run = self._records.get("run", run_id)
@@ -337,10 +663,10 @@ class WorkflowService:
         run = self.get_run(run_id)
         if run["status"] not in allowed:
             raise Conflict(f"a run in status {run['status']!r} cannot do this")
-        plan = self.get_plan(run["plan_id"])["plan"]
+        record = self.get_plan(run["plan_id"])
         run.update(status="running", issues=[], error=None)
         self._records.put("run", run)
-        self._spawn(self._run(run_id, plan, first=False, answer=answer))
+        self._spawn(self._run(run_id, record, first=False, answer=answer))
         return run
 
     def answer_run(self, run_id: str, answer: Any) -> dict[str, Any]:

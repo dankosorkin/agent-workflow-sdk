@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Backends</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0E1013;font-family:'Inter',system-ui,sans-serif}
+:root{--bg:#0E1013;--panel:#161A1F;--panel2:#1B2027;--line:#262C35;--text:#E6E9ED;--muted:#9AA3AF;--accent:#7DB0FF;--ok:#63D6AA;--warn:#F2C94C;--bad:#FF9A62;--mono:'JetBrains Mono',ui-monospace,monospace}
+a{color:inherit;text-decoration:none}
+button,input{font-family:inherit}
+button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0FF;outline-offset:2px}
+</style>
+</helmet>
+<div style="background:var(--bg);color:var(--text);min-height:1100px;display:flex;flex-direction:column">
+
+  <header style="display:flex;flex-wrap:wrap;align-items:center;gap:16px 28px;padding:14px 28px;border-bottom:1px solid var(--line);background:var(--panel)">
+    <div style="display:flex;align-items:center;gap:10px;font-weight:600;font-size:15px">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#7DB0FF" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="5" cy="12" r="2.5"/><circle cx="19" cy="6" r="2.5"/><circle cx="19" cy="18" r="2.5"/><path d="M7.5 12h4l5-5M11.5 12l5 5"/></svg>
+      agentflow
+    </div>
+    <nav style="display:flex;gap:6px;flex-wrap:wrap" aria-label="Sections">
+      <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Plans</a>
+      <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">New plan</a>
+      <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Runs</a>
+      <a href="Backends.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">Backends</a>
+      <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Inventory</a>
+    </nav>
+    <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
+      <span style="display:flex;align-items:center;gap:7px"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>live</span>
+    </div>
+  </header>
+
+  <main style="padding:28px 32px 48px;display:flex;flex-direction:column;gap:24px;box-sizing:border-box;max-width:1100px;width:100%;margin:0 auto">
+    <section style="display:flex;flex-direction:column;gap:8px">
+      <h1 style="margin:0;font-size:28px;font-weight:600;letter-spacing:-.01em">Backends</h1>
+      <p style="margin:0;font-size:15px;line-height:1.55;color:var(--muted);max-width:820px">Which agents can run on this machine, and what each one picks up by itself. Steering, skills and <span style="font-family:var(--mono)">AGENTS.md</span> / <span style="font-family:var(--mono)">CLAUDE.md</span> are loaded by the backend, not pasted into prompts: put a file where the backend looks and the agent applies it. This page lists what exists and can check that the pickup really happens.</p>
+      <div style="font-size:13px;color:var(--muted)">Project directory: <span style="font-family:var(--mono);color:var(--text)">{{workspace}}</span></div>
+    </section>
+
+    <sc-if value="{{error}}" hint-placeholder-val="{{ false }}">
+      <div style="background:#2E1B12;border:1px solid #7A3E22;border-radius:12px;padding:12px 16px;font-size:14px;line-height:1.5;color:#FFC9A8">{{error}}</div>
+    </sc-if>
+
+    <sc-for list="{{cards}}" as="c" hint-placeholder-count="3">
+      <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px 24px;display:flex;flex-direction:column;gap:16px">
+        <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
+          <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
+            <h2 style="margin:0;font-size:19px;font-weight:600;font-family:var(--mono)">{{c.name}}</h2>
+            <span style="{{c.chip}}">{{c.status}}</span>
+            <span style="font-size:13px;color:var(--muted);font-family:var(--mono)">{{c.version}}</span>
+          </div>
+          <sc-if value="{{c.available}}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;gap:10px">
+              <button onClick="{{c.toggle}}" style="height:40px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:13px;cursor:pointer">{{c.toggleLabel}}</button>
+              <button onClick="{{c.probe}}" style="{{c.probeStyle}}">{{c.probeLabel}}</button>
+            </div>
+          </sc-if>
+        </div>
+
+        <sc-if value="{{c.available}}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-wrap:wrap;gap:22px;font-size:14px;color:var(--muted)">
+            <span>Steering <b style="color:var(--text)">{{c.nSteering}}</b></span>
+            <span>Skills <b style="color:var(--text)">{{c.nSkills}}</b></span>
+            <span>Instructions <b style="color:var(--text)">{{c.nInstructions}}</b></span>
+            <span style="font-family:var(--mono);font-size:12px">fingerprint {{c.fingerprint}}</span>
+          </div>
+
+          <sc-if value="{{c.hasProbe}}" hint-placeholder-val="{{ false }}">
+            <div style="background:var(--bg);border-radius:10px;padding:10px 0">
+              <div style="padding:4px 18px 8px;font-size:12px;color:var(--muted)">{{c.probeNote}}</div>
+              <sc-for list="{{c.probeRows}}" as="r" hint-placeholder-count="3">
+                <div style="display:flex;flex-wrap:wrap;gap:14px;padding:6px 18px;align-items:baseline">
+                  <span style="font-family:var(--mono);font-size:13px;flex:none;width:110px">{{r.kind}}</span>
+                  <span style="{{r.chip}}">{{r.status}}</span>
+                  <span style="font-size:13px;color:#C9D1DB;flex:1 1 300px;overflow-wrap:anywhere">{{r.detail}}</span>
+                </div>
+              </sc-for>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{c.open}}" hint-placeholder-val="{{ false }}">
+            <sc-for list="{{c.groups}}" as="g" hint-placeholder-count="3">
+              <div style="display:flex;flex-direction:column;gap:6px">
+                <div style="font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">{{g.title}} · {{g.count}}</div>
+                <sc-if value="{{g.empty}}" hint-placeholder-val="{{ false }}"><div style="font-size:13px;color:var(--muted);padding:6px 0">{{g.emptyText}}</div></sc-if>
+                <sc-for list="{{g.items}}" as="e" hint-placeholder-count="3">
+                  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;padding:8px 12px;border-radius:8px;background:var(--panel2)">
+                    <span style="font-family:var(--mono);font-size:13px;flex:none;min-width:180px">{{e.name}}</span>
+                    <span style="{{e.chip}}">{{e.scope}}</span>
+                    <span style="font-size:12px;color:var(--muted);font-family:var(--mono)">{{e.inclusion}}</span>
+                    <span style="font-size:13px;color:#C9D1DB;flex:1 1 300px;overflow-wrap:anywhere">{{e.description}}</span>
+                  </div>
+                </sc-for>
+              </div>
+            </sc-for>
+          </sc-if>
+        </sc-if>
+
+        <sc-if value="{{c.missing}}" hint-placeholder-val="{{ false }}">
+          <div style="font-size:14px;color:var(--muted);line-height:1.55">The executable <span style="font-family:var(--mono);color:var(--text)">{{c.binary}}</span> was not found on this machine, so plans cannot run on this backend.</div>
+        </sc-if>
+      </section>
+    </sc-for>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1360,"height":1400}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { backends: [], ext: {}, probes: {}, open: {}, loaded: false, error: '' };
+    this._timer = null;
+  }
+  async componentDidMount() {
+    try {
+      const backends = (await AF.get('/backends')) || [];
+      this.setState({ backends, loaded: true });
+      await Promise.all(backends.filter((b) => b.available).map((b) => this.loadOne(b.backend)));
+    } catch (e) {
+      this.setState({ error: String(e.message || e), loaded: true });
+    }
+  }
+  componentWillUnmount() { if (this._timer) { clearInterval(this._timer); this._timer = null; } }
+  async loadOne(name) {
+    const [ext, probe] = await Promise.all([AF.get('/backends/' + name + '/extensions').catch(() => null), AF.get('/backends/' + name + '/probe').catch(() => null)]);
+    this.setState((st) => ({ ext: { ...st.ext, [name]: ext }, probes: { ...st.probes, [name]: probe } }));
+    if (probe && probe.status === 'running') this.watch();
+  }
+  watch() {
+    if (this._timer) return;
+    this._timer = setInterval(async () => {
+      const running = Object.values(this.state.probes).filter((p) => p && p.status === 'running').map((p) => p.backend);
+      if (!running.length) { clearInterval(this._timer); this._timer = null; return; }
+      for (const n of running) { try { const p = await AF.get('/backends/' + n + '/probe'); this.setState((st) => ({ probes: { ...st.probes, [n]: p } })); } catch (e) { /* keep polling */ } }
+    }, 1500);
+  }
+  async probe(name) {
+    try {
+      const p = await AF.post('/backends/' + name + '/probe', {});
+      this.setState((st) => ({ probes: { ...st.probes, [name]: p }, error: '' }));
+      this.watch();
+    } catch (e) {
+      this.setState({ error: 'Probe refused: ' + (typeof e.detail === 'string' ? e.detail : String(e.message || e)) });
+    }
+  }
+  renderVals() {
+    const S = this.state;
+    const chip = (bg, fg) => 'font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;white-space:nowrap;background:' + bg + ';color:' + fg + ';';
+    const probeChip = { ok: chip('#16382D', '#7EE0B5'), missing: chip('#3D2418', '#FF9A62'), error: chip('#3D2418', '#FF9A62'), not_probed: chip('#1B2027', '#9AA3AF') };
+    const kinds = [['steering', 'Steering', 'No steering files found.'], ['skills', 'Skills', 'No skills found.'], ['instructions', 'Instructions (AGENTS.md / CLAUDE.md)', 'No instruction files found.']];
+    const cards = S.backends.map((b) => {
+      const name = b.backend, ext = S.ext[name], pr = S.probes[name];
+      const all = (ext && ext.extensions) || {};
+      const running = !!(pr && pr.status === 'running');
+      const rows = ((pr && pr.results) || []).map((r) => ({ kind: r.kind, status: r.status.replace('_', ' '), chip: probeChip[r.status] || probeChip.error, detail: r.detail + (r.seconds ? ' (' + r.seconds + ' s)' : '') }));
+      const note = !pr || pr.status === 'never' ? '' : running ? 'Running the real agent in an empty temporary directory with canary files…' : pr.status === 'error' ? 'The check failed: ' + (pr.error || '') : 'Result of the last check: the agent was given canary files and had to apply them.';
+      return {
+        name, available: !!b.available, missing: !b.available, binary: b.binary,
+        status: b.available ? 'available' : 'not installed', chip: b.available ? chip('#16382D', '#7EE0B5') : chip('#3D2418', '#FF9A62'),
+        version: b.version || '',
+        nSteering: (all.steering || []).length, nSkills: (all.skills || []).length, nInstructions: (all.instructions || []).length,
+        fingerprint: (ext && ext.fingerprint) || '—',
+        open: !!S.open[name], toggleLabel: S.open[name] ? 'Hide files' : 'Show files',
+        toggle: () => this.setState((st) => ({ open: { ...st.open, [name]: !st.open[name] } })),
+        probe: () => { if (!running) this.probe(name); },
+        probeLabel: running ? 'Checking…' : 'Check pickup',
+        probeStyle: 'height:40px;padding:0 16px;border-radius:10px;border:0;background:' + (running ? '#2A3A57' : '#7DB0FF') + ';color:' + (running ? '#9AA3AF' : '#0B1220') + ';font-weight:600;font-size:13px;cursor:' + (running ? 'default' : 'pointer') + ';',
+        hasProbe: rows.length > 0 || running, probeRows: rows, probeNote: note,
+        groups: kinds.map(([k, title, emptyText]) => {
+          const items = (all[k] || []).map((e) => ({ name: e.name, scope: e.scope, chip: chip(e.scope === 'project' ? '#1F2A3D' : '#1B2027', e.scope === 'project' ? '#A9C9FF' : '#9AA3AF'), inclusion: e.inclusion || '', description: e.description }));
+          return { title, count: items.length, items, empty: items.length === 0, emptyText };
+        })
+      };
+    });
+    return { cards, workspace: (Object.values(S.ext).find((e) => e && e.workspace) || {}).workspace || '', error: S.error };
+  }
+}
+</script>
+</body>
+</html>

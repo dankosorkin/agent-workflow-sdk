@@ -29,11 +29,12 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
       <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">Plans</a>
       <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">New plan</a>
       <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Runs</a>
+      <a href="Backends.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Backends</a>
       <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Inventory</a>
     </nav>
     <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
       <span style="display:flex;align-items:center;gap:7px"><span style="width:8px;height:8px;border-radius:50%;background:var(--ok)"></span>live</span>
-      <span>inventory a72f19c</span>
+      <span>inventory {{headDigest}}</span>
     </div>
   </header>
 
@@ -66,6 +67,26 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
     </aside>
 
     <main style="flex:999 1 620px;min-width:0;padding:28px 32px 48px;display:flex;flex-direction:column;gap:28px;box-sizing:border-box">
+
+      <sc-if value="{{noPlans}}" hint-placeholder-val="{{ false }}">
+        <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:28px;display:flex;flex-direction:column;gap:14px;max-width:720px">
+          <h1 style="margin:0;font-size:24px;font-weight:600">There is no plan to approve yet</h1>
+          <div style="font-size:15px;line-height:1.6;color:var(--muted)">A plan appears here only after a design has converged. Until then there is nothing to approve or launch.</div>
+          <sc-if value="{{hasPending}}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:14px;font-weight:600;color:#F2C94C">Designs that are still in progress</div>
+            <sc-for list="{{pending}}" as="d" hint-placeholder-count="2">
+              <a href="{{d.href}}" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;text-decoration:none;color:var(--text);padding:12px 14px;border-radius:10px;background:var(--panel2)">
+                <span style="font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;background:#3A2F14;color:#F2C94C;white-space:nowrap">{{d.label}}</span>
+                <span style="font-size:14px;flex:1 1 300px">{{d.title}}</span>
+                <span style="font-family:var(--mono);font-size:12px;color:var(--accent)">open →</span>
+              </a>
+            </sc-for>
+          </sc-if>
+          <div><a href="Create.dc.html" style="display:inline-block;height:44px;line-height:44px;padding:0 20px;border-radius:10px;background:#7DB0FF;color:#0B1220;font-weight:600;font-size:14px;text-decoration:none">New plan from a request</a></div>
+        </section>
+      </sc-if>
+
+      <sc-if value="{{hasPlan}}" hint-placeholder-val="{{ true }}">
 
       <section style="display:flex;flex-direction:column;gap:12px">
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px">
@@ -105,6 +126,27 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
           <div style="border:1px solid #7A3E22;border-radius:10px;padding:10px 12px;background:#2E1B12;font-size:13.5px;color:#FFC9A8;line-height:1.5">Approval refused: {{approveError}}</div>
         </sc-if>
       </section>
+
+      <sc-if value="{{ctxShow}}" hint-placeholder-val="{{ false }}">
+        <section style="display:flex;flex-direction:column;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 22px">
+          <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Where it runs</h2>
+          <div style="display:flex;flex-wrap:wrap;gap:22px;font-size:14px">
+            <span><span style="color:var(--muted)">backend</span> <b style="font-family:var(--mono)">{{ctxBackend}}</b></span>
+            <span><span style="color:var(--muted)">files changed after approval</span> <b>{{ctxModeLabel}}</b></span>
+          </div>
+          <div style="font-size:13px;color:var(--muted);line-height:1.55">{{ctxModeHint}}</div>
+          <sc-if value="{{ctxHasItems}}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px;color:var(--muted)">The plan relies on these files (the agent loads them itself):</div>
+            <sc-for list="{{ctxItems}}" as="e" hint-placeholder-count="2">
+              <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;padding:6px 10px;border-radius:8px;background:var(--panel2)">
+                <span style="font-family:var(--mono);font-size:13px;min-width:150px">{{e.name}}</span>
+                <span style="font-size:12px;color:var(--muted)">{{e.kind}} · {{e.scope}}</span>
+                <span style="font-size:12.5px;color:#C9D1DB;min-width:0;overflow-wrap:anywhere">{{e.description}}</span>
+              </div>
+            </sc-for>
+          </sc-if>
+        </section>
+      </sc-if>
 
       <section style="display:flex;flex-direction:column;gap:14px">
         <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Step graph · where each step runs and with what rights</h2>
@@ -183,19 +225,9 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
             </sc-for>
           </div>
 
-          <div style="display:flex;flex-direction:column;gap:8px">
-            <div style="font-size:13px;color:var(--muted)">Rights for this run</div>
-            <div style="display:flex;flex-wrap:wrap;gap:8px">
-              <sc-for list="{{narrow}}" as="q" hint-placeholder-count="2">
-                <button onClick="{{q.pick}}" aria-pressed="{{q.pressed}}" style="{{q.style}}">{{q.label}}</button>
-              </sc-for>
-            </div>
-            <div style="font-size:13px;color:var(--muted);line-height:1.5">{{narrowHint}}</div>
-          </div>
-
           <div style="display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:10px;background:var(--panel2);font-size:13px;line-height:1.55;color:var(--muted)">
             <div>Backends are not chosen here. Each step runs on the first backend listed for its agent in <span style="font-family:var(--mono);color:var(--text)">inventory.json</span>.</div>
-            <div>Rights come from the approved plan and can only be narrowed for a run, never widened.</div>
+            <div>Every step gets exactly the rights written in the approved plan.</div>
           </div>
 
           <div style="display:flex;flex-wrap:wrap;gap:16px;border-top:1px solid var(--line)">
@@ -250,6 +282,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
         </div>
       </section>
 
+      </sc-if>
     </main>
   </div>
 </div>
@@ -260,14 +293,14 @@ class Component extends DCLogic {
     super(props);
     this.state = {
       plans: [], sel: '', records: {}, issues: {}, runs: [],
-      narrow: 'asis', vals: {}, dry: false, loaded: false, error: '', approveError: ''
+      vals: {}, inventory: null, designs: [], dry: false, loaded: false, error: '', approveError: ''
     };
   }
   async componentDidMount() {
     try {
-      const [plans, runs] = await Promise.all([AF.get('/plans'), AF.get('/runs').catch(() => [])]);
+      const [plans, runs, inventory, designs] = await Promise.all([AF.get('/plans'), AF.get('/runs').catch(() => []), AF.get('/inventory').catch(() => null), AF.get('/designs').catch(() => [])]);
       const sel = plans && plans.length ? plans[0].id : '';
-      this.setState({ plans: plans || [], runs: runs || [], sel, loaded: true });
+      this.setState({ plans: plans || [], runs: runs || [], inventory, designs: designs || [], sel, loaded: true });
       if (sel) this.loadPlan(sel);
     } catch (e) {
       this.setState({ error: String(e.message || e), loaded: true });
@@ -312,6 +345,11 @@ class Component extends DCLogic {
       const msg = Array.isArray(detail) ? detail.map((i) => (i.code || '') + ': ' + (i.message || '')).join('; ') : (typeof detail === 'string' ? detail : String(e.message || e));
       this.setState({ approveError: msg });
     }
+  }
+  _backendOf(agent) {
+    const inv = this.state.inventory, a = inv && inv.agents && inv.agents[agent];
+    const b = a && a.backends && a.backends[0];
+    return (b && b.backend) || '(not in inventory)';
   }
   _planName(rec) {
     const p = rec && rec.plan;
@@ -360,6 +398,11 @@ class Component extends DCLogic {
 
     const rec = S.records[S.sel] || null;
     const plan = (rec && rec.plan) || null;
+    const pctx = (rec && rec.context) || null;
+    const pItems = ((rec && rec.inventory && rec.inventory.context && rec.inventory.context.extensions) || []).map((e) => ({ name: e.name, kind: e.kind, scope: e.scope, description: e.description }));
+    const writes = ((plan && plan.graph && plan.graph.steps) || []).some((st) => (st.permission || 'read_only') !== 'read_only' || st.side_effects);
+    const resolvedMode = pctx ? (pctx.mode === 'auto' ? (writes ? 'strict' : 'track') : pctx.mode) : '';
+    const modeText = { strict: 'The files are part of the approval: editing one revokes it and you approve again.', track: 'The plan keeps the files as they were; a change is shown as a warning on the run and it goes on.' };
     const permCol = { read_only: 'background:#1B2027;color:#9AA3AF;', allowlist: 'background:#1F2A3D;color:#A9C9FF;', full: 'background:#3D2418;color:#FF9A62;' };
     const waves = this._waves(rec);
     const cols = waves.map((w, i) => ({
@@ -368,7 +411,7 @@ class Component extends DCLogic {
         const perm = s.permission || 'read_only';
         const deps = (s.depends_on && s.depends_on.length) ? ('← ' + s.depends_on.join(', ')) : 'start';
         return {
-          id: s.id, agent: s.agent || '', backend: (s.backend || '(from inventory)'),
+          id: s.id, agent: s.agent || '', backend: this._backendOf(s.agent),
           permission: perm, tools: s.tools || [], deps, checks: (s.checks || []).length,
           unsup: [], effects: false, mayAsk: !!(s.may_ask || s.ask), mayAskLabel: 'may ask',
           permStyle: 'font-family:\'JetBrains Mono\',monospace;font-size:11px;font-weight:600;padding:3px 8px;border-radius:6px;' + (permCol[perm] || permCol.read_only)
@@ -388,8 +431,6 @@ class Component extends DCLogic {
     const issueSummary = issues.length + ' issue(s) (' + errs.length + ' errors, ' + warns.length + ' warnings)';
 
     const pill = (on) => 'cursor:pointer;height:44px;padding:0 18px;border-radius:10px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#0E1013') + ';';
-    const narrow = [['asis', 'As approved'], ['ro', 'Cap everything at read_only']].map(([id, label]) => ({ label, pressed: S.narrow === id, style: pill(S.narrow === id), pick: () => this.setState({ narrow: id }) }));
-    const narrowHint = S.narrow === 'asis' ? 'Every step gets exactly the rights written in the approved plan.' : 'Steps that need to write will fail their checks and block their descendants. Use it for a safe trial run.';
 
     const params = (plan && plan.parameters) || {};
     const inputs = Object.keys(params).map((key) => {
@@ -417,12 +458,20 @@ class Component extends DCLogic {
     const ok = !!(ap && ap.status === 'approved');
     const hasErrors = errs.length > 0;
     const prov = (plan && plan.provenance) || {};
+    const lbl = { asking: 'waiting for your answer', designing: 'designing' };
+    const pending = (S.designs || []).filter((d) => d.status === 'asking' || d.status === 'designing').map((d) => {
+      const t = String(d.request || '').replace(/\s+/g, ' ').trim();
+      return { href: 'Create.dc.html?design=' + encodeURIComponent(d.id), label: lbl[d.status], title: t.length > 90 ? t.slice(0, 90) + '…' : t };
+    });
     const boxCol = ok ? '#16382D;border:1px solid #1F5A45' : '#2A2410;border:1px solid #6B5A1E';
     const name = this._planName(rec);
     const st = rec ? statusOf(rec) : 'not_approved';
 
     return {
-      plans, planCount: plans.length, cols, pre, inputs, narrow, narrowHint, runs, issueSummary,
+      noPlans: S.loaded && plans.length === 0, hasPlan: plans.length > 0,
+      hasPending: pending.length > 0, pending,
+      ctxShow: !!pctx, ctxBackend: pctx ? pctx.backend : '', ctxModeLabel: pctx ? (pctx.mode === 'auto' ? 'auto → ' + resolvedMode : pctx.mode) : '', ctxModeHint: modeText[resolvedMode] || '', ctxHasItems: pItems.length > 0, ctxItems: pItems,
+      headDigest: ((prov && prov.inventory_digest) || '').slice(0, 7) || '—', plans, planCount: plans.length, cols, pre, inputs, runs, issueSummary,
       noIssues: validationIssues.length === 0, unsup, unsupSummary, noUnsup: unsup.length === 0,
       error: S.error, approveError: S.approveError,
       approve: () => this.approve(), launch: () => this.launch(),

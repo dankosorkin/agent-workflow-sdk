@@ -29,6 +29,7 @@ button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #7
       <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Plans</a>
       <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">New plan</a>
       <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">Runs</a>
+      <a href="Backends.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Backends</a>
       <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Inventory</a>
     </nav>
     <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
@@ -51,6 +52,13 @@ button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #7
           <span style="font-size:12px;color:var(--muted)">{{transport}}</span>
         </div>
         <div style="font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.7">plan {{planId}} · thread {{runId}}</div>
+        <sc-if value="{{hasWorkspace}}" hint-placeholder-val="{{ false }}">
+          <div style="font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.7">{{workspaceKind}}: <span style="color:var(--text)">{{workspacePath}}</span> <span>{{workspaceBranch}}</span></div>
+          <div style="font-size:12.5px;color:var(--muted)">{{workspaceNote}}</div>
+        </sc-if>
+        <sc-if value="{{hasWarnings}}" hint-placeholder-val="{{ false }}">
+          <div style="background:#2A2410;border:1px solid #6B5A1E;border-radius:10px;padding:10px 14px;font-size:13.5px;line-height:1.5;color:#E6D9A8;max-width:760px">{{warningText}}</div>
+        </sc-if>
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:10px">
         <a href="Runs.dc.html" style="display:inline-flex;align-items:center;height:44px;padding:0 18px;border-radius:10px;border:1px solid var(--line);color:var(--text);font-size:14px">All runs</a>
@@ -222,7 +230,17 @@ button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #7
     </div>
 
     <section style="display:flex;flex-direction:column;gap:12px">
-      <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Event stream</h2>
+      <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+        <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Event stream</h2>
+        <span style="{{signalStyle}}">{{signalLabel}}</span>
+      </div>
+      <sc-if value="{{working}}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:15px;padding:12px 16px;border:1px solid var(--line);border-radius:12px;background:var(--panel)">
+          <span style="width:10px;height:10px;border-radius:50%;background:#7DB0FF;box-shadow:0 0 0 4px #1F2A3D"></span>
+          <span>Working: <span style="font-family:var(--mono)">{{workLabel}}</span> · {{workSeconds}} s</span>
+          <span style="font-size:13px;color:var(--muted)">An agent call sends nothing until it answers; the heartbeat shows the server is alive.</span>
+        </div>
+      </sc-if>
       <div style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:6px 0;overflow-x:auto">
         <div style="min-width:560px">
           <sc-for list="{{events}}" as="e" hint-placeholder-count="8">
@@ -235,6 +253,27 @@ button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #7
         </div>
       </div>
     </section>
+
+      <!-- what the agents did inside their calls -->
+      <sc-if value="{{hasAgent}}" hint-placeholder-val="{{ false }}">
+        <section style="display:flex;flex-direction:column;gap:10px;padding:16px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel)">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between">
+            <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Agent output</h2>
+            <span style="font-size:12px;color:var(--muted)">{{agentNote}}</span>
+          </div>
+          <div id="agent-log" style="max-height:380px;overflow:auto;background:var(--bg);border-radius:10px;padding:6px 0">
+            <sc-for list="{{agentRows}}" as="a" hint-placeholder-count="4">
+              <div style="display:flex;gap:14px;padding:5px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.5">
+                <span style="color:var(--muted);flex:none">{{a.t}}</span>
+                <span style="flex:none;width:150px;color:var(--muted);overflow-wrap:anywhere">{{a.who}}</span>
+                <span style="flex:none;width:90px;color:{{a.color}}">{{a.name}}</span>
+                <span style="color:#C9D1DB;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0">{{a.text}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+      </sc-if>
+
   </main>
 </div>
 </x-dc>
@@ -245,16 +284,18 @@ class Component extends DCLogic {
     const params = new URLSearchParams(window.location.search);
     this.state = {
       runId: params.get('run') || '', record: null, plan: null,
-      sel: '', answer: -1, typed: '', transport: '', error: ''
+      sel: '', answer: -1, typed: '', transport: '', inventory: null, error: '', now: Date.now(), signal: 0, agent: []
     };
-    this._close = null; this._poll = null;
+    this._close = null; this._poll = null; this._timer = null; this._agentClose = null; this._agentSeq = 0; this._agentLen = 0;
   }
   async componentDidMount() {
+    this._timer = setInterval(() => this.setState({ now: Date.now() }), 1000);
     const id = this.state.runId;
     if (!id) { this.setState({ error: 'No run id in the URL (expected ?run=<id>).' }); return; }
     try {
       const rec = await AF.get('/runs/' + id);
       this.setState({ record: rec });
+      AF.get('/inventory').then((inventory) => this.setState({ inventory })).catch(() => {});
       if (rec.plan_id) AF.get('/plans/' + rec.plan_id).then((p) => this.setState({ plan: p })).catch(() => {});
     } catch (e) {
       this.setState({ error: String(e.message || e) });
@@ -262,17 +303,45 @@ class Component extends DCLogic {
     }
     this.openStream();
   }
-  componentWillUnmount() { this.stop(); }
+  componentWillUnmount() {
+    this.stop();
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    if (this._agentClose) { this._agentClose(); this._agentClose = null; }
+  }
+  componentDidUpdate() {
+    const n = (this.state.agent || []).length;
+    if (n !== this._agentLen) {
+      this._agentLen = n;
+      const el = document.getElementById('agent-log');
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }
+  _agentOpen(path) {
+    if (this._agentClose) this._agentClose();
+    this._agentClose = AF.agentStream(path, this._agentSeq || 0, (e) => {
+      if (e.seq <= (this._agentSeq || 0)) return;
+      this._agentSeq = e.seq;
+      this.setState((st) => ({ agent: (st.agent || []).concat(e) }));
+    });
+  }
   stop() {
     if (this._close) { this._close(); this._close = null; }
     if (this._poll) { clearInterval(this._poll); this._poll = null; }
   }
-  onRun(rec) { this.setState({ record: rec }); }
+  onRun(rec) {
+    this.setState({ record: rec, signal: Date.now() });
+    // Nothing changes on its own after a final or paused status: stop streaming and polling.
+    // answer / resume re-open the stream.
+    const st = rec && rec.status;
+    if (['completed', 'partial', 'failed', 'refused', 'error', 'interrupted'].includes(st)) { this.stop(); this.setState({ transport: 'finished' }); }
+    else if (['waiting', 'held'].includes(st)) { this.stop(); this.setState({ transport: 'paused, waiting for you' }); }
+  }
   openStream() {
     const id = this.state.runId;
     this.stop();
     this.setState({ transport: 'live (SSE)' });
-    this._close = AF.stream('/runs/' + id + '/events', (rec) => this.onRun(rec), () => this.startPolling());
+    this._agentOpen('/runs/' + id + '/agent-stream');
+    this._close = AF.stream('/runs/' + id + '/events', (rec) => this.onRun(rec), () => this.startPolling(), (t) => this.setState({ signal: t }));
   }
   startPolling() {
     if (this._poll) return;
@@ -310,6 +379,11 @@ class Component extends DCLogic {
   _outcome() { const r = this.state.record; return (r && r.outcome) || null; }
   _question() { const o = this._outcome(); return (o && o.question) || null; }
   _options() { const q = this._question(); return (q && (q.options || [])) || []; }
+  _backendOf(agent) {
+    const inv = this.state.inventory, a = inv && inv.agents && inv.agents[agent];
+    const b = a && a.backends && a.backends[0];
+    return (b && b.backend) || '(not in inventory)';
+  }
   _planSteps() { return (this.state.plan && this.state.plan.plan && this.state.plan.plan.graph && this.state.plan.plan.graph.steps) || []; }
 
   renderVals() {
@@ -319,17 +393,26 @@ class Component extends DCLogic {
     const outcome = this._outcome();
     const planSteps = this._planSteps();
     const stepIds = planSteps.length ? planSteps.map((s) => s.id) : Object.keys((outcome && outcome.steps) || {});
-    const agentOf = {}; planSteps.forEach((s) => { agentOf[s.id] = [s.agent || '', s.backend || '(inventory)', s.permission || '']; });
+    const agentOf = {}; planSteps.forEach((s) => { agentOf[s.id] = [s.agent || '', this._backendOf(s.agent), s.permission || '']; });
 
     // Map the live per-step status onto the mock status keys used for styling.
     const stepStatus = (outcome && outcome.steps) || {};
+    // A step is "running" only while the activity log says its agent call is open; the others wait.
+    const openSteps = {}, answeredSteps = {};
+    ((rec && rec.events) || []).forEach((x) => {
+      if (x.kind !== 'step') return;
+      if (x.state === 'started') { openSteps[x.step] = true; delete answeredSteps[x.step]; }
+      else { delete openSteps[x.step]; if (x.state === 'finished') answeredSteps[x.step] = true; }
+    });
+    const hasStepLog = ((rec && rec.events) || []).some((x) => x.kind === 'step');
     const mapStep = (sid) => {
       const st = (stepStatus[sid] && stepStatus[sid].status) || null;
       if (st === 'ok') return 'done';
       if (st === 'failed') return 'failed';
       if (st === 'blocked') return 'blocked';
       // No per-step record yet: infer from run status.
-      if (status === 'running') return 'running';
+      // The run's own verdict on a step arrives at the end; until then the log says what the agent did.
+      if (status === 'running') return hasStepLog && !openSteps[sid] ? (answeredSteps[sid] ? 'answered' : 'queued') : 'running';
       if (status === 'waiting') return 'waiting';
       if (status === 'held') return 'held';
       return 'queued';
@@ -341,6 +424,7 @@ class Component extends DCLogic {
       waiting: ['?', 'asks you', 'background:#3A2F14;color:#F2C94C;'],
       held: ['‖', 'held', 'background:#3D2418;color:#FF9A62;'],
       queued: ['', 'queued', 'background:#1B2027;color:#9AA3AF;'],
+      answered: ['…', 'answered', 'background:#1F2A3D;color:#A9C9FF;'],
       failed: ['✕', 'failed', 'background:#3D2418;color:#FF9A62;'],
       blocked: ['⊘', 'blocked', 'background:#2A2F36;color:#C9D1DB;']
     };
@@ -357,6 +441,7 @@ class Component extends DCLogic {
       const s = states[id];
       if (s === 'blocked') return blockedReason[id] || 'blocked by a failed ancestor';
       if (s === 'failed') return failedError[id] || 'failed';
+      if (s === 'answered') return 'answered, checking';
       if (s === 'done') return 'done';
       if (s === 'running') return 'running';
       if (s === 'waiting') return 'waiting for your answer';
@@ -383,6 +468,7 @@ class Component extends DCLogic {
     else if (cs === 'failed') { note = 'The step failed. Its descendants are blocked.'; output = failedError[sel] || 'No valid output.'; }
     else if (cs === 'blocked') { note = blockedReason[sel] || 'Blocked by a failed ancestor.'; output = 'Not run.'; }
     else if (cs === 'running') { output = '(running…)'; }
+    else if (cs === 'answered') { output = '(the agent answered; the result is being checked)'; }
     else if (cs === 'waiting') { note = 'This run is waiting for your answer. See the card above.'; output = 'Not run yet.'; }
     else if (cs === 'held') { note = 'Held: the approval is re-checked before every step and is not valid now.'; output = 'Not run.'; }
     const agent = agentOf[sel] || ['', '', ''];
@@ -424,18 +510,33 @@ class Component extends DCLogic {
 
     // Event stream, derived from the per-step statuses and the final run status.
     const ev = (name, text, color) => ({ t: '', name, text, kind: mono + 'flex:none;width:170px;color:' + color + ';' });
+    const agentAll = S.agent || [];
+    const agentRows = AF.agentRows(agentAll.slice(-300));
+    const agentNote = agentAll.length > 300 ? 'showing the last 300 of ' + agentAll.length + ' entries' : agentAll.length + ' entries';
+    const act = AF.activity(rec, S.now);
     const events = [];
-    events.push(ev('run.started', 'plan ' + (rec && rec.plan_id || ''), '#7DB0FF'));
-    stepIds.forEach((id) => {
+    if (act.rows.length) act.rows.forEach((r) => events.push({ t: r.t, name: r.name, text: r.text, kind: mono + 'flex:none;width:170px;color:' + r.color + ';' }));
+    else events.push(ev('run.started', 'plan ' + (rec && rec.plan_id || ''), '#7DB0FF'));
+    if (!act.rows.length) stepIds.forEach((id) => {
       const s = states[id];
       if (s === 'done') events.push(ev('step.ok', id, '#63D6AA'));
       else if (s === 'failed') events.push(ev('step.failed', id + ' · ' + (failedError[id] || ''), '#FF9A62'));
       else if (s === 'blocked') events.push(ev('step.blocked', id + ' · ' + (blockedReason[id] || ''), '#FF9A62'));
       else if (s === 'running') events.push(ev('step.running', id, '#7DB0FF'));
     });
-    if (status === 'waiting') events.push(ev('question.raised', 'run waiting for an answer', '#F2C94C'));
-    if (isTerminal) events.push(ev('run.' + status, outText, (status === 'completed' ? '#63D6AA' : '#FF9A62')));
+    if (!act.rows.length && status === 'waiting') events.push(ev('question.raised', 'run waiting for an answer', '#F2C94C'));
+    if (!act.rows.length && isTerminal) events.push(ev('run.' + status, outText, (status === 'completed' ? '#63D6AA' : '#FF9A62')));
 
+    const live = !!rec && !['completed', 'partial', 'failed', 'refused', 'error', 'interrupted', 'waiting', 'held'].includes(status);
+    const age = S.signal ? Math.round((S.now - S.signal) / 1000) : null;
+    const sg = (bg, fg) => 'font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;white-space:nowrap;background:' + bg + ';color:' + fg + ';';
+    let signalLabel = '', signalStyle = sg('#1B2027', '#9AA3AF');
+    if (live) {
+      if (age === null) signalLabel = 'connecting…';
+      else if (age <= 5) { signalLabel = '● live · signal ' + age + ' s ago'; signalStyle = sg('#16382D', '#7EE0B5'); }
+      else if (age <= 20) { signalLabel = 'no signal for ' + age + ' s'; signalStyle = sg('#3A2F14', '#F2C94C'); }
+      else { signalLabel = 'no signal for ' + age + ' s · the connection may be lost, reload the page'; signalStyle = sg('#3D2418', '#FF9A62'); }
+    }
     // Question banner (waiting).
     const q = this._question() || {};
     const optLabels = (q.options || []);
@@ -456,6 +557,10 @@ class Component extends DCLogic {
     }[status] || '';
 
     return {
+      hasAgent: agentAll.length > 0, agentRows, agentNote,
+      hasWorkspace: !!(rec && rec.workspace), workspaceKind: rec && rec.workspace ? rec.workspace.kind : '', workspacePath: rec && rec.workspace ? rec.workspace.path : '', workspaceBranch: rec && rec.workspace && rec.workspace.branch ? '· branch ' + rec.workspace.branch + (rec.workspace.base ? ' from ' + rec.workspace.base : '') : '', workspaceNote: rec && rec.workspace ? rec.workspace.note : '',
+      hasWarnings: !!(rec && rec.warnings && rec.warnings.length), warningText: rec && rec.warnings ? rec.warnings.join(' · ') : '',
+      signalLabel, signalStyle, working: live && !!act.current, workLabel: act.current ? act.current.label : '', workSeconds: act.current ? act.current.seconds : 0,
       error: S.error, runId: S.runId || '—', planId: (rec && rec.plan_id) || '—', transport: S.transport,
       steps, sel: selObj, events, doneCount, totalSteps, options,
       status: { label: status || 'loading…', style: 'font-size:12px;font-weight:600;padding:4px 12px;border-radius:999px;' + stCol[statusTone] },

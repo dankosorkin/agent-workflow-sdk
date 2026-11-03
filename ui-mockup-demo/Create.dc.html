@@ -29,6 +29,7 @@ button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{
       <a href="Main.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Plans</a>
       <a href="Create.dc.html" style="padding:8px 14px;border-radius:8px;background:var(--panel2);font-size:14px;font-weight:500">New plan</a>
       <a href="Runs.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Runs</a>
+      <a href="Backends.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Backends</a>
       <a href="Inventory.dc.html" style="padding:8px 14px;border-radius:8px;color:var(--muted);font-size:14px">Inventory</a>
     </nav>
     <div style="margin-left:auto;display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-family:var(--mono);font-size:12px;color:var(--muted)">
@@ -49,30 +50,59 @@ button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{
 
     <!-- phase A -->
     <sc-if value="{{notStarted}}" hint-placeholder-val="{{ false }}">
+      <sc-if value="{{hasDesigns}}" hint-placeholder-val="{{ false }}">
+        <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 24px;display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Your earlier designs</div>
+          <sc-for list="{{designs}}" as="d" hint-placeholder-count="3">
+            <a href="{{d.href}}" style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;text-decoration:none;color:var(--text);padding:10px 12px;border-radius:10px;background:var(--panel2)">
+              <span style="{{d.chip}}">{{d.label}}</span>
+              <span style="font-size:14px;flex:1 1 300px">{{d.title}}</span>
+              <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">{{d.id}}</span>
+            </a>
+          </sc-for>
+        </section>
+      </sc-if>
       <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:24px;display:flex;flex-direction:column;gap:22px">
         <label style="display:flex;flex-direction:column;gap:8px">
           <span style="font-size:14px;font-weight:500">Request</span>
           <textarea rows="5" value="{{request}}" onChange="{{onRequest}}" placeholder="Describe the task in plain language." style="resize:vertical;box-sizing:border-box;padding:14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;line-height:1.55"></textarea>
         </label>
 
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <div style="font-size:13px;color:var(--muted)">Approval mode</div>
+        <!-- where the plan runs -->
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:14px;font-weight:500">Backend</div>
           <div style="display:flex;flex-wrap:wrap;gap:8px">
-            <sc-for list="{{modes}}" as="m" hint-placeholder-count="2">
+            <sc-for list="{{backendChoices}}" as="b" hint-placeholder-count="3">
+              <button onClick="{{b.pick}}" aria-pressed="{{b.pressed}}" style="{{b.style}}">{{b.label}}</button>
+            </sc-for>
+          </div>
+          <div style="font-size:13px;line-height:1.55;color:var(--muted)">Every step is done by this backend's own agent, shaped by a role (researcher, analyst, writer, coder, reviewer). Its steering, skills and <span style="font-family:var(--mono)">AGENTS.md</span> / <span style="font-family:var(--mono)">CLAUDE.md</span> apply by themselves. Each run gets its own git worktree, so your checkout is not touched.</div>
+        </div>
+
+        <sc-if value="{{hasExtChoices}}" hint-placeholder-val="{{ false }}">
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <div style="font-size:14px;font-weight:500">Rely on <span style="color:var(--muted);font-weight:400">· optional: the plan may name these, and a change to them is noticed</span></div>
+            <div style="max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--bg)">
+              <sc-for list="{{extChoices}}" as="e" hint-placeholder-count="4">
+                <button onClick="{{e.toggle}}" aria-pressed="{{e.on}}" style="{{e.style}}">
+                  <span style="font-family:var(--mono);font-size:13px;flex:none">{{e.mark}}</span>
+                  <span style="font-family:var(--mono);font-size:13px;flex:none;min-width:150px;text-align:left">{{e.name}}</span>
+                  <span style="font-size:12px;color:var(--muted);flex:none">{{e.kind}} · {{e.scope}}</span>
+                  <span style="font-size:12.5px;color:#C9D1DB;text-align:left;min-width:0;overflow-wrap:anywhere">{{e.description}}</span>
+                </button>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <div style="font-size:14px;font-weight:500">If a file the plan relies on changes after approval</div>
+          <div style="display:flex;flex-wrap:wrap;gap:8px">
+            <sc-for list="{{modeChoices}}" as="m" hint-placeholder-count="3">
               <button onClick="{{m.pick}}" aria-pressed="{{m.pressed}}" style="{{m.style}}">{{m.label}}</button>
             </sc-for>
           </div>
-          <div style="font-size:13px;color:var(--muted);line-height:1.5">{{modeHint}}</div>
-        </div>
-
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <div style="font-size:13px;color:var(--muted)">Design rounds, <span style="font-family:var(--mono)">max_design_rounds</span></div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px">
-            <sc-for list="{{rounds}}" as="n" hint-placeholder-count="4">
-              <button onClick="{{n.pick}}" aria-pressed="{{n.pressed}}" style="{{n.style}}">{{n.label}}</button>
-            </sc-for>
-          </div>
-          <div style="font-size:13px;color:var(--muted);line-height:1.5">Default 3. When the limit is reached with open remarks, the plan goes to you with those remarks. It is never accepted silently and the loop never runs on.</div>
+          <div style="font-size:13px;line-height:1.55;color:var(--muted)">{{modeHint}}</div>
         </div>
 
         <div style="padding:14px;border-radius:10px;background:var(--panel2);font-size:13px;line-height:1.55;color:var(--muted)">
@@ -87,7 +117,7 @@ button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{
     <sc-if value="{{started}}" hint-placeholder-val="{{ true }}">
 
       <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 22px;display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between">
-        <div style="font-size:14px;line-height:1.5;color:var(--muted);max-width:700px">“{{requestShort}}” · approval <span style="font-family:var(--mono);color:var(--text)">{{S_mode}}</span> · <span style="font-family:var(--mono);color:var(--text)">max_design_rounds {{S_rounds}}</span></div>
+        <div style="font-size:14px;line-height:1.5;color:var(--muted);max-width:700px">“{{requestShort}}”</div>
         <button onClick="{{reset}}" style="height:40px;padding:0 16px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:13px;cursor:pointer">Edit request</button>
       </section>
 
@@ -96,6 +126,52 @@ button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{
         <span style="{{statusChip}}">{{statusLabel}}</span>
         <span style="font-size:13px;color:var(--muted)">design <span style="font-family:var(--mono);color:var(--text)">{{designId}}</span></span>
       </section>
+
+      <!-- live activity: what is happening right now, and proof the connection is alive -->
+      <sc-if value="{{hasActivity}}" hint-placeholder-val="{{ false }}">
+        <section style="display:flex;flex-direction:column;gap:12px;padding:16px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel)">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
+            <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Activity</h2>
+            <span style="{{signalStyle}}">{{signalLabel}}</span>
+          </div>
+          <sc-if value="{{working}}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:15px">
+              <span style="width:10px;height:10px;border-radius:50%;background:#7DB0FF;box-shadow:0 0 0 4px #1F2A3D"></span>
+              <span>Working: <span style="font-family:var(--mono)">{{workLabel}}</span> · {{workSeconds}} s</span>
+            </div>
+            <div style="font-size:13px;color:var(--muted);line-height:1.5">A model call can take minutes and sends nothing until it answers. The server heartbeat above shows the connection and the server are alive; this line shows which call is running and for how long.</div>
+          </sc-if>
+          <div style="background:var(--bg);border-radius:10px;padding:6px 0">
+            <sc-for list="{{activityRows}}" as="e" hint-placeholder-count="4">
+              <div style="display:flex;gap:16px;padding:6px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.5">
+                <span style="color:var(--muted);flex:none">{{e.t}}</span>
+                <span style="flex:none;width:170px;color:{{e.color}}">{{e.name}}</span>
+                <span style="color:#C9D1DB">{{e.text}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+      </sc-if>
+
+      <!-- what the agents did inside their calls -->
+      <sc-if value="{{hasAgent}}" hint-placeholder-val="{{ false }}">
+        <section style="display:flex;flex-direction:column;gap:10px;padding:16px 20px;border:1px solid var(--line);border-radius:12px;background:var(--panel)">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;justify-content:space-between">
+            <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Agent output</h2>
+            <span style="font-size:12px;color:var(--muted)">{{agentNote}}</span>
+          </div>
+          <div id="agent-log" style="max-height:380px;overflow:auto;background:var(--bg);border-radius:10px;padding:6px 0">
+            <sc-for list="{{agentRows}}" as="a" hint-placeholder-count="4">
+              <div style="display:flex;gap:14px;padding:5px 16px;font-family:var(--mono);font-size:12.5px;line-height:1.5">
+                <span style="color:var(--muted);flex:none">{{a.t}}</span>
+                <span style="flex:none;width:150px;color:var(--muted);overflow-wrap:anywhere">{{a.who}}</span>
+                <span style="flex:none;width:90px;color:{{a.color}}">{{a.name}}</span>
+                <span style="color:#C9D1DB;white-space:pre-wrap;overflow-wrap:anywhere;min-width:0">{{a.text}}</span>
+              </div>
+            </sc-for>
+          </div>
+        </section>
+      </sc-if>
 
       <!-- question from the orchestrator -->
       <sc-if value="{{asking}}" hint-placeholder-val="{{ false }}">
@@ -154,7 +230,7 @@ button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{
         </div>
         <sc-for list="{{passes}}" as="p" hint-placeholder-count="2">
           <div style="border:1px solid var(--line);border-radius:12px;background:var(--panel2);padding:16px;display:flex;flex-direction:column;gap:12px">
-            <div style="font-size:14px;font-weight:500">Round {{p.n}} of {{S_rounds}}</div>
+            <div style="font-size:14px;font-weight:500">Round {{p.n}}</div>
             <sc-for list="{{p.rows}}" as="r" hint-placeholder-count="3">
               <div style="display:flex;gap:12px;align-items:flex-start">
                 <span style="{{r.badge}}">{{r.mark}}</span>
@@ -193,175 +269,6 @@ button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{
         </section>
       </sc-if>
 
-      <!-- review & approval -->
-      <sc-if value="{{reviewable}}" hint-placeholder-val="{{ true }}">
-      <section style="background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;display:flex;flex-direction:column;gap:20px">
-        <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
-          <span style="width:26px;height:26px;border-radius:50%;background:#3A2F14;color:#F2C94C;display:inline-flex;align-items:center;justify-content:center;font-size:13px;font-weight:600">!</span>
-          <h2 style="margin:0;font-size:16px;font-weight:600">3 · Review effective rights</h2>
-        </div>
-
-        <div style="display:flex;flex-wrap:wrap;gap:12px 32px;padding:14px 16px;border-radius:10px;background:var(--panel2)">
-          <div><div style="font-size:12px;color:var(--muted)">plan_hash (what you approve)</div><div style="font-family:var(--mono);font-size:14px;margin-top:4px">{{planHash}}</div></div>
-          <div><div style="font-size:12px;color:var(--muted)">inventory_digest</div><div style="font-family:var(--mono);font-size:14px;margin-top:4px">a72f19c</div></div>
-          <div><div style="font-size:12px;color:var(--muted)">skills / mcp</div><div style="font-family:var(--mono);font-size:14px;margin-top:4px">empty (reserved)</div></div>
-        </div>
-
-        <!-- auto threshold -->
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between">
-            <div style="font-size:14px;font-weight:500">Auto-approval threshold</div>
-            <span style="{{auto.chip}}">{{auto.label}}</span>
-          </div>
-          <sc-if value="{{auto.fallback}}" hint-placeholder-val="{{ false }}">
-            <div style="background:#2A2410;border:1px solid #6B5A1E;border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.55;color:#E6D9A8">Mode <span style="font-family:var(--mono)">auto</span> was requested but fell back to <span style="font-family:var(--mono)">manual</span>. Reason: {{auto.reason}}</div>
-          </sc-if>
-          <sc-for list="{{auto.items}}" as="a" hint-placeholder-count="4">
-            <div style="display:flex;gap:10px;align-items:flex-start;font-size:13.5px;line-height:1.5"><span style="{{a.badge}}">{{a.mark}}</span><span>{{a.text}}</span></div>
-          </sc-for>
-        </div>
-
-        <!-- per step -->
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div style="font-size:14px;font-weight:500">Per step: backend, rights, commands and data bindings</div>
-          <sc-for list="{{steps}}" as="s" hint-placeholder-count="5">
-            <div style="border:1px solid var(--line);border-radius:12px;padding:16px;background:var(--panel2);display:flex;flex-direction:column;gap:12px">
-              <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:baseline">
-                <span style="font-family:var(--mono);font-size:14px;font-weight:500">{{s.id}}</span>
-                <span style="font-size:13px;color:var(--muted)">agent {{s.agent}} · backend <span style="font-family:var(--mono);color:var(--text)">{{s.backend}}</span></span>
-                <span style="{{s.permStyle}}">{{s.permission}}</span>
-                <sc-if value="{{s.isFull}}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;font-weight:600;color:#FF9A62">full access, needs your explicit approval</span></sc-if>
-              </div>
-              <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
-                <span style="font-size:12px;color:var(--muted)">tools</span>
-                <sc-for list="{{s.tools}}" as="t" hint-placeholder-count="1"><span style="font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:var(--bg)">{{t}}</span></sc-for>
-                <sc-if value="{{s.noTools}}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;color:var(--muted)">none</span></sc-if>
-                <sc-if value="{{s.mayAsk}}" hint-placeholder-val="{{ false }}"><span style="font-size:12px;padding:3px 9px;border-radius:999px;background:#1F2A3D;color:#A9C9FF;margin-left:6px">{{s.mayAskLabel}}</span></sc-if>
-              </div>
-              <sc-if value="{{s.hasCmds}}" hint-placeholder-val="{{ false }}">
-                <div style="display:flex;flex-direction:column;gap:6px">
-                  <div style="font-size:12px;color:var(--muted)">Commands (argv, never a shell string)</div>
-                  <sc-for list="{{s.cmds}}" as="c" hint-placeholder-count="1">
-                    <div style="font-family:var(--mono);font-size:12.5px;line-height:1.6;padding:10px 12px;border-radius:8px;background:var(--bg);overflow-x:auto;white-space:pre">argv   {{c.argv}}
-cwd    {{c.cwd}}
-allow  {{c.allow}}</div>
-                  </sc-for>
-                </div>
-              </sc-if>
-              <div style="display:flex;flex-direction:column;gap:4px">
-                <div style="font-size:12px;color:var(--muted)">Data bindings</div>
-                <sc-for list="{{s.binds}}" as="b" hint-placeholder-count="2">
-                  <div style="font-family:var(--mono);font-size:12.5px;line-height:1.55">{{b.name}} <span style="color:var(--muted)">←</span> {{b.src}} <sc-if value="{{b.via}}" hint-placeholder-val="{{ false }}"><span style="font-family:'Inter',sans-serif;font-size:11px;padding:2px 8px;border-radius:999px;background:#3A2F14;color:#F2C94C;margin-left:6px">indirect, via ancestor {{b.via}}</span></sc-if></div>
-                </sc-for>
-              </div>
-            </div>
-          </sc-for>
-        </div>
-
-        <!-- data flow -->
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div style="font-size:14px;font-weight:500">Data flow <span style="color:var(--muted);font-weight:400">· who feeds whom, from <span style="font-family:var(--mono)">dataflow(steps)</span></span></div>
-          <div style="overflow-x:auto;border:1px solid var(--line);border-radius:12px;background:var(--panel2)">
-            <div style="position:relative;width:1058px;height:300px">
-              <!-- arrows: gap 1 -->
-              <svg width="55" height="8" viewBox="0 0 55 8" preserveAspectRatio="none" style="position:absolute;left:194px;top:154px;width:55px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 0 4 L 55 4"></path></svg>
-              <svg width="8" height="48" viewBox="0 0 8 48" preserveAspectRatio="none" style="position:absolute;left:245px;top:110px;width:8px;height:48px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 4 0 L 4 48"></path></svg>
-              <svg width="8" height="48" viewBox="0 0 8 48" preserveAspectRatio="none" style="position:absolute;left:245px;top:158px;width:8px;height:48px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 4 0 L 4 48"></path></svg>
-              <svg width="54" height="8" viewBox="0 0 54 8" preserveAspectRatio="none" style="position:absolute;left:249px;top:106px;width:54px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#7DB0FF" stroke="none" style="stroke: none; fill: #7DB0FF; fill: context-stroke"/></marker></defs><path d="M 0 4 L 50 4" marker-end="url(#dc-arrow-head-filled-1)"></path></svg>
-              <svg width="54" height="8" viewBox="0 0 54 8" preserveAspectRatio="none" style="position:absolute;left:249px;top:202px;width:54px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#7DB0FF" stroke="none" style="stroke: none; fill: #7DB0FF; fill: context-stroke"/></marker></defs><path d="M 0 4 L 50 4" marker-end="url(#dc-arrow-head-filled-2)"></path></svg>
-              <!-- arrows: gap 2 -->
-              <svg width="55" height="8" viewBox="0 0 55 8" preserveAspectRatio="none" style="position:absolute;left:474px;top:106px;width:55px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 0 4 L 55 4"></path></svg>
-              <svg width="55" height="8" viewBox="0 0 55 8" preserveAspectRatio="none" style="position:absolute;left:474px;top:202px;width:55px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 0 4 L 55 4"></path></svg>
-              <svg width="8" height="96" viewBox="0 0 8 96" preserveAspectRatio="none" style="position:absolute;left:525px;top:110px;width:8px;height:96px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><path d="M 4 0 L 4 96"></path></svg>
-              <svg width="54" height="8" viewBox="0 0 54 8" preserveAspectRatio="none" style="position:absolute;left:529px;top:154px;width:54px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#7DB0FF" stroke="none" style="stroke: none; fill: #7DB0FF; fill: context-stroke"/></marker></defs><path d="M 0 4 L 50 4" marker-end="url(#dc-arrow-head-filled-3)"></path></svg>
-              <!-- arrow: gap 3 -->
-              <svg width="109" height="8" viewBox="0 0 109 8" preserveAspectRatio="none" style="position:absolute;left:754px;top:154px;width:109px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#7DB0FF" stroke="none" style="stroke: none; fill: #7DB0FF; fill: context-stroke"/></marker></defs><path d="M 0 4 L 105 4" marker-end="url(#dc-arrow-head-filled-4)"></path></svg>
-              <!-- indirect arrow over the top: collect_repos -> classify -->
-              <svg width="8" height="108" viewBox="0 0 8 108" preserveAspectRatio="none" style="position:absolute;left:105px;top:24px;width:8px;height:108px;overflow:visible;fill:none;stroke:#F2C94C;stroke-width:2;stroke-dasharray:6 6;stroke-linecap:round;stroke-linejoin:round"><path d="M 4 0 L 4 108"></path></svg>
-              <svg width="560" height="8" viewBox="0 0 560 8" preserveAspectRatio="none" style="position:absolute;left:109px;top:20px;width:560px;height:8px;overflow:visible;fill:none;stroke:#F2C94C;stroke-width:2;stroke-dasharray:6 6;stroke-linecap:round;stroke-linejoin:round"><path d="M 0 4 L 560 4"></path></svg>
-              <svg width="8" height="107" viewBox="0 0 8 107" preserveAspectRatio="none" style="position:absolute;left:665px;top:24px;width:8px;height:107px;overflow:visible;fill:none;stroke:#F2C94C;stroke-width:2;stroke-dasharray:6 6;stroke-linecap:round;stroke-linejoin:round"><defs><marker id="dc-arrow-head-filled-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#F2C94C" stroke="none" style="stroke: none; fill: #F2C94C; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 103" marker-end="url(#dc-arrow-head-filled-5)"></path></svg>
-              <!-- cards -->
-              <div style="position:absolute;left:24px;top:132px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">collect_repos</b><br>repo-scanner</span></div>
-              <div style="position:absolute;left:304px;top:84px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">detect_java</b><br>java-inspector</span></div>
-              <div style="position:absolute;left:304px;top:180px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">read_builds</b><br>build-reader</span></div>
-              <div style="position:absolute;left:584px;top:132px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">classify</b><br>migration-analyst</span></div>
-              <div style="position:absolute;left:864px;top:132px;width:170px;height:52px;box-sizing:border-box;padding:6px 8px;display:flex;align-items:center;justify-content:center;text-align:center;background:#161A1F;border:1px solid #262C35;border-radius:10px;font-size:12px;line-height:16px"><span><b style="font-family:'JetBrains Mono',monospace">write_report</b><br>report-writer</span></div>
-              <!-- labels -->
-              <div style="position:absolute;left:254px;top:82px;width:44px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">repos</div>
-              <div style="position:absolute;left:254px;top:218px;width:44px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">repos</div>
-              <div style="position:absolute;left:483px;top:82px;width:36px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">java</div>
-              <div style="position:absolute;left:477px;top:218px;width:48px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">builds</div>
-              <div style="position:absolute;left:791px;top:130px;width:36px;text-align:center;font-size:13px;line-height:16px;color:#9AA3AF">rows</div>
-              <div style="position:absolute;left:250px;top:36px;width:300px;font-size:13px;line-height:16px;color:#F2C94C">root · indirect, via ancestor collect_repos</div>
-              <!-- legend -->
-              <svg width="40" height="8" viewBox="0 0 40 8" preserveAspectRatio="none" style="position:absolute;left:24px;top:266px;width:40px;height:8px;overflow:visible;fill:none;stroke:#7DB0FF;stroke-width:2;stroke-linecap:round"><path d="M 0 4 L 40 4"></path></svg>
-              <div style="position:absolute;left:72px;top:262px;width:200px;font-size:13px;line-height:16px;color:#9AA3AF">direct, step is in depends_on</div>
-              <svg width="40" height="8" viewBox="0 0 40 8" preserveAspectRatio="none" style="position:absolute;left:330px;top:266px;width:40px;height:8px;overflow:visible;fill:none;stroke:#F2C94C;stroke-width:2;stroke-dasharray:6 6;stroke-linecap:round"><path d="M 0 4 L 40 4"></path></svg>
-              <div style="position:absolute;left:378px;top:262px;width:260px;font-size:13px;line-height:16px;color:#9AA3AF">indirect, <span style="font-family:'JetBrains Mono',monospace">direct: false</span>, through an ancestor</div>
-            </div>
-          </div>
-          <div style="background:var(--bg);border-radius:10px;overflow-x:auto">
-            <table style="width:100%;min-width:520px;border-collapse:collapse;font-family:var(--mono);font-size:12.5px">
-              <thead><tr style="text-align:left;color:var(--muted)"><th style="padding:10px 14px;font-weight:500">from</th><th style="padding:10px 14px;font-weight:500">to</th><th style="padding:10px 14px;font-weight:500">input</th><th style="padding:10px 14px;font-weight:500">direct</th></tr></thead>
-              <tbody>
-                <sc-for list="{{edges}}" as="e" hint-placeholder-count="6">
-                  <tr style="border-top:1px solid var(--line)"><td style="padding:8px 14px">{{e.from}}</td><td style="padding:8px 14px">{{e.to}}</td><td style="padding:8px 14px">{{e.input}}</td><td style="{{e.style}}">{{e.direct}}</td></tr>
-                </sc-for>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- verifier issues -->
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="font-size:14px;font-weight:500">Verifier remarks still open <span style="color:var(--muted);font-weight:400">· {{issues.length}}</span></div>
-          <sc-if value="{{noIssues}}" hint-placeholder-val="{{ false }}"><div style="font-size:13.5px;color:var(--muted)">No open remarks.</div></sc-if>
-          <sc-for list="{{issues}}" as="i" hint-placeholder-count="2">
-            <div style="border:1px solid var(--line);border-left:0;border-radius:12px;padding:14px 16px;background:var(--panel2);display:flex;flex-direction:column;gap:8px">
-              <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">
-                <span style="{{i.sev}}">{{i.severity}}</span>
-                <span style="font-family:var(--mono);font-size:12px;padding:3px 8px;border-radius:6px;background:var(--bg)">{{i.code}}</span>
-                <span style="font-family:var(--mono);font-size:12px;color:var(--muted)">{{i.step}}</span>
-              </div>
-              <div style="font-size:14px;line-height:1.55">{{i.claim}}</div>
-              <div style="font-size:13px;line-height:1.5;color:var(--muted)">Evidence needed: {{i.evidence}}</div>
-              <sc-if value="{{i.suggest}}" hint-placeholder-val="{{ false }}"><div style="font-size:13px;line-height:1.5;padding:10px 12px;border-radius:8px;background:var(--bg)"><span style="color:var(--muted)">Suggestion, text only:</span> {{i.suggest}}</div></sc-if>
-            </div>
-          </sc-for>
-        </div>
-
-        <!-- designer text -->
-        <div style="border:1px dashed #4A5360;border-radius:12px;padding:14px 16px;display:flex;flex-direction:column;gap:8px">
-          <div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center"><span style="font-size:12px;font-weight:600;padding:3px 9px;border-radius:999px;background:#2A2F36;color:#C9D1DB">Designer’s description</span><span style="font-size:12px;color:var(--muted)">not confirmed, written by a model</span></div>
-          <div style="font-size:13.5px;line-height:1.6;color:#B7BFCA">“Scans the repositories, detects each service’s Java version, rates migration effort and writes a short report with a table per service. Only the report file is written.”</div>
-          <div style="font-size:12.5px;color:var(--muted)">Compare it with the rights above. Only the rights above are enforced.</div>
-        </div>
-
-        <!-- decision -->
-        <sc-if value="{{canDecide}}" hint-placeholder-val="{{ true }}">
-          <div style="display:flex;flex-direction:column;gap:14px;padding-top:6px;border-top:1px solid var(--line)">
-            <sc-if value="{{limitHit}}" hint-placeholder-val="{{ false }}">
-              <label style="display:flex;gap:10px;align-items:flex-start;font-size:14px;line-height:1.5;padding-top:14px"><input type="checkbox" checked="{{ack}}" onChange="{{toggleAck}}" style="width:20px;height:20px;margin-top:1px"><span>I have read the {{openCount}} open remarks and accept them.</span></label>
-            </sc-if>
-            <label style="display:flex;flex-direction:column;gap:6px">
-              <span style="font-size:13px;color:var(--muted)">Note for the designer (used by Reject)</span>
-              <textarea rows="2" placeholder="e.g. the report must be read-only, send it to stdout" style="resize:vertical;box-sizing:border-box;padding:12px 14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:14px"></textarea>
-            </label>
-            <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center">
-              <button onClick="{{approve}}" style="{{approveStyle}}">Approve plan {{planHash}}</button>
-              <button onClick="{{reset}}" style="height:48px;padding:0 20px;border-radius:10px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:14px;cursor:pointer">Reject with note</button>
-            </div>
-            <div style="font-size:13px;color:var(--muted);line-height:1.5">There is no manual plan editing in v1. A rejection sends your note back to the designer for a new round, then validator and verifier run again. If nobody answers, the run stops as <span style="font-family:var(--mono)">awaiting_approval</span>. Approval becomes void if the plan or the inventory changes.</div>
-          </div>
-        </sc-if>
-        <sc-if value="{{saved}}" hint-placeholder-val="{{ false }}">
-          <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:center;background:#16382D;border:1px solid #1F5A45;border-radius:12px;padding:14px 18px">
-            <span style="font-size:14px;color:#BDEFDD;line-height:1.5">Approved <span style="font-family:var(--mono)">java-version-audit</span> v1 · plan_hash {{planHash}} · inventory_digest a72f19c.</span>
-            <a href="Main.dc.html" style="display:inline-flex;align-items:center;height:44px;padding:0 20px;border-radius:10px;background:#63D6AA;color:#06241A;font-weight:600;font-size:14px">Open plan and launch →</a>
-          </div>
-        </sc-if>
-      </section>
-      </sc-if>
     </sc-if>
   </main>
 </div>
@@ -371,15 +278,81 @@ class Component extends DCLogic {
   constructor(props) {
     super(props);
     this.state = {
-      started: false, mode: 'manual', rounds: 3,
-      request: 'Find all services in ~/Development/services that run Java older than 21, rate each by migration effort, and give me a report I can hand to the team lead.',
-      designId: '', record: null, answer: '', error: ''
+      started: false,
+      request: '',
+      designId: '', record: null, answer: '', error: '', designs: [], now: Date.now(), signal: 0, agent: [],
+      backends: [], backend: '', ext: null, picked: {}, mode: 'auto'
     };
-    this._close = null;
+    this._close = null; this._timer = null; this._agentClose = null; this._agentSeq = 0; this._agentLen = 0;
   }
-  componentWillUnmount() { if (this._close) { this._close(); this._close = null; } }
+  async componentDidMount() {
+    this._timer = setInterval(() => this.setState({ now: Date.now() }), 1000);
+    // The design id lives in the URL, so leaving this tab and coming back picks the task up again.
+    const id = new URLSearchParams(window.location.search).get('design');
+    if (id) { await this.open(id); return; }
+    this.loadDesigns();
+    this.loadBackends();
+  }
+  async loadBackends() {
+    try {
+      const all = (await AF.get('/backends')) || [];
+      const ok = all.filter((b) => b.available);
+      this.setState({ backends: all });
+      if (ok.length && !this.state.backend) this.pickBackend(ok[0].backend);
+    } catch (e) { /* the form still works without it */ }
+  }
+  async pickBackend(name) {
+    this.setState({ backend: name, ext: null, picked: {} });
+    try {
+      const ext = await AF.get('/backends/' + name + '/extensions');
+      if (this.state.backend === name) this.setState({ ext });
+    } catch (e) { /* optional */ }
+  }
+  async loadDesigns() {
+    try { this.setState({ designs: (await AF.get('/designs')) || [] }); } catch (e) { /* the list is optional */ }
+  }
+  async open(id) {
+    try {
+      const rec = await AF.get('/designs/' + id);
+      this.setState({ started: true, designId: id, record: rec, request: rec.request || '', error: '' });
+      window.history.replaceState(null, '', '?design=' + encodeURIComponent(id));
+      if (['done', 'failed', 'interrupted'].includes(rec.status)) this._agentOpen('/designs/' + id + '/agent-stream');
+      else {
+        this._stream(id);
+      }
+    } catch (e) {
+      this.setState({ error: 'Cannot open design ' + id + ': ' + String(e.message || e) });
+      this.loadDesigns();
+    }
+  }
+  componentWillUnmount() {
+    if (this._close) { this._close(); this._close = null; }
+    if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    if (this._agentClose) { this._agentClose(); this._agentClose = null; }
+  }
+  componentDidUpdate() {
+    const n = (this.state.agent || []).length;
+    if (n !== this._agentLen) {
+      this._agentLen = n;
+      const el = document.getElementById('agent-log');
+      if (el) el.scrollTop = el.scrollHeight;
+    }
+  }
+  _agentOpen(path) {
+    if (this._agentClose) this._agentClose();
+    this._agentClose = AF.agentStream(path, this._agentSeq || 0, (e) => {
+      if (e.seq <= (this._agentSeq || 0)) return;
+      this._agentSeq = e.seq;
+      this.setState((st) => ({ agent: (st.agent || []).concat(e) }));
+    });
+  }
+  _stream(id) {
+    this._agentOpen('/designs/' + id + '/agent-stream');
+    if (this._close) this._close();
+    this._close = AF.stream('/designs/' + id + '/events', (r) => this.onDesign(r), null, (t) => this.setState({ signal: t }));
+  }
   onDesign(rec) {
-    this.setState({ record: rec });
+    this.setState({ record: rec, signal: Date.now() });
     const terminal = ['done', 'failed', 'interrupted'];
     if (terminal.includes(rec.status) && this._close) { this._close(); this._close = null; }
   }
@@ -387,10 +360,13 @@ class Component extends DCLogic {
     const request = (this.state.request || '').trim();
     if (!request) { this.setState({ error: 'The request is empty.' }); return; }
     try {
-      const d = await AF.post('/designs', { request, mode: this.state.mode, max_rounds: this.state.rounds });
+      const S = this.state;
+      const extensions = Object.keys(S.picked).filter((k) => S.picked[k]).map((k) => { const [kind, name] = k.split('\u0001'); return { kind, name }; });
+      const body = S.backend ? { request, backend: S.backend, extensions, mode: S.mode } : { request };
+      const d = await AF.post('/designs', body);
       this.setState({ started: true, designId: d.id, record: d, error: '' });
-      if (this._close) this._close();
-      this._close = AF.stream('/designs/' + d.id + '/events', (rec) => this.onDesign(rec));
+      window.history.replaceState(null, '', '?design=' + encodeURIComponent(d.id));
+      this._stream(d.id);
     } catch (e) {
       this.setState({ error: String(e.message || e) });
     }
@@ -401,21 +377,56 @@ class Component extends DCLogic {
     try {
       await AF.post('/designs/' + id + '/answer', { answer });
       this.setState({ answer: '' });
-      if (!this._close) this._close = AF.stream('/designs/' + id + '/events', (rec) => this.onDesign(rec));
+      if (!this._close) this._stream(id);
     } catch (e) {
       this.setState({ error: String(e.message || e) });
     }
   }
   reset() {
     if (this._close) { this._close(); this._close = null; }
-    this.setState({ started: false, designId: '', record: null, answer: '', error: '' });
+    if (this._agentClose) { this._agentClose(); this._agentClose = null; }
+    this._agentSeq = 0;
+    this.setState({ started: false, designId: '', record: null, answer: '', error: '', agent: [] });
+    window.history.replaceState(null, '', window.location.pathname);
+    this.loadDesigns();
   }
   renderVals() {
-    const S = this.state, rec = S.record, R = S.rounds;
+    const S = this.state, rec = S.record;
+    const agentAll = S.agent || [];
+    const agentRows = AF.agentRows(agentAll.slice(-300));
+    const agentNote = agentAll.length > 300 ? 'showing the last 300 of ' + agentAll.length + ' entries' : agentAll.length + ' entries';
+    const choice = (on) => 'cursor:pointer;height:40px;padding:0 16px;border-radius:10px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#161A1F') + ';';
+    const backendChoices = S.backends.filter((b) => b.available).map((b) => ({ label: b.backend, pressed: S.backend === b.backend, style: choice(S.backend === b.backend) + "font-family:'JetBrains Mono',monospace;", pick: () => this.pickBackend(b.backend) }));
+    const kindLabel = { steering: 'steering', skills: 'skill', instructions: 'instructions' };
+    const extChoices = [];
+    Object.keys((S.ext && S.ext.extensions) || {}).forEach((kind) => (S.ext.extensions[kind] || []).forEach((e) => {
+      const key = kind + '\u0001' + e.name, on = !!S.picked[key];
+      extChoices.push({ name: e.name, kind: kindLabel[kind] || kind, scope: e.scope, description: e.description, on, mark: on ? '[x]' : '[ ]',
+        style: 'cursor:pointer;display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;padding:8px 10px;border-radius:8px;border:1px solid ' + (on ? '#3A5A8A' : 'transparent') + ';background:' + (on ? '#1F2A3D' : 'transparent') + ';color:#E6E9ED;text-align:left;',
+        toggle: () => this.setState((st) => ({ picked: { ...st.picked, [key]: !st.picked[key] } })) });
+    }));
+    const modeInfo = { auto: ['auto', 'Strict if any step writes or has side effects, otherwise track.'], strict: ['strict', 'The files are part of the approval. Edit one after approving and the approval is revoked; approve again to go on.'], track: ['track', 'The plan keeps the files as they were. If one changes, the run goes on and shows a warning.'] };
+    const modeChoices = Object.keys(modeInfo).map((m) => ({ label: modeInfo[m][0], pressed: S.mode === m, style: choice(S.mode === m), pick: () => this.setState({ mode: m }) }));
+    const act = AF.activity(rec, S.now);
+    const live = rec && (rec.status === 'designing' || rec.status === 'asking');
+    const age = S.signal ? Math.round((S.now - S.signal) / 1000) : null;
+    const sig = (bg, fg) => 'font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;white-space:nowrap;background:' + bg + ';color:' + fg + ';';
+    let sigLabel = '', sigStyle = sig('#1B2027', '#9AA3AF');
+    if (live) {
+      if (age === null) sigLabel = 'connecting…';
+      else if (age <= 5) { sigLabel = '● live · signal ' + age + ' s ago'; sigStyle = sig('#16382D', '#7EE0B5'); }
+      else if (age <= 20) { sigLabel = 'no signal for ' + age + ' s'; sigStyle = sig('#3A2F14', '#F2C94C'); }
+      else { sigLabel = 'no signal for ' + age + ' s · the connection may be lost, reload the page'; sigStyle = sig('#3D2418', '#FF9A62'); }
+    } else if (rec) sigLabel = 'finished';
+    const dChip = (bg, fg) => 'font-size:12px;font-weight:500;padding:3px 10px;border-radius:999px;white-space:nowrap;background:' + bg + ';color:' + fg + ';';
+    const dMap = { asking: ['waiting for your answer', dChip('#3A2F14', '#F2C94C')], designing: ['designing', dChip('#1F2A3D', '#A9C9FF')], done: ['plan ready', dChip('#16382D', '#7EE0B5')], failed: ['failed', dChip('#3D2418', '#FF9A62')], interrupted: ['interrupted', dChip('#3D2418', '#FF9A62')] };
+    const order = { asking: 0, designing: 1, interrupted: 2, failed: 3, done: 4 };
+    const designs = (S.designs || []).slice().sort((a, b) => (order[a.status] ?? 9) - (order[b.status] ?? 9)).map((d) => {
+      const m = dMap[d.status] || [d.status, dChip('#1B2027', '#9AA3AF')];
+      const t = String(d.request || '').replace(/\s+/g, ' ').trim();
+      return { id: d.id, href: 'Create.dc.html?design=' + encodeURIComponent(d.id), label: m[0], chip: m[1], title: t.length > 90 ? t.slice(0, 90) + '…' : t };
+    });
     const pill = (on) => 'cursor:pointer;height:44px;padding:0 18px;border-radius:10px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#0E1013') + ';';
-    const modes = [['manual', 'manual (default)'], ['auto', 'auto']].map(([id, label]) => ({ label, pressed: S.mode === id, style: pill(S.mode === id), pick: () => this.setState({ mode: id }) }));
-    const modeHint = S.mode === 'manual' ? 'You review effective rights and approve the plan hash.' : 'Skips the review only if the plan passes the rights threshold. Otherwise it falls back to manual and says why.';
-    const rounds = [2, 3, 4, 5].map((n) => ({ label: String(n), pressed: S.rounds === n, style: pill(S.rounds === n), pick: () => this.setState({ rounds: n }) }));
 
     const status = rec ? rec.status : '';
     const result = (rec && rec.result) || null;
@@ -483,8 +494,13 @@ class Component extends DCLogic {
     const rShort = (S.request || '').length > 120 ? (S.request || '').slice(0, 117) + '…' : (S.request || '');
 
     return {
-      notStarted: !S.started, started: S.started, S_mode: S.mode, S_rounds: R,
-      modes, modeHint, rounds,
+      hasAgent: agentAll.length > 0, agentRows, agentNote,
+      hasActivity: act.rows.length > 0, activityRows: act.rows.slice(-14), working: S.started && rec && rec.status === 'designing' && !!act.current,
+      workLabel: act.current ? act.current.label : '', workSeconds: act.current ? act.current.seconds : 0,
+      signalLabel: sigLabel, signalStyle: sigStyle,
+      hasDesigns: designs.length > 0, designs,
+      backendChoices, extChoices, hasExtChoices: extChoices.length > 0, modeChoices, modeHint: modeInfo[S.mode][1],
+      notStarted: !S.started, started: S.started,
       request: S.request, requestShort: rShort,
       onRequest: (e) => this.setState({ request: e.target.value }),
       start: () => this.start(), reset: () => this.reset(),
@@ -497,9 +513,7 @@ class Component extends DCLogic {
       designFailed: designFailed || interrupted, failReason,
       hasBrief: !!brief, brief: briefVals,
       hasRounds: passes.length > 0, passes, loop, limitHit, openCount: issues.length,
-      notExecutable, execErrors, issues, noIssues: issues.length === 0,
-      // The hardcoded per-step/dataflow/approval panel is not driven by live data; approval lives on the Plans screen.
-      reviewable: false
+      notExecutable, execErrors, issues, noIssues: issues.length === 0
     };
   }
 }
