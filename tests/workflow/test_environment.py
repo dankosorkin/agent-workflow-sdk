@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import subprocess
+from pathlib import Path
 
 import pytest
 from agentflow.workflow import inventory_digest, validate_inventory
@@ -381,3 +382,163 @@ async def test_the_http_layer_carries_system_backend_launch_binding_and_preview(
         assert started.status_code == 201 and started.json()["binding"]["backend"] == "kiro"
         bad = client.post(f"/plans/{plan_id}/runs", json={**body, "backend": "nope"})
         assert bad.status_code == 422
+
+
+def writing_step(name="out.txt"):
+    """A runner hook that does what a coder does: writes a file into its worktree."""
+
+    def hook(step_id):
+        if step_id == "collect":
+            (Path(runner_mod._workspace.get()) / name).write_text("the agent wrote this\n")
+
+    return hook
+
+
+def branches(project):
+    return git(project, "branch", "--list", "agentflow/*").split()
+
+
+async def test_a_run_that_changed_nothing_leaves_no_worktree_or_branch(project, tmp_path):
+    service, _ = make_service(tmp_path, project)
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(plan_id, {"window": "24h"}, backend="kiro")
+    done = await settle(service, "run", run["id"], FINISHED)
+    ws = done["workspace"]
+    assert done["status"] == "completed" and ws["removed"] is True and ws["ahead"] == 0
+    assert not (tmp_path / "data" / "worktrees" / run["id"]).exists()
+    assert branches(project) == []
+    assert "no changes" in ws["note"]
+
+
+async def test_what_the_agents_wrote_is_saved_on_the_branch_and_the_worktree_is_kept(
+    project, tmp_path
+):
+    service, _ = make_service(tmp_path, project, on_step=writing_step())
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(plan_id, {"window": "24h"}, backend="kiro")
+    done = await settle(service, "run", run["id"], FINISHED)
+    ws = done["workspace"]
+    assert ws.get("removed") is None and ws["ahead"] == 1 and ws["changed"] == 1 and ws["commit"]
+    assert (tmp_path / "data" / "worktrees" / run["id"]).is_dir()
+    assert git(project, "show", f"{ws['branch']}:out.txt") == "the agent wrote this"
+    # the copied extension file is not the agents' work, so it is not in the commit
+    tree = git(project, "ls-tree", "-r", "--name-only", ws["branch"]).split()
+    assert ".kiro/steering/draft.md" not in tree and "out.txt" in tree
+    assert git(project, "status", "--porcelain").count("out.txt") == 0  # your checkout is untouched
+
+
+async def test_removing_a_worktree_keeps_the_work_on_its_branch(project, tmp_path):
+    from agentflow.workflow.service import Conflict
+
+    service, _ = make_service(tmp_path, project, on_step=writing_step())
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(plan_id, {"window": "24h"}, backend="kiro")
+    done = await settle(service, "run", run["id"], FINISHED)
+    branch = done["workspace"]["branch"]
+
+    removed = service.remove_workspace(run["id"])
+    assert removed["workspace"]["removed"] is True
+    assert not (tmp_path / "data" / "worktrees" / run["id"]).exists()
+    assert branch in git(project, "branch", "--list", "agentflow/*")  # the work is still there
+    with pytest.raises(Conflict):  # unmerged work is not deleted by 'delete'
+        service.remove_workspace(run["id"], "delete")
+    assert branch in git(project, "branch", "--list", "agentflow/*")
+    service.remove_workspace(run["id"], "force")
+    assert branches(project) == []
+
+
+async def test_a_worktree_with_uncommitted_changes_or_outside_the_folder_is_never_removed(
+    project, tmp_path
+):
+    env = Environment(project, tmp_path / "data")
+    with pytest.raises(ValueError, match="not a worktree made by this service"):
+        env.remove_workspace({"kind": "worktree", "root": str(project), "base": "HEAD"})
+    ws = env.prepare_workspace("run-x", "kiro")
+    (tmp_path / "data" / "worktrees" / "run-x" / "precious.txt").write_text("unsaved")
+    with pytest.raises(ValueError, match="uncommitted"):
+        env.remove_workspace(ws)
+    assert (tmp_path / "data" / "worktrees" / "run-x" / "precious.txt").exists()
+
+
+async def test_a_run_that_is_held_keeps_its_worktree(project, tmp_path):
+    pick = [{"kind": "steering", "name": "tracked"}]
+    edited = {"done": False}
+
+    def edit_once(step_id):
+        if step_id == "collect" and not edited["done"]:
+            edited["done"] = True
+            write(project / ".kiro/steering/tracked.md", "---\ninclusion: manual\n---\n# Changed")
+
+    service, _ = make_service(tmp_path, project, on_step=edit_once)
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(
+        plan_id, {"window": "24h"}, backend="kiro", extensions=pick, mode="strict"
+    )
+    held = await settle(service, "run", run["id"], FINISHED)
+    assert held["status"] == "held" and held["workspace"].get("removed") is None
+    assert (tmp_path / "data" / "worktrees" / run["id"]).is_dir()
+    from agentflow.workflow.service import Conflict
+
+    with pytest.raises(Conflict, match="still needed"):
+        service.remove_workspace(run["id"])
+
+
+async def test_sweep_removes_what_holds_no_work_and_can_clear_directories_keeping_branches(
+    project, tmp_path
+):
+    service, _ = make_service(tmp_path, project, on_step=writing_step())
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(plan_id, {"window": "24h"}, backend="kiro")
+    await settle(service, "run", run["id"], FINISHED)
+
+    first = service.sweep_workspaces("clean")
+    assert first["removed"] == [] and "commit(s) of work" in first["kept"][0]["why"]
+    second = service.sweep_workspaces("finished")
+    assert second["removed"] == [run["id"]]
+    assert not (tmp_path / "data" / "worktrees" / run["id"]).exists()
+    assert len(branches(project)) == 1  # the work is kept
+    listed = service.list_workspaces()
+    assert (
+        listed[0]["run_id"] == run["id"]
+        and listed[0]["exists"] is False
+        and listed[0]["ahead"] == 1
+    )
+
+
+async def test_the_http_workspace_endpoints(project, tmp_path):
+    from agentflow.server.workflow_app import create_workflow_app
+    from fastapi.testclient import TestClient
+
+    service, _ = make_service(tmp_path, project, on_step=writing_step())
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(plan_id, {"window": "24h"}, backend="kiro")
+    await settle(service, "run", run["id"], FINISHED)
+    with TestClient(create_workflow_app(service, workspace=project)) as client:
+        listed = client.get("/workspaces").json()
+        assert (
+            listed[0]["run_id"] == run["id"]
+            and listed[0]["exists"] is True
+            and listed[0]["ahead"] == 1
+        )
+        assert client.post("/workspaces/sweep", json={"mode": "bogus"}).status_code == 422
+        assert client.delete(f"/runs/{run['id']}/workspace?branch=bogus").status_code == 409
+        assert client.delete("/runs/nope/workspace").status_code == 404
+        gone = client.delete(f"/runs/{run['id']}/workspace")
+        assert gone.status_code == 200 and gone.json()["workspace"]["removed"] is True
+
+
+async def test_removing_a_worktree_leaves_other_stale_worktree_records_alone(project, tmp_path):
+    import shutil
+
+    # a worktree of the user's own, whose folder has since gone missing (git calls it prunable)
+    theirs = tmp_path / "theirs"
+    git(project, "worktree", "add", "-q", "-b", "their-branch", str(theirs), "HEAD")
+    shutil.rmtree(theirs)
+
+    env = Environment(project, tmp_path / "data")
+    ws = env.prepare_workspace("run-keep", "kiro")
+    env.remove_workspace(ws, "delete")
+
+    listing = git(project, "worktree", "list", "--porcelain")
+    assert str(theirs.resolve()) in listing or "their-branch" in listing  # their record survives
+    assert "run-keep" not in listing

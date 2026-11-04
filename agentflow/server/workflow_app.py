@@ -82,6 +82,9 @@ def create_workflow_app(
     class ApproveRequest(BaseModel):
         by: str
 
+    class SweepRequest(BaseModel):
+        mode: str = "clean"
+
     class RunRequest(BaseModel):
         params: dict[str, Any] = Field(default_factory=dict)
         backend: str | None = None
@@ -186,6 +189,18 @@ def create_workflow_app(
     @app.get("/runs")
     async def list_runs() -> list[dict[str, Any]]:
         return service.list_runs()
+
+    @app.get("/workspaces")
+    async def list_workspaces() -> list[dict[str, Any]]:
+        return await asyncio.to_thread(service.list_workspaces)
+
+    @app.delete("/runs/{run_id}/workspace")
+    async def remove_workspace(run_id: str, branch: str = "keep") -> dict[str, Any]:
+        return await asyncio.to_thread(call, service.remove_workspace, run_id, branch)
+
+    @app.post("/workspaces/sweep")
+    async def sweep_workspaces(body: SweepRequest) -> dict[str, Any]:
+        return await asyncio.to_thread(call, service.sweep_workspaces, body.mode)
 
     @app.get("/runs/{run_id}")
     async def get_run(run_id: str) -> dict[str, Any]:

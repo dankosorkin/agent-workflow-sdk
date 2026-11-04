@@ -46,6 +46,14 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   preamble), so an approval does not depend on the backend or on bound files. A plan that the
   chosen backend cannot run (for example `allowlist` on Codex) is refused at launch with reasons;
   `GET /plans/{id}/binding?backend=&ext=kind:name&mode=` previews the binding.
+- Worktree cleanup. When a run finishes, what the agents wrote is committed to the run's branch
+  (the copied extension files are not counted), and a worktree with no changes is removed together
+  with its branch; one with work is kept, with the commit and the number of changed files on the
+  run. A run that is held or waiting keeps its worktree. `remove_workspace(run_id, branch="keep" |
+  "delete" | "force")`, `list_workspaces()` and `sweep_workspaces("clean" | "finished")`, over
+  `DELETE /runs/{id}/workspace`, `GET /workspaces` and `POST /workspaces/sweep`; buttons on the Run
+  and Runs screens. Removal never touches a worktree outside the service's own folder, refuses
+  while changes are uncommitted, and drops only its own git record (not `git worktree prune`).
 - Run mode `strict` / `track` / `auto` for the files a run relies on: strict holds the run when
   one changes between steps (resume accepts the new state), track warns once. Each run gets its own
   git worktree on `agentflow/<run_id>` with the project's uncommitted extension files copied in; a

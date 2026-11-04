@@ -55,6 +55,13 @@ button:focus-visible,a:focus-visible,textarea:focus-visible{outline:2px solid #7
         <sc-if value="{{hasWorkspace}}" hint-placeholder-val="{{ false }}">
           <div style="font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.7">{{workspaceKind}}: <span style="color:var(--text)">{{workspacePath}}</span> <span>{{workspaceBranch}}</span></div>
           <div style="font-size:12.5px;color:var(--muted)">{{workspaceNote}}</div>
+          <sc-if value="{{canRemoveWs}}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px">
+              <button onClick="{{removeKeep}}" style="height:34px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:12.5px;cursor:pointer">Remove worktree (keep the branch)</button>
+              <button onClick="{{removeAll}}" style="height:34px;padding:0 14px;border-radius:8px;border:1px solid #7A3E22;background:transparent;color:#FFC9A8;font-size:12.5px;cursor:pointer">{{removeAllLabel}}</button>
+            </div>
+          </sc-if>
+          <sc-if value="{{wsError}}" hint-placeholder-val="{{ false }}"><div style="font-size:12.5px;color:#FFC9A8">{{wsError}}</div></sc-if>
         </sc-if>
         <sc-if value="{{hasBinding}}" hint-placeholder-val="{{ false }}">
           <div style="font-family:var(--mono);font-size:12px;color:var(--muted);line-height:1.7">executes on <span style="color:var(--text)">{{bindingBackend}}</span> · if a file you rely on changes: {{bindingMode}}{{bindingFiles}}</div>
@@ -287,7 +294,7 @@ class Component extends DCLogic {
     const params = new URLSearchParams(window.location.search);
     this.state = {
       runId: params.get('run') || '', record: null, plan: null,
-      sel: '', answer: -1, typed: '', transport: '', inventory: null, error: '', now: Date.now(), signal: 0, agent: []
+      sel: '', answer: -1, typed: '', transport: '', inventory: null, error: '', wsError: '', now: Date.now(), signal: 0, agent: []
     };
     this._close = null; this._poll = null; this._timer = null; this._agentClose = null; this._agentSeq = 0; this._agentLen = 0;
   }
@@ -389,6 +396,18 @@ class Component extends DCLogic {
     const a = inv && inv.agents && inv.agents[agent];
     const b = a && a.backends && a.backends[0];
     return (b && b.backend) || '(not in inventory)';
+  }
+  async removeWorkspace(branch) {
+    const rec = this.state.record, ws = rec && rec.workspace;
+    if (!ws) return;
+    const work = ws.ahead > 0;
+    if (branch !== 'keep' && work && !window.confirm('This deletes the branch ' + ws.branch + ' with the agents\' work on it (' + (ws.changed || 'some') + ' file(s)). It cannot be undone. Continue?')) return;
+    try {
+      const run = await AF.del('/runs/' + this.state.runId + '/workspace?branch=' + (branch === 'keep' ? 'keep' : (work ? 'force' : 'delete')));
+      this.setState({ record: run, wsError: '' });
+    } catch (e) {
+      this.setState({ wsError: typeof e.detail === 'string' ? e.detail : String(e.message || e) });
+    }
   }
   _planSteps() { return (this.state.plan && this.state.plan.plan && this.state.plan.plan.graph && this.state.plan.plan.graph.steps) || []; }
 
@@ -565,6 +584,9 @@ class Component extends DCLogic {
     return {
       hasAgent: agentAll.length > 0, agentRows, agentNote,
       hasWorkspace: !!(rec && rec.workspace), workspaceKind: rec && rec.workspace ? rec.workspace.kind : '', workspacePath: rec && rec.workspace ? rec.workspace.path : '', workspaceBranch: rec && rec.workspace && rec.workspace.branch ? '· branch ' + rec.workspace.branch + (rec.workspace.base ? ' from ' + rec.workspace.base : '') : '', workspaceNote: rec && rec.workspace ? rec.workspace.note : '',
+      canRemoveWs: !!(rec && rec.workspace && rec.workspace.kind === 'worktree' && !rec.workspace.removed && ['completed', 'partial', 'failed', 'error', 'refused'].includes(rec.status)),
+      removeKeep: () => this.removeWorkspace('keep'), removeAll: () => this.removeWorkspace('all'),
+      removeAllLabel: rec && rec.workspace && rec.workspace.ahead > 0 ? 'Remove worktree and delete the branch' : 'Remove worktree and branch', wsError: S.wsError,
       hasBinding: !!(rec && rec.binding), bindingBackend: rec && rec.binding ? rec.binding.backend : '', bindingMode: rec && rec.binding ? (rec.binding.mode === 'auto' ? 'auto → ' + rec.binding.resolved_mode : rec.binding.mode) : '', bindingFiles: rec && rec.binding && rec.binding.extensions && rec.binding.extensions.length ? ' (' + rec.binding.extensions.map((e) => e.name).join(', ') + ')' : '',
       hasWarnings: !!(rec && rec.warnings && rec.warnings.length), warningText: rec && rec.warnings ? rec.warnings.join(' · ') : '',
       signalLabel, signalStyle, working: live && !!act.current, workLabel: act.current ? act.current.label : '', workSeconds: act.current ? act.current.seconds : 0,

@@ -39,6 +39,7 @@ repository is used in place, and the run says so.
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 import subprocess
 from collections.abc import Callable
@@ -417,19 +418,22 @@ class Environment:
             check=False,
         ).stdout.strip()
         target = path / rel
-        self._overlay_extensions(backend, target)
+        overlay = self._overlay_extensions(backend, target, path)
         return {
             "kind": "worktree",
             "path": str(target),
             "root": str(path),
             "branch": branch,
             "base": base,
+            "overlay": overlay,
             "note": "its own branch; your checkout is untouched",
         }
 
-    def _overlay_extensions(self, backend: str, target: Path) -> None:
+    def _overlay_extensions(self, backend: str, target: Path, root: Path) -> dict[str, str]:
         """Copy the project-level extension files into the worktree, so the agent there sees what
-        the user sees now (a worktree has only what is committed)."""
+        the user sees now (a worktree has only what is committed). Returns ``{path: sha256}``
+        (paths relative to the worktree root) so they are not mistaken for the agents' work."""
+        copied: dict[str, str] = {}
         for _kind, scope, base, pattern in _SOURCES[backend]:
             if scope != "project":
                 continue
@@ -441,4 +445,130 @@ class Environment:
                     continue
                 dest = target / base / src.relative_to(source_root)
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(src.read_bytes())
+                data = src.read_bytes()
+                dest.write_bytes(data)
+                copied[str(dest.relative_to(root))] = hashlib.sha256(data).hexdigest()
+        return copied
+
+    # -- what is left when a run is over ---------------------------------------------------
+
+    _IDENTITY = ("-c", "user.name=agentflow", "-c", "user.email=agentflow@localhost")
+
+    def _git(self, cwd: Path | str, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(  # noqa: S603 - argv list, no shell
+            ["git", *self._IDENTITY, "-C", str(cwd), *args],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    def _owned(self, ws: dict[str, Any]) -> Path:
+        """The worktree root of ``ws``, refusing anything outside this service's worktree folder."""
+        root = Path(ws.get("root") or "").resolve()
+        base = (self.data_dir / "worktrees").resolve()
+        if ws.get("kind") != "worktree" or base not in root.parents:
+            raise ValueError("not a worktree made by this service")
+        return root
+
+    def workspace_state(self, ws: dict[str, Any]) -> dict[str, Any]:
+        """``exists``, the files the agents changed (``dirty``; the copied extension files do not
+        count unless an agent edited them) and the commits ahead of the starting point."""
+        root = self._owned(ws)
+        if not root.is_dir():  # the directory is gone; the branch may still hold the work
+            ahead = ""
+            if ws.get("branch"):
+                ahead = self._git(
+                    self.project, "rev-list", "--count", f"{ws['base']}..{ws['branch']}"
+                ).stdout.strip()
+            return {"exists": False, "dirty": [], "ahead": int(ahead) if ahead.isdigit() else 0}
+        out = self._git(root, "status", "--porcelain", "-uall").stdout.splitlines()
+        overlay = ws.get("overlay") or {}
+        dirty = []
+        for line in out:
+            rel = line[3:].split(" -> ")[-1].strip().strip('"')
+            digest = overlay.get(rel)
+            file = root / rel
+            if (
+                digest
+                and file.is_file()
+                and hashlib.sha256(file.read_bytes()).hexdigest() == digest
+            ):
+                continue
+            dirty.append(rel)
+        ahead = self._git(root, "rev-list", "--count", f"{ws['base']}..HEAD").stdout.strip()
+        return {"exists": True, "dirty": dirty, "ahead": int(ahead) if ahead.isdigit() else 0}
+
+    def finalize_workspace(self, ws: dict[str, Any], run_id: str, label: str) -> dict[str, Any]:
+        """Save what the agents wrote as one commit on the run's branch, so nothing is lost when
+        the directory goes away. Returns ``changed`` (files changed on the branch), ``commit`` and
+        ``ahead`` (commits beyond the starting point)."""
+        root = self._owned(ws)
+        before = self.workspace_state(ws)
+        commit = None
+        if before["dirty"]:
+            self._git(root, "add", "-A")
+            for rel, digest in (ws.get("overlay") or {}).items():
+                file = root / rel
+                if file.is_file() and hashlib.sha256(file.read_bytes()).hexdigest() == digest:
+                    self._git(root, "reset", "-q", "--", rel)
+            staged = self._git(root, "diff", "--cached", "--name-only").stdout.split()
+            if staged:
+                self._git(root, "commit", "-q", "-m", f"agentflow {run_id}: {label}"[:200])
+                commit = self._git(root, "rev-parse", "--short", "HEAD").stdout.strip()
+        after = self.workspace_state(ws)
+        changed = (
+            len(self._git(root, "diff", "--name-only", f"{ws['base']}..HEAD").stdout.split())
+            if after["ahead"]
+            else 0
+        )
+        return {"changed": changed, "commit": commit, "ahead": after["ahead"]}
+
+    def _forget(self, repo: Path, root: Path) -> None:
+        """Drop git's record of THIS worktree if its directory is already gone. ``git worktree
+        prune`` would also drop the records of every other worktree whose folder is missing,
+        which are not ours to touch, so only the matching record is removed."""
+        folder = repo / ".git" / "worktrees"
+        if not folder.is_dir():
+            return
+        for entry in folder.iterdir():
+            pointer = entry / "gitdir"
+            try:
+                target = Path(pointer.read_text().strip()).parent
+            except OSError:
+                continue
+            if target.resolve() == root and not root.exists():
+                shutil.rmtree(entry, ignore_errors=True)
+
+    def remove_workspace(self, ws: dict[str, Any], branch: str = "keep") -> dict[str, Any]:
+        """Remove the run's worktree directory. ``branch``: ``keep`` (default, the work stays on
+        it), ``delete`` (only if fully merged or empty) or ``force``. Refuses while an agent's
+        changes are not committed."""
+        if branch not in ("keep", "delete", "force"):
+            raise ValueError("branch must be keep, delete or force")
+        root = self._owned(ws)
+        state = self.workspace_state(ws)
+        if state["dirty"]:
+            raise ValueError(
+                f"uncommitted changes in the worktree: {', '.join(state['dirty'][:5])}"
+            )
+        start = root if root.is_dir() else self.project
+        common = self._git(start, "rev-parse", "--git-common-dir")
+        git_dir = Path(common.stdout.strip() or ".git")
+        # ``--git-common-dir`` is relative to where git ran, not to our process
+        repo = (git_dir if git_dir.is_absolute() else start / git_dir).resolve().parent
+        if root.is_dir():
+            done = self._git(repo, "worktree", "remove", "--force", str(root))
+            if done.returncode != 0:
+                raise ValueError(f"git could not remove the worktree: {done.stderr.strip()[:200]}")
+        self._forget(repo, root)
+        deleted = False
+        name = ws.get("branch")
+        if name and branch != "keep":
+            flag = "-D" if branch == "force" else "-d"
+            res = self._git(repo, "branch", flag, name)
+            if res.returncode != 0 and branch == "delete" and state["ahead"] == 0:
+                res = self._git(repo, "branch", "-D", name)  # empty branch: nothing to lose
+            deleted = res.returncode == 0
+            if not deleted:
+                raise ValueError(f"branch {name} was kept: {res.stderr.strip()[:200]}")
+        return {"removed": True, "branch_deleted": deleted}

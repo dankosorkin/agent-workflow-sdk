@@ -363,6 +363,11 @@ window.AF = {
     if (!r.ok) throw Object.assign(new Error(r.status + ' ' + p), { status: r.status, detail: await r.json().catch(() => null) });
     return r.json();
   },
+  async del(p) {
+    const r = await fetch(this.base + p, { method: 'DELETE' });
+    if (!r.ok) throw Object.assign(new Error(r.status + ' ' + p), { status: r.status, detail: (await r.json().catch(() => ({}))).detail });
+    return r.json();
+  },
   stream(p, onRecord, onError, onTick) {
     const es = new EventSource(this.base + p);
     es.onmessage = (e) => { try { onRecord(JSON.parse(e.data)); } catch (err) { /* ignore keepalive/parse */ } };

@@ -80,6 +80,9 @@ from agentflow.workflow.runner import (
 __all__ = ["Conflict", "NotFound", "WorkflowService"]
 
 
+_FINISHED = {"completed", "failed", "partial", "error", "refused"}
+
+
 class NotFound(LookupError):
     pass
 
@@ -700,8 +703,113 @@ class WorkflowService:
             body = outcome.to_dict()
             held_reasons = body["issues"] if outcome.status == "held" else []
             run.update(status=outcome.status, outcome=body, issues=held_reasons, error=None)
+        if run["status"] in _FINISHED and run.get("workspace"):
+            await self._close_workspace(run)
         self._records.put("run", run)
         self._emit(run_id, "run", state=run["status"])
+
+    async def _close_workspace(self, run: dict[str, Any]) -> None:
+        """A finished run leaves nothing behind that is not wanted: what the agents wrote is
+        committed to the run's branch, and a worktree with no changes is removed with its branch.
+        A failure here never changes the run's result; it is reported as a warning."""
+        ws = run["workspace"]
+        if ws.get("kind") != "worktree" or self._env is None:
+            return
+        try:
+            info = await asyncio.to_thread(
+                self._env.finalize_workspace, ws, run["id"], f"plan {run['plan_id']}"
+            )
+            ws.update(info)
+            if info["ahead"] == 0:
+                await asyncio.to_thread(self._env.remove_workspace, ws, "delete")
+                ws.update(removed=True, note="no changes: the worktree and its branch were removed")
+            else:
+                ws["note"] = (
+                    f"{info['changed']} file(s) changed, saved on branch {ws['branch']}"
+                    f" (commit {info['commit'] or 'earlier'}); the worktree is kept"
+                )
+            self._emit(
+                run["id"], "workspace", state="removed" if ws.get("removed") else "kept", **info
+            )
+        except Exception as exc:
+            run["warnings"].append(f"worktree cleanup: {type(exc).__name__}: {exc}")
+
+    # -- worktrees of finished runs ------------------------------------------------------------
+
+    def _workspace_run(self, run_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
+        run = self.get_run(run_id)
+        ws = run.get("workspace")
+        if not ws or ws.get("kind") != "worktree" or self._env is None:
+            raise NotFound(f"run {run_id!r} has no worktree")
+        return run, ws
+
+    def list_workspaces(self) -> list[dict[str, Any]]:
+        """Every worktree a run made: where it is, whether it is still on disk, what is in it."""
+        out = []
+        for run in self.list_runs():
+            ws = run.get("workspace")
+            if not ws or ws.get("kind") != "worktree" or self._env is None:
+                continue
+            try:
+                state = self._env.workspace_state(ws)
+            except ValueError:
+                continue
+            out.append(
+                {
+                    "run_id": run["id"],
+                    "status": run["status"],
+                    "path": ws["path"],
+                    "branch": ws.get("branch"),
+                    "exists": state["exists"] and not ws.get("removed"),
+                    "changed": ws.get("changed", len(state["dirty"])),
+                    "uncommitted": len(state["dirty"]),
+                    "ahead": state["ahead"],
+                    "removed": bool(ws.get("removed")),
+                }
+            )
+        return out
+
+    def remove_workspace(self, run_id: str, branch: str = "keep") -> dict[str, Any]:
+        """Remove a finished run's worktree. The work stays on its branch unless ``branch`` says
+        ``delete`` (refused if it holds unmerged commits) or ``force``."""
+        run, ws = self._workspace_run(run_id)
+        if run["status"] not in _FINISHED:
+            raise Conflict(f"run {run_id} is {run['status']}: its worktree is still needed")
+        try:
+            done = self._env.remove_workspace(ws, branch)
+        except ValueError as exc:
+            raise Conflict(str(exc)) from exc
+        ws.update(
+            removed=True,
+            note="removed by request"
+            + ("; branch deleted" if done["branch_deleted"] else f"; branch {ws['branch']} kept"),
+        )
+        self._records.put("run", run)
+        return run
+
+    def sweep_workspaces(self, mode: str = "clean") -> dict[str, Any]:
+        """Remove worktrees of finished runs. ``clean``: only those that hold no work, with their
+        branch. ``finished``: every finished run's directory, keeping branches that hold work.
+        Worktrees with uncommitted changes and runs still going are never touched."""
+        if mode not in ("clean", "finished"):
+            raise ValueError("mode must be clean or finished")
+        removed, kept = [], []
+        for item in self.list_workspaces():
+            run = self.get_run(item["run_id"])
+            if not item["exists"] or run["status"] not in _FINISHED:
+                continue
+            if item["uncommitted"]:
+                kept.append({"run_id": item["run_id"], "why": "uncommitted changes"})
+                continue
+            if item["ahead"] and mode == "clean":
+                kept.append({"run_id": item["run_id"], "why": f"{item['ahead']} commit(s) of work"})
+                continue
+            try:
+                self.remove_workspace(item["run_id"], "delete" if not item["ahead"] else "keep")
+                removed.append(item["run_id"])
+            except (Conflict, NotFound) as exc:
+                kept.append({"run_id": item["run_id"], "why": str(exc)})
+        return {"removed": removed, "kept": kept}
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         run = self._records.get("run", run_id)

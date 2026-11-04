@@ -43,6 +43,19 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
       <div style="font-size:13px;color:var(--muted)">A held, waiting or crashed run can be resumed; the approval is re-checked first.</div>
     </section>
 
+    <sc-if value="{{hasWs}}" hint-placeholder-val="{{ false }}">
+      <section style="display:flex;flex-wrap:wrap;gap:12px 20px;align-items:center;justify-content:space-between;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 18px">
+        <div style="display:flex;flex-direction:column;gap:4px">
+          <div style="font-size:14px"><b>{{wsOnDisk}}</b> worktree(s) on disk · <b>{{wsWithWork}}</b> hold work saved on a branch</div>
+          <div style="font-size:12.5px;color:var(--muted)">{{wsMessage}}</div>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:8px">
+          <button onClick="{{sweepClean}}" style="height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:13px;cursor:pointer">Remove empty ones</button>
+          <button onClick="{{sweepFinished}}" style="height:36px;padding:0 14px;border-radius:8px;border:1px solid var(--line);background:transparent;color:var(--text);font-size:13px;cursor:pointer">Remove all finished (keep branches)</button>
+        </div>
+      </section>
+    </sc-if>
+
     <section style="display:flex;flex-wrap:wrap;gap:16px">
       <div style="flex:2 1 420px;background:#2A2410;border:1px solid #6B5A1E;border-radius:14px;padding:18px 20px;display:flex;flex-direction:column;gap:10px">
         <span style="font-size:13px;color:#D9C27A">Needs your attention</span>
@@ -106,7 +119,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
 class Component extends DCLogic {
   constructor(props) {
     super(props);
-    this.state = { filter: 'all', runs: [], plans: {}, loaded: false, error: '' };
+    this.state = { filter: 'all', workspaces: [], wsMessage: '', runs: [], plans: {}, loaded: false, error: '' };
     // label, badge-style, group
     this.ST = {
       waiting: ['waiting', 'background:#3A2F14;color:#F2C94C;', 'att'],
@@ -128,9 +141,23 @@ class Component extends DCLogic {
       const byId = {};
       (plans || []).forEach((p) => { byId[p.id] = p; });
       this.setState({ runs: runs || [], plans: byId, loaded: true });
+      this.loadWs();
     } catch (e) {
       this.setState({ error: String(e.message || e), loaded: true });
     }
+  }
+  async loadWs() {
+    try { this.setState({ workspaces: (await AF.get('/workspaces')) || [] }); } catch (e) { /* optional */ }
+  }
+  async sweep(mode) {
+    if (mode === 'finished' && !window.confirm('Remove the directory of every finished run? Work the agents wrote stays on its branch.')) return;
+    try {
+      const r = await AF.post('/workspaces/sweep', { mode });
+      this.setState({ wsMessage: 'Removed ' + r.removed.length + ' worktree(s)' + (r.kept.length ? '; left ' + r.kept.length + ': ' + r.kept.map((k) => k.run_id.slice(-6) + ' (' + k.why + ')').join(', ') : '') + '.' });
+    } catch (e) {
+      this.setState({ wsMessage: 'Cleanup failed: ' + (typeof e.detail === 'string' ? e.detail : String(e.message || e)) });
+    }
+    this.loadWs();
   }
   _st(status) { return this.ST[status] || [status, 'background:#1B2027;color:#9AA3AF;', 'other']; }
   _group(r) { return this._st(r.status)[2]; }
@@ -197,7 +224,11 @@ class Component extends DCLogic {
     const running = all.filter((r) => r.status === 'running').length;
     const finished = all.filter((r) => ['completed', 'partial', 'failed'].includes(r.status));
     const fc = (s) => finished.filter((r) => r.status === s).length;
+    const S = this.state;
+    const onDisk = (S.workspaces || []).filter((w) => w.exists);
     return {
+      hasWs: (S.workspaces || []).length > 0, wsOnDisk: onDisk.length, wsWithWork: onDisk.filter((w) => w.ahead > 0).length, wsMessage: S.wsMessage || 'A worktree with no changes is removed when its run ends; one with work is kept.',
+      sweepClean: () => this.sweep('clean'), sweepFinished: () => this.sweep('finished'),
       filters, rows, attention: att.length, attChips, noAtt: att.length === 0,
       runningNow: running, finishedCount: finished.length,
       finishedBreakdown: fc('completed') + ' completed · ' + fc('partial') + ' partial · ' + fc('failed') + ' failed'
