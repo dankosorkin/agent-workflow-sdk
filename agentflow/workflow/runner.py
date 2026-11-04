@@ -309,10 +309,24 @@ class StepState(GateState):
     status: Annotated[str, last]
 
 
-def _cache_key(step: dict[str, Any], inputs: dict[str, Any]) -> str:
-    """What the agent sees AND what the result must satisfy: change either, miss the cache."""
+def _executor(
+    step: dict[str, Any], entry: dict[str, Any], inventory: dict[str, Any]
+) -> dict[str, Any]:
+    """Who does the step: the backend and its agent, and the role text that shapes it."""
+    role = (inventory.get("agents") or {}).get(step["agent"]) or {}
+    return {
+        "backend": entry.get("backend"),
+        "agent": entry.get("agent"),
+        "preamble": role.get("preamble", ""),
+    }
+
+
+def _cache_key(step: dict[str, Any], inputs: dict[str, Any], executor: dict[str, Any]) -> str:
+    """What the agent sees AND what the result must satisfy: change either, miss the cache. The
+    executor is part of it: the same plan on another backend is a different run, not a replay."""
     return artifact_key(
         {
+            "executor": executor,
             "agent": step["agent"],
             "prompt": step["prompt"],
             "inputs": inputs,
@@ -454,6 +468,7 @@ def build_workflow_graph(
                 raise ApprovalRevoked(revoked)
 
         step, entry = steps[task.id], entries[task.id]
+        executor = _executor(step, entry, inventory)
         results = {r["task_id"]: r for r in (state.get("plan") or {}).get("results") or ()}
         inputs, problems = resolve_inputs(step, results, state.get("params") or {})
         if problems:
@@ -471,7 +486,7 @@ def build_workflow_graph(
             Returns (cached envelope | None, final gate state | None, cache key).
             """
             run_inputs = {**inputs, "clarification": clar} if clar else inputs
-            key = _cache_key(step, run_inputs)
+            key = _cache_key(step, run_inputs, executor)
             cached = await store.get(CACHE_NS, key)
             if cached is not None:
                 return {**cached.value, "cached": True}, None, key
@@ -491,7 +506,7 @@ def build_workflow_graph(
 
         try:
             if step.get("side_effects"):
-                key = _cache_key(step, inputs)
+                key = _cache_key(step, inputs, executor)
                 envelope = await effects.run(f"{phash}:{task.id}:{key}", execute_once)
             elif may:
                 envelope = None
@@ -543,7 +558,7 @@ def build_workflow_graph(
             raise
 
         assert envelope is not None
-        key = _cache_key(step, {**inputs, "clarification": clar} if clar else inputs)
+        key = _cache_key(step, {**inputs, "clarification": clar} if clar else inputs, executor)
         await store.put(CACHE_NS, key, {k: v for k, v in envelope.items() if k != "cached"})
         return TaskResult(task.id, output=envelope)
 

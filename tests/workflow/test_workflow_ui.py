@@ -132,7 +132,13 @@ def test_the_create_screen_sends_only_what_the_server_reads():
     text = (UI_DIR / "Create.dc.html").read_text()
     assert "max_rounds" not in text and "max_design_rounds" not in text
     # what the form sends is exactly what POST /designs reads
-    assert "{ request, backend: S.backend, extensions, mode: S.mode }" in text
+    assert "{ request, system_backend: this.state.system }" in text
+    # the executing backend is chosen at launch, not at design time
+    assert "extChoices" not in text and "pickBackend" not in text
+    main = (UI_DIR / "Main.dc.html").read_text()
+    assert (
+        "backend: this.state.backend, extensions: this._selection(), mode: this.state.mode" in main
+    )
 
 
 def test_the_create_screen_can_resume_a_design_from_the_url():

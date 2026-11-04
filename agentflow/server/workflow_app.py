@@ -25,7 +25,7 @@ import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
 from agentflow.workflow.extensions import (
     BACKENDS,
@@ -58,7 +58,7 @@ def create_workflow_app(
     ui_dir = ui_dir or (Path(__file__).resolve().parents[2] / "ui-mockup-demo")
     workspace = Path(workspace or Path.cwd()).expanduser().resolve()
     try:
-        from fastapi import FastAPI, HTTPException
+        from fastapi import FastAPI, HTTPException, Query
         from fastapi.middleware.cors import CORSMiddleware
         from fastapi.responses import RedirectResponse, StreamingResponse
         from fastapi.staticfiles import StaticFiles
@@ -74,9 +74,7 @@ def create_workflow_app(
 
     class DesignRequest(BaseModel):
         request: str
-        backend: str | None = None
-        extensions: list[ExtensionRef] = Field(default_factory=list)
-        mode: str = "auto"
+        system_backend: str | None = None
 
     class AnswerRequest(BaseModel):
         answer: Any
@@ -86,6 +84,9 @@ def create_workflow_app(
 
     class RunRequest(BaseModel):
         params: dict[str, Any] = Field(default_factory=dict)
+        backend: str | None = None
+        extensions: list[ExtensionRef] = Field(default_factory=list)
+        mode: str = "auto"
 
     @asynccontextmanager
     async def lifespan(_app: Any) -> AsyncIterator[None]:
@@ -122,9 +123,7 @@ def create_workflow_app(
         return call(
             service.start_design,
             body.request,
-            backend=body.backend,
-            extensions=[e.model_dump() for e in body.extensions],
-            mode=body.mode,
+            system_backend=body.system_backend,
         )
 
     @app.get("/designs")
@@ -161,7 +160,28 @@ def create_workflow_app(
 
     @app.post("/plans/{plan_id}/runs", status_code=201)
     async def start_run(plan_id: str, body: RunRequest) -> dict[str, Any]:
-        return call(service.start_run, plan_id, body.params)
+        return call(
+            service.start_run,
+            plan_id,
+            body.params,
+            backend=body.backend,
+            extensions=[e.model_dump() for e in body.extensions],
+            mode=body.mode,
+        )
+
+    @app.get("/plans/{plan_id}/binding")
+    async def plan_binding(
+        plan_id: str,
+        backend: str,
+        ext: Annotated[list[str] | None, Query()] = None,
+        mode: str = "auto",
+    ) -> dict[str, Any]:
+        # ``ext`` repeats as ``kind:name`` (for example ``skills:api-design``).
+        picked = []
+        for item in ext or []:
+            kind, _, name = item.partition(":")
+            picked.append({"kind": kind, "name": name})
+        return call(service.binding_preview, plan_id, backend, picked, mode)
 
     @app.get("/runs")
     async def list_runs() -> list[dict[str, Any]]:

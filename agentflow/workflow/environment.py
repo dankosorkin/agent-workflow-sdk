@@ -12,26 +12,34 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The environment a plan runs in: which backend, which roles, which files, which directory.
+"""The environment around a plan: system agents, roles, the binding at launch, the worktree.
 
-A step is carried out by the *generic* agent of the chosen backend (no named agent files), shaped
-by a **role** (a short preamble: researcher, writer, coder...). Everything the user adds to the
-backend's own folders (steering, skills, ``AGENTS.md``) is applied by the backend itself; the SDK
-only records which of those files the plan relies on, so a change can be noticed:
+A plan does not know which provider will run it. It names **roles** (researcher, coder...) and
+the permission each step needs; the roles are the neutral vocabulary and live here, in the
+engine, together with the three system agents (orchestrator, designer, critic) whose prompts are
+in :mod:`agentflow.workflow.design_prompts`. The system agents run on a *system backend* of their
+own, in an empty directory and with their full instructions in the prompt, so neither the user's
+steering nor the choice of executor changes how plans are designed.
 
-* **strict**: the files are part of the inventory digest. Edit one after approval and the approval
-  is revoked, exactly like an inventory change.
-* **track**: the plan keeps the snapshot it was approved with; a changed file is reported as a
-  warning and the run goes on.
+The provider is bound when a run **starts** (:func:`bind_inventory`): the user picks one backend,
+every step runs on its generic agent shaped by the role, and the backend applies the user's own
+steering, skills and ``AGENTS.md`` / ``CLAUDE.md`` by itself. The files the user chooses to rely on
+are recorded with the run, and what happens when one changes is the run's mode:
+
+* **strict**: the run is held (resumable) when a file changes between steps.
+* **track**: the run goes on and shows a warning.
 * **auto** (default): strict if any step writes (``allowlist``/``full``) or has side effects,
   otherwise track.
 
-Each run gets its own git worktree on its own branch, so what the agents write never touches the
-user's checkout. A project that is not a git repository is used in place, and the run says so.
+An approval covers the plan and the roles it relies on, not a provider: the same approved plan
+can run on Kiro today and on Codex tomorrow. Each run gets its own git worktree on its own branch,
+so what the agents write never touches the user's checkout; a project that is not a git
+repository is used in place, and the run says so.
 """
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -51,7 +59,10 @@ __all__ = [
     "MODES",
     "Environment",
     "Role",
+    "bind_inventory",
+    "build_catalog",
     "build_inventory",
+    "drift",
     "load_roles",
     "resolve_mode",
 ]
@@ -146,48 +157,52 @@ def load_roles(project: Path | str, *, home: Path | str | None = None) -> dict[s
     return roles
 
 
-_EXTENSIONS_NOTE = (
-    "The agent loads these itself. Name one in a step prompt when that step should use it "
-    "(for example 'use the api-design skill'); nothing is pasted for you."
-)
+def build_catalog(project: Path | str, *, home: Path | str | None = None) -> dict[str, Any]:
+    """The provider-neutral inventory: every role, with the generic agent of each known backend.
+
+    This is what plans are designed, validated and approved against. Its digest covers only what
+    the plan depends on (see :func:`~agentflow.workflow.inventory.inventory_digest`).
+    """
+    roles = load_roles(project, home=home)
+    return {
+        "neutral": True,
+        "agents": {
+            name: {
+                "description": role.description,
+                "permissions": list(role.permissions),
+                "backends": [{"backend": b, "agent": GENERIC_AGENT[b]} for b in BACKENDS],
+                "preamble": role.preamble,
+            }
+            for name, role in sorted(roles.items())
+        },
+    }
 
 
-def build_inventory(
+def bind_inventory(
+    catalog: dict[str, Any],
     backend: str,
     project: Path | str,
     *,
     selection: list[dict[str, str]] | None = None,
     home: Path | str | None = None,
 ) -> dict[str, Any]:
-    """The inventory for ``backend``: the roles, each served by its generic agent, plus the
-    extension files the plan relies on (``selection`` is a list of ``{"kind", "name"}``).
-
-    The result has the usual ``agents`` shape, so validation, backend resolution and approval work
-    unchanged. ``context`` and each agent's ``preamble`` are part of the digest on purpose.
+    """The catalog bound to ONE backend: every role is served by that backend's generic agent
+    only (no silent fallback to another provider), plus the extension files the run relies on
+    (``selection`` is a list of ``{"kind", "name"}``). The digest equals the catalog's, so an
+    approval given on the catalog stays valid for any backend.
     """
     if backend not in BACKENDS:
         raise ValueError(f"unknown backend {backend!r}")
-    roles = load_roles(project, home=home)
-    agent = GENERIC_AGENT[backend]
-    inventory: dict[str, Any] = {
-        "agents": {
-            name: {
-                "description": role.description,
-                "permissions": list(role.permissions),
-                "backends": [{"backend": backend, "agent": agent}],
-                "preamble": role.preamble,
-            }
-            for name, role in sorted(roles.items())
-        }
-    }
     found = discover(backend, project, home=home)
     chosen: list[dict[str, Any]] = []
+    missing: list[str] = []
     for want in selection or []:
         match = next(
             (e for e in found.get(want.get("kind", ""), []) if e.name == want.get("name")), None
         )
         if match is None:
-            raise ValueError(f"unknown {want.get('kind')} {want.get('name')!r} for {backend}")
+            missing.append(f"{want.get('kind')} {want.get('name')!r}")
+            continue
         chosen.append(
             {
                 "kind": match.kind,
@@ -197,8 +212,30 @@ def build_inventory(
                 "digest": match.digest,
             }
         )
-    inventory["context"] = {"backend": backend, "extensions": chosen}
-    return inventory
+    if missing:
+        raise ValueError(f"not found for {backend}: {', '.join(missing)}")
+    bound = {
+        **catalog,
+        "agents": {
+            name: {**agent, "backends": [{"backend": backend, "agent": GENERIC_AGENT[backend]}]}
+            for name, agent in (catalog.get("agents") or {}).items()
+        },
+        "context": {"backend": backend, "extensions": chosen},
+    }
+    return bound
+
+
+def build_inventory(
+    backend: str,
+    project: Path | str,
+    *,
+    selection: list[dict[str, str]] | None = None,
+    home: Path | str | None = None,
+) -> dict[str, Any]:
+    """:func:`build_catalog` bound to ``backend`` in one call."""
+    return bind_inventory(
+        build_catalog(project, home=home), backend, project, selection=selection, home=home
+    )
 
 
 def resolve_mode(mode: str, plan: dict[str, Any]) -> str:
@@ -211,31 +248,25 @@ def resolve_mode(mode: str, plan: dict[str, Any]) -> str:
     return "track"
 
 
-def drift(snapshot: dict[str, Any], live: dict[str, Any]) -> list[str]:
-    """Names of extension files that differ between two inventories (changed, added, gone)."""
-    old = {
-        (e["kind"], e["name"]): e["digest"]
-        for e in (snapshot.get("context") or {}).get("extensions", [])
-    }
-    new = {
-        (e["kind"], e["name"]): e["digest"]
-        for e in (live.get("context") or {}).get("extensions", [])
-    }
-    changed = [
-        f"{k[0]}:{k[1]}" for k in sorted(old.keys() | new.keys()) if old.get(k) != new.get(k)
+def drift(old: list[dict[str, Any]], new: list[dict[str, Any]]) -> list[str]:
+    """``kind:name`` of the extension files that differ between two bindings (changed, added,
+    gone). Each argument is a binding's ``context.extensions`` list."""
+    before = {(e["kind"], e["name"]): e["digest"] for e in old}
+    after = {(e["kind"], e["name"]): e["digest"] for e in new}
+    keys = sorted(before.keys() | after.keys())
+    return [
+        f"{kind}:{name}"
+        for kind, name in keys
+        if before.get((kind, name)) != after.get((kind, name))
     ]
-    roles_old = {n: a.get("preamble") for n, a in (snapshot.get("agents") or {}).items()}
-    roles_new = {n: a.get("preamble") for n, a in (live.get("agents") or {}).items()}
-    changed += [
-        f"role:{n}"
-        for n in sorted(roles_old.keys() | roles_new.keys())
-        if roles_old.get(n) != roles_new.get(n)
-    ]
-    return changed
 
 
 class Environment:
-    """Where a service runs plans: the project, the backends it can use, the worktrees it makes."""
+    """Where a service designs and runs plans: the project, the backends, the system backend, the
+    worktrees it makes."""
+
+    #: Which backend the system agents use when none is chosen: the first one installed.
+    SYSTEM_PREFERENCE = ("claude_code", "codex", "kiro")
 
     def __init__(
         self,
@@ -243,33 +274,107 @@ class Environment:
         data_dir: Path | str,
         *,
         home: Path | str | None = None,
-        designer_factory: Callable[[str, Path], tuple[Any, bool]] | None = None,
+        system_backend: str | None = None,
+        designer_factory: Callable[[str, Path], Any] | None = None,
     ) -> None:
         self.project = Path(project).expanduser().resolve()
         self.data_dir = Path(data_dir).expanduser().resolve()
         self.home = Path(home).expanduser() if home is not None else None
+        self.system_backend = system_backend
         self._designer_factory = designer_factory
 
-    # -- what the plan is designed from ---------------------------------------------------
+    # -- the neutral side: what plans are designed from ------------------------------------
 
-    def inventory_for(
-        self, backend: str, selection: list[dict[str, str]] | None = None
-    ) -> dict[str, Any]:
-        return build_inventory(backend, self.project, selection=selection, home=self.home)
+    def catalog(self) -> dict[str, Any]:
+        return build_catalog(self.project, home=self.home)
 
-    def designer_for(self, backend: str) -> tuple[Any, bool]:
-        """``(designer, named_agents)`` running the three design roles on ``backend``."""
+    def system_backend_name(self, chosen: str | None = None) -> str:
+        """The backend the system agents run on: the one asked for, the configured one, or the
+        first installed."""
+        name = chosen or self.system_backend
+        if name is not None:
+            if name not in BACKENDS:
+                raise ValueError(f"unknown backend {name!r}")
+            return name
+        for candidate in self.SYSTEM_PREFERENCE:
+            if shutil.which(BACKENDS[candidate]):
+                return candidate
+        raise ValueError("no agent backend is installed (kiro-cli, claude or codex)")
+
+    def designer_for(self, system_backend: str | None = None) -> Any:
+        """The designer running orchestrator, creator and verifier on the system backend.
+
+        They run in an empty directory (the user's project files do not touch them) with their
+        whole instructions in the prompt, so no agent file has to be installed anywhere.
+        """
+        backend = self.system_backend_name(system_backend)
+        sandbox = self.data_dir / "system-agents"
+        sandbox.mkdir(parents=True, exist_ok=True)
         if self._designer_factory is not None:
-            return self._designer_factory(backend, self.project)
-        from agentflow.workflow.design import backend_designer, claude_designer
+            return self._designer_factory(backend, sandbox)
+        from agentflow.workflow.design import backend_designer
         from agentflow.workflow.runner import make_backend
 
-        if backend == "claude_code":
-            return claude_designer(self.project), True
         entry = {"backend": backend, "agent": GENERIC_AGENT[backend]}
         return backend_designer(
-            lambda role: make_backend(entry, {"permission": "read_only"}, cwd=self.project)
-        ), False
+            lambda role: make_backend(entry, {"permission": "read_only"}, cwd=sandbox)
+        )
+
+    # -- the binding: what happens when a run starts ------------------------------------------
+
+    def bind(self, backend: str, selection: list[dict[str, str]] | None = None) -> dict[str, Any]:
+        return bind_inventory(
+            self.catalog(), backend, self.project, selection=selection, home=self.home
+        )
+
+    def preview(
+        self,
+        plan: dict[str, Any],
+        backend: str,
+        selection: list[dict[str, str]] | None = None,
+        mode: str = "auto",
+    ) -> dict[str, Any]:
+        """What binding ``plan`` to ``backend`` would mean, without starting anything: whether it
+        can run there, and what is missing."""
+        from agentflow.workflow.plan import validate_plan
+        from agentflow.workflow.runner import unsupported_features
+
+        out: dict[str, Any] = {
+            "backend": backend,
+            "mode": mode,
+            "resolved_mode": resolve_mode(mode, plan),
+            "installed": backend in BACKENDS and shutil.which(BACKENDS[backend]) is not None,
+            "issues": [],
+            "extensions": [],
+        }
+        if backend not in BACKENDS:
+            out["issues"].append(
+                {
+                    "code": "unknown_backend",
+                    "severity": "error",
+                    "message": f"unknown backend {backend!r}",
+                }
+            )
+            return out
+        if not out["installed"]:
+            out["issues"].append(
+                {
+                    "code": "backend_not_installed",
+                    "severity": "error",
+                    "message": f"{BACKENDS[backend]} was not found on this machine",
+                }
+            )
+        try:
+            bound = self.bind(backend, selection)
+        except ValueError as exc:
+            out["issues"].append(
+                {"code": "extension_missing", "severity": "error", "message": str(exc)}
+            )
+            return out
+        out["extensions"] = bound["context"]["extensions"]
+        problems = validate_plan(plan, inventory=bound) + unsupported_features(plan)
+        out["issues"] += [i.to_dict() for i in problems]
+        return out
 
     # -- where the plan runs ----------------------------------------------------------------
 

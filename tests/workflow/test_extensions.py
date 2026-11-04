@@ -32,6 +32,19 @@ def test_front_matter_gives_scalars_and_the_body():
     assert parse_front_matter("---\nname: never closed\n") == ({}, "---\nname: never closed\n")
 
 
+def test_front_matter_understands_block_scalars():
+    text = "---\nname: mongo\ndescription: >-\n  Connect to Mongo\n  and run queries.\nmodel: x\n---\nbody"
+    meta, body = parse_front_matter(text)
+    assert meta == {
+        "name": "mongo",
+        "description": "Connect to Mongo and run queries.",
+        "model": "x",
+    }
+    assert body == "body"
+    literal, _ = parse_front_matter("---\ndescription: |\n  line one\n  line two\n---\n")
+    assert literal["description"] == "line one\nline two"
+
+
 @pytest.fixture
 def machine(tmp_path):
     home, project = tmp_path / "home", tmp_path / "project"

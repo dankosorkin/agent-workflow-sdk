@@ -65,7 +65,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
         <table style="width:100%;min-width:900px;border-collapse:collapse;font-size:14px">
           <thead>
             <tr style="text-align:left;color:var(--muted);font-size:12px">
-              <th style="padding:14px 18px;font-weight:500">Agent</th><th style="padding:14px 18px;font-weight:500">Backends, first one is used</th><th style="padding:14px 18px;font-weight:500">Allowed permissions</th><th style="padding:14px 18px;font-weight:500">Description</th><th style="padding:14px 18px;font-weight:500">Used by</th>
+              <th style="padding:14px 18px;font-weight:500">Agent</th><th style="padding:14px 18px;font-weight:500">{{backendsHeader}}</th><th style="padding:14px 18px;font-weight:500">Allowed permissions</th><th style="padding:14px 18px;font-weight:500">Description</th><th style="padding:14px 18px;font-weight:500">Used by</th>
             </tr>
           </thead>
           <tbody>
@@ -174,6 +174,7 @@ class Component extends DCLogic {
     const permCol = { read_only: 'background:#1B2027;color:#C9D1DB;', allowlist: 'background:#1F2A3D;color:#A9C9FF;', full: 'background:#3D2418;color:#FF9A62;' };
     const pillBase = 'font-family:\'JetBrains Mono\',monospace;font-size:11.5px;padding:3px 9px;border-radius:6px;';
     const rawAgents = this._agents();
+    const neutral = !!(S.inv && S.inv.neutral);
     const tabsDef = [['agents', 'Agents', ''], ['backends', 'Backends', 'catalog'], ['skills', 'Skills', 'reserved'], ['mcp', 'MCP servers', 'reserved']];
     const tabs = tabsDef.map(([id, label, tag]) => {
       const on = S.tab === id;
@@ -193,7 +194,7 @@ class Component extends DCLogic {
       : 'inventory_digest changes with any edit, and each approval is bound to it: ' + approved.map((p) => p.id).join(', ') + ' would have to be approved again. Runs of revoked plans are held; finished steps keep their results.';
     const agents = rawAgents.map((a) => ({
       name: a.name, desc: a.desc, used: usedBy[a.name] ? usedBy[a.name] + ' plan(s)' : '—', changed: false, rowBg: 'transparent',
-      backends: a.backends.map((b, i) => ({ label: b + (i === 0 ? ' · used' : ''), style: pillBase + (i === 0 ? 'background:#1F2A3D;color:#A9C9FF;' : 'background:#1B2027;color:#9AA3AF;') })),
+      backends: a.backends.map((b, i) => ({ label: b + (!neutral && i === 0 ? ' · used' : ''), style: pillBase + (!neutral && i === 0 ? 'background:#1F2A3D;color:#A9C9FF;' : 'background:#1B2027;color:#9AA3AF;') })),
       perms: a.perms.map((p) => ({ label: p, style: pillBase + (permCol[p] || 'background:#1B2027;color:#C9D1DB;') }))
     }));
     const catalog = [
@@ -209,7 +210,7 @@ class Component extends DCLogic {
       mcp: { title: 'MCP servers', text: 'Backends do not pass MCP servers to agents in v1, so a plan cannot use them. The validator rejects a non-empty mcp field with reserved_field: the SDK cannot pass it to a backend yet.', example: 'step.mcp = ["x"]  →  Issue{code: "reserved_field", step: …}', why: 'Reserved so the plan format stays stable when support arrives.' }
     };
     return {
-      tabs, agents, catalog, error: S.error,
+      tabs, agents, catalog, error: S.error, backendsHeader: neutral ? 'Can run on (you choose at launch)' : 'Backends, first one is used',
       digest: this.state.inv ? Object.keys((this.state.inv.agents) || {}).length + ' agents' : '—',
       showAgents: S.tab === 'agents', showBackends: S.tab === 'backends', showReserved: S.tab === 'skills' || S.tab === 'mcp',
       reserved: reservedMap[S.tab] || reservedMap.skills,

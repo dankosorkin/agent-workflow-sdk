@@ -69,7 +69,26 @@ def load_inventory(path: Path | str) -> dict[str, Any]:
 
 
 def inventory_digest(inventory: dict[str, Any]) -> str:
-    """Content hash of the inventory; any change to it changes the digest."""
+    """Content hash of the inventory; any change to it changes the digest.
+
+    A provider-neutral inventory (``"neutral": true``, built by
+    :func:`agentflow.workflow.environment.build_catalog`) is hashed by what the plan depends on:
+    each role's description, permissions and preamble. Which backend serves the roles, and which
+    extension files are bound, are chosen when a run starts, so they must not change the digest;
+    an approval stays valid for the same plan on any backend.
+    """
+    if inventory.get("neutral"):
+        inventory = {
+            "neutral": True,
+            "agents": {
+                name: {
+                    "description": agent.get("description", ""),
+                    "permissions": list(agent.get("permissions") or []),
+                    "preamble": agent.get("preamble", ""),
+                }
+                for name, agent in sorted((inventory.get("agents") or {}).items())
+            },
+        }
     return artifact_key(inventory)
 
 

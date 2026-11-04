@@ -106,20 +106,32 @@ class Extension:
 
 
 def parse_front_matter(text: str) -> tuple[dict[str, str], str]:
-    """Split ``---`` fenced ``key: value`` lines from the body. Not YAML: scalars only."""
+    """Split ``---`` fenced ``key: value`` lines from the body. Not YAML: scalars only, plus the
+    folded/literal block forms (``>``, ``>-``, ``|``, ``|-``) that skill files use for long
+    descriptions. A bare ``tools:`` that opens a list is skipped."""
     lines = text.splitlines()
     if not lines or lines[0].strip() != "---":
         return {}, text
     meta: dict[str, str] = {}
-    for i in range(1, len(lines)):
+    i = 1
+    while i < len(lines):
         line = lines[i]
         if line.strip() == "---":
             return meta, "\n".join(lines[i + 1 :])
         key, sep, value = line.partition(":")
-        value = value.strip().strip("\"'")
-        if (
-            sep and key.strip() and value and not key.startswith((" ", "\t", "-"))
-        ):  # a bare "tools:" opens a list
+        i += 1
+        if not sep or not key.strip() or key.startswith((" ", "\t", "-")):
+            continue
+        value = value.strip()
+        if value in (">", ">-", "|", "|-"):
+            block: list[str] = []
+            while i < len(lines) and lines[i].startswith((" ", "\t")):
+                block.append(lines[i].strip())
+                i += 1
+            joiner = " " if value.startswith(">") else "\n"
+            value = joiner.join(part for part in block if part)
+        value = value.strip("\"'")
+        if value:  # an empty value opens a list
             meta[key.strip()] = value
     return {}, text  # never closed: treat it all as body
 

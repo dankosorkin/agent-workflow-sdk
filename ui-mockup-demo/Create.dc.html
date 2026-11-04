@@ -68,41 +68,15 @@ button:focus-visible,a:focus-visible,textarea:focus-visible,input:focus-visible{
           <textarea rows="5" value="{{request}}" onChange="{{onRequest}}" placeholder="Describe the task in plain language." style="resize:vertical;box-sizing:border-box;padding:14px;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--text);font-size:15px;line-height:1.55"></textarea>
         </label>
 
-        <!-- where the plan runs -->
+        <!-- the designers only: the executing backend is chosen when the plan is launched -->
         <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="font-size:14px;font-weight:500">Backend</div>
+          <div style="font-size:14px;font-weight:500">System agents run on <span style="color:var(--muted);font-weight:400">· the plan itself does not depend on it</span></div>
           <div style="display:flex;flex-wrap:wrap;gap:8px">
-            <sc-for list="{{backendChoices}}" as="b" hint-placeholder-count="3">
+            <sc-for list="{{systemChoices}}" as="b" hint-placeholder-count="4">
               <button onClick="{{b.pick}}" aria-pressed="{{b.pressed}}" style="{{b.style}}">{{b.label}}</button>
             </sc-for>
           </div>
-          <div style="font-size:13px;line-height:1.55;color:var(--muted)">Every step is done by this backend's own agent, shaped by a role (researcher, analyst, writer, coder, reviewer). Its steering, skills and <span style="font-family:var(--mono)">AGENTS.md</span> / <span style="font-family:var(--mono)">CLAUDE.md</span> apply by themselves. Each run gets its own git worktree, so your checkout is not touched.</div>
-        </div>
-
-        <sc-if value="{{hasExtChoices}}" hint-placeholder-val="{{ false }}">
-          <div style="display:flex;flex-direction:column;gap:10px">
-            <div style="font-size:14px;font-weight:500">Rely on <span style="color:var(--muted);font-weight:400">· optional: the plan may name these, and a change to them is noticed</span></div>
-            <div style="max-height:240px;overflow:auto;display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--bg)">
-              <sc-for list="{{extChoices}}" as="e" hint-placeholder-count="4">
-                <button onClick="{{e.toggle}}" aria-pressed="{{e.on}}" style="{{e.style}}">
-                  <span style="font-family:var(--mono);font-size:13px;flex:none">{{e.mark}}</span>
-                  <span style="font-family:var(--mono);font-size:13px;flex:none;min-width:150px;text-align:left">{{e.name}}</span>
-                  <span style="font-size:12px;color:var(--muted);flex:none">{{e.kind}} · {{e.scope}}</span>
-                  <span style="font-size:12.5px;color:#C9D1DB;text-align:left;min-width:0;overflow-wrap:anywhere">{{e.description}}</span>
-                </button>
-              </sc-for>
-            </div>
-          </div>
-        </sc-if>
-
-        <div style="display:flex;flex-direction:column;gap:10px">
-          <div style="font-size:14px;font-weight:500">If a file the plan relies on changes after approval</div>
-          <div style="display:flex;flex-wrap:wrap;gap:8px">
-            <sc-for list="{{modeChoices}}" as="m" hint-placeholder-count="3">
-              <button onClick="{{m.pick}}" aria-pressed="{{m.pressed}}" style="{{m.style}}">{{m.label}}</button>
-            </sc-for>
-          </div>
-          <div style="font-size:13px;line-height:1.55;color:var(--muted)">{{modeHint}}</div>
+          <div style="font-size:13px;line-height:1.55;color:var(--muted)">The orchestrator, designer and critic are defined in the engine and run in an empty directory with their full instructions in the prompt, so your steering does not change how plans are designed. The plan names roles, not providers: you pick the backend that executes it on the Plans screen, and the same plan can run on another one later.</div>
         </div>
 
         <div style="padding:14px;border-radius:10px;background:var(--panel2);font-size:13px;line-height:1.55;color:var(--muted)">
@@ -281,7 +255,7 @@ class Component extends DCLogic {
       started: false,
       request: '',
       designId: '', record: null, answer: '', error: '', designs: [], now: Date.now(), signal: 0, agent: [],
-      backends: [], backend: '', ext: null, picked: {}, mode: 'auto'
+      backends: [], system: ''
     };
     this._close = null; this._timer = null; this._agentClose = null; this._agentSeq = 0; this._agentLen = 0;
   }
@@ -294,19 +268,7 @@ class Component extends DCLogic {
     this.loadBackends();
   }
   async loadBackends() {
-    try {
-      const all = (await AF.get('/backends')) || [];
-      const ok = all.filter((b) => b.available);
-      this.setState({ backends: all });
-      if (ok.length && !this.state.backend) this.pickBackend(ok[0].backend);
-    } catch (e) { /* the form still works without it */ }
-  }
-  async pickBackend(name) {
-    this.setState({ backend: name, ext: null, picked: {} });
-    try {
-      const ext = await AF.get('/backends/' + name + '/extensions');
-      if (this.state.backend === name) this.setState({ ext });
-    } catch (e) { /* optional */ }
+    try { this.setState({ backends: (await AF.get('/backends')) || [] }); } catch (e) { /* optional */ }
   }
   async loadDesigns() {
     try { this.setState({ designs: (await AF.get('/designs')) || [] }); } catch (e) { /* the list is optional */ }
@@ -360,9 +322,7 @@ class Component extends DCLogic {
     const request = (this.state.request || '').trim();
     if (!request) { this.setState({ error: 'The request is empty.' }); return; }
     try {
-      const S = this.state;
-      const extensions = Object.keys(S.picked).filter((k) => S.picked[k]).map((k) => { const [kind, name] = k.split('\u0001'); return { kind, name }; });
-      const body = S.backend ? { request, backend: S.backend, extensions, mode: S.mode } : { request };
+      const body = this.state.system ? { request, system_backend: this.state.system } : { request };
       const d = await AF.post('/designs', body);
       this.setState({ started: true, designId: d.id, record: d, error: '' });
       window.history.replaceState(null, '', '?design=' + encodeURIComponent(d.id));
@@ -396,17 +356,7 @@ class Component extends DCLogic {
     const agentRows = AF.agentRows(agentAll.slice(-300));
     const agentNote = agentAll.length > 300 ? 'showing the last 300 of ' + agentAll.length + ' entries' : agentAll.length + ' entries';
     const choice = (on) => 'cursor:pointer;height:40px;padding:0 16px;border-radius:10px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#161A1F') + ';';
-    const backendChoices = S.backends.filter((b) => b.available).map((b) => ({ label: b.backend, pressed: S.backend === b.backend, style: choice(S.backend === b.backend) + "font-family:'JetBrains Mono',monospace;", pick: () => this.pickBackend(b.backend) }));
-    const kindLabel = { steering: 'steering', skills: 'skill', instructions: 'instructions' };
-    const extChoices = [];
-    Object.keys((S.ext && S.ext.extensions) || {}).forEach((kind) => (S.ext.extensions[kind] || []).forEach((e) => {
-      const key = kind + '\u0001' + e.name, on = !!S.picked[key];
-      extChoices.push({ name: e.name, kind: kindLabel[kind] || kind, scope: e.scope, description: e.description, on, mark: on ? '[x]' : '[ ]',
-        style: 'cursor:pointer;display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;padding:8px 10px;border-radius:8px;border:1px solid ' + (on ? '#3A5A8A' : 'transparent') + ';background:' + (on ? '#1F2A3D' : 'transparent') + ';color:#E6E9ED;text-align:left;',
-        toggle: () => this.setState((st) => ({ picked: { ...st.picked, [key]: !st.picked[key] } })) });
-    }));
-    const modeInfo = { auto: ['auto', 'Strict if any step writes or has side effects, otherwise track.'], strict: ['strict', 'The files are part of the approval. Edit one after approving and the approval is revoked; approve again to go on.'], track: ['track', 'The plan keeps the files as they were. If one changes, the run goes on and shows a warning.'] };
-    const modeChoices = Object.keys(modeInfo).map((m) => ({ label: modeInfo[m][0], pressed: S.mode === m, style: choice(S.mode === m), pick: () => this.setState({ mode: m }) }));
+    const systemChoices = [{ label: 'auto (first installed)', value: '' }].concat(S.backends.filter((b) => b.available).map((b) => ({ label: b.backend, value: b.backend }))).map((b) => ({ label: b.label, pressed: S.system === b.value, style: choice(S.system === b.value) + (b.value ? "font-family:'JetBrains Mono',monospace;" : ''), pick: () => this.setState({ system: b.value }) }));
     const act = AF.activity(rec, S.now);
     const live = rec && (rec.status === 'designing' || rec.status === 'asking');
     const age = S.signal ? Math.round((S.now - S.signal) / 1000) : null;
@@ -499,7 +449,7 @@ class Component extends DCLogic {
       workLabel: act.current ? act.current.label : '', workSeconds: act.current ? act.current.seconds : 0,
       signalLabel: sigLabel, signalStyle: sigStyle,
       hasDesigns: designs.length > 0, designs,
-      backendChoices, extChoices, hasExtChoices: extChoices.length > 0, modeChoices, modeHint: modeInfo[S.mode][1],
+      systemChoices,
       notStarted: !S.started, started: S.started,
       request: S.request, requestShort: rShort,
       onRequest: (e) => this.setState({ request: e.target.value }),

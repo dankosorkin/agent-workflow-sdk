@@ -10,11 +10,14 @@ from agentflow.workflow import runner as runner_mod
 from agentflow.workflow.environment import (
     BUILTIN_ROLES,
     Environment,
+    bind_inventory,
+    build_catalog,
     build_inventory,
     drift,
     load_roles,
     resolve_mode,
 )
+from agentflow.workflow.runner import PlanRefused
 from agentflow.workflow.service import WorkflowService
 from test_design import BRIEF, NO_ISSUES, Designer, good_plan_obj, j
 from wf_helpers import make_inventory
@@ -64,47 +67,66 @@ def test_the_builtin_roles_and_their_layers(tmp_path):
     assert "broken" not in roles and "empty" not in roles  # an unusable file never half-applies
 
 
-def test_the_inventory_for_a_backend_is_valid_and_uses_the_generic_agent(project, tmp_path):
+def test_the_catalog_is_neutral_and_valid(project, tmp_path):
+    catalog = build_catalog(project, home=tmp_path / "nohome")
+    assert catalog["neutral"] is True and validate_inventory(catalog) == []
+    researcher = catalog["agents"]["researcher"]
+    assert {b["backend"] for b in researcher["backends"]} == {"kiro", "claude_code", "codex"}
+    assert catalog["agents"]["coder"]["permissions"] == ["read_only", "allowlist", "full"]
+    assert "context" not in catalog
+
+
+def test_binding_serves_every_role_by_one_backend_only(project, tmp_path):
     inv = build_inventory("kiro", project, home=tmp_path / "nohome")
     assert validate_inventory(inv) == []
     assert inv["agents"]["researcher"]["backends"] == [{"backend": "kiro", "agent": "vibe"}]
-    assert inv["agents"]["coder"]["permissions"] == ["read_only", "allowlist", "full"]
-    assert inv["agents"]["analyst"]["preamble"]
     assert inv["context"] == {"backend": "kiro", "extensions": []}
     with pytest.raises(ValueError):
         build_inventory("nope", project)
 
 
-def test_selected_extensions_are_part_of_the_digest(project, tmp_path):
+def test_an_approval_does_not_depend_on_the_backend_or_the_files(project, tmp_path):
     home = tmp_path / "nohome"
+    catalog = build_catalog(project, home=home)
+    digest = inventory_digest(catalog)
     pick = [{"kind": "steering", "name": "tracked"}]
-    inv = build_inventory("kiro", project, selection=pick, home=home)
-    assert [e["name"] for e in inv["context"]["extensions"]] == ["tracked"]
-    before = inventory_digest(inv)
+    for backend in ("kiro", "claude_code", "codex"):
+        bound = bind_inventory(
+            catalog, backend, project, selection=pick if backend == "kiro" else [], home=home
+        )
+        assert inventory_digest(bound) == digest
     write(project / ".kiro/steering/tracked.md", "---\ninclusion: manual\n---\n# Changed")
-    after_inv = build_inventory("kiro", project, selection=pick, home=home)
-    assert inventory_digest(after_inv) != before
-    assert drift(inv, after_inv) == ["steering:tracked"]
-    # a file that is not selected does not matter
-    write(project / ".kiro/steering/draft.md", "# edited, but not selected")
-    assert inventory_digest(
-        build_inventory("kiro", project, selection=pick, home=home)
-    ) == inventory_digest(after_inv)
-    with pytest.raises(ValueError):
+    assert (
+        inventory_digest(bind_inventory(catalog, "kiro", project, selection=pick, home=home))
+        == digest
+    )
+
+
+def test_a_missing_extension_is_named(project, tmp_path):
+    home = tmp_path / "nohome"
+    with pytest.raises(ValueError, match="skills 'ghost'"):
         build_inventory("kiro", project, selection=[{"kind": "skills", "name": "ghost"}], home=home)
 
 
-def test_a_role_edit_changes_the_digest_too(project, tmp_path):
+def test_drift_names_the_files_that_changed(project, tmp_path):
     home = tmp_path / "nohome"
-    before = build_inventory("codex", project, home=home)
+    pick = [{"kind": "steering", "name": "tracked"}]
+    before = build_inventory("kiro", project, selection=pick, home=home)["context"]["extensions"]
+    assert drift(before, before) == []
+    write(project / ".kiro/steering/tracked.md", "---\ninclusion: manual\n---\n# Changed")
+    after = build_inventory("kiro", project, selection=pick, home=home)["context"]["extensions"]
+    assert drift(before, after) == ["steering:tracked"]
+    assert drift(before, []) == ["steering:tracked"] and drift([], before) == ["steering:tracked"]
+
+
+def test_a_role_edit_changes_the_catalog_digest(project, tmp_path):
+    home = tmp_path / "nohome"
+    before = inventory_digest(build_catalog(project, home=home))
     write(
         project / ".agentflow/roles/analyst.md",
         "---\ndescription: d\npermissions: read_only\n---\nNew text.",
     )
-    after = build_inventory("codex", project, home=home)
-    assert inventory_digest(before) != inventory_digest(after) and drift(before, after) == [
-        "role:analyst"
-    ]
+    assert inventory_digest(build_catalog(project, home=home)) != before
 
 
 def test_auto_is_strict_when_a_step_writes():
@@ -131,7 +153,6 @@ def test_a_run_gets_its_own_worktree_with_uncommitted_extensions(project, tmp_pa
     assert (path / ".kiro/steering/draft.md").exists()
     assert "agentflow/run-1" in git(project, "branch", "--list")
     assert git(project, "status", "--porcelain").count("README") == 0  # the checkout is untouched
-    assert ws["path"] == str(path.resolve()) or ws["path"].endswith("run-1")
 
 
 def test_a_project_that_is_not_a_repository_is_used_in_place(tmp_path):
@@ -149,23 +170,29 @@ def plan_for_roles():
     return plan
 
 
-def make_service(tmp_path, project):
-    seen = {"cwd": [], "prompts": []}
+def make_service(tmp_path, project, plan=None, on_step=None):
+    seen = {"cwd": [], "prompts": [], "backends": []}
 
     async def runner(step, entry, prompt):
         seen["cwd"].append(runner_mod._workspace.get())
         seen["prompts"].append(prompt)
+        seen["backends"].append(entry["backend"])
+        if on_step:
+            on_step(step["id"])
         return {
             "collect": '{"logs": [{"id": 1}]}',
             "analyze": '{"findings": [{"title": "spike"}]}',
         }[step["id"]]
 
-    designer = Designer(orchestrator=[BRIEF], creator=[j(plan_for_roles())], verifier=[NO_ISSUES])
+    designer = Designer(
+        orchestrator=[BRIEF], creator=[j(plan or plan_for_roles())], verifier=[NO_ISSUES]
+    )
     env = Environment(
         project,
         tmp_path / "data",
         home=tmp_path / "nohome",
-        designer_factory=lambda b, cwd: (designer, False),
+        system_backend="codex",
+        designer_factory=lambda backend, sandbox: designer,
     )
     service = WorkflowService(
         tmp_path / "data",
@@ -174,7 +201,7 @@ def make_service(tmp_path, project):
         runner=runner,
         environment=env,
     )
-    return service, seen, designer
+    return service, seen
 
 
 async def settle(service, kind, doc_id, done, timeout=5.0):
@@ -189,25 +216,44 @@ async def settle(service, kind, doc_id, done, timeout=5.0):
     raise AssertionError(rec)
 
 
-async def designed_and_approved(service, **kw):
-    d = service.start_design("find anomalies", backend="kiro", **kw)
+FINISHED = {"completed", "refused", "error", "failed", "partial", "held"}
+
+
+async def designed_and_approved(service):
+    d = service.start_design("find anomalies")
     done = await settle(service, "design", d["id"], {"done", "failed"})
     assert done["status"] == "done", done
     service.approve(done["plan_id"], "daniel")
-    return done["plan_id"]
+    return done["plan_id"], done
 
 
-async def test_a_plan_runs_in_its_worktree_with_the_role_preamble(project, tmp_path):
-    service, seen, designer = make_service(tmp_path, project)
-    plan_id = await designed_and_approved(service)
+async def test_a_plan_is_designed_without_a_backend(project, tmp_path):
+    service, _ = make_service(tmp_path, project)
+    plan_id, design = await designed_and_approved(service)
     record = service.get_plan(plan_id)
-    assert record["context"] == {"backend": "kiro", "selection": [], "mode": "auto"}
-    assert "analyst" in record["inventory"]["agents"]
+    assert design["system_backend"] == "codex"
+    assert record["neutral"] is True and "context" not in record and "inventory" not in record
+    assert not any("backend" in s for s in record["plan"]["graph"]["steps"])
+    assert service.environment_info()["system_backend"] == "codex"
 
-    run = service.start_run(plan_id, {"window": "24h"})
-    done = await settle(
-        service, "run", run["id"], {"completed", "failed", "partial", "error", "refused"}
-    )
+
+async def test_the_same_approved_plan_runs_on_two_backends(project, tmp_path):
+    service, seen = make_service(tmp_path, project)
+    plan_id, _ = await designed_and_approved(service)
+    on_kiro = service.start_run(plan_id, {"window": "24h"}, backend="kiro")
+    first = await settle(service, "run", on_kiro["id"], FINISHED)
+    on_codex = service.start_run(plan_id, {"window": "24h"}, backend="codex")
+    second = await settle(service, "run", on_codex["id"], FINISHED)
+    assert first["status"] == "completed" and second["status"] == "completed"
+    assert set(seen["backends"][:2]) == {"kiro"} and set(seen["backends"][2:]) == {"codex"}
+    assert first["binding"]["backend"] == "kiro" and second["binding"]["backend"] == "codex"
+
+
+async def test_a_run_uses_its_worktree_and_the_role_preamble(project, tmp_path):
+    service, seen = make_service(tmp_path, project)
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(plan_id, {"window": "24h"}, backend="kiro")
+    done = await settle(service, "run", run["id"], FINISHED)
     assert done["status"] == "completed", done
     assert done["workspace"]["kind"] == "worktree"
     assert all(str(c).endswith(run["id"]) for c in seen["cwd"]) and seen["cwd"]
@@ -215,74 +261,123 @@ async def test_a_plan_runs_in_its_worktree_with_the_role_preamble(project, tmp_p
     assert "Collect the raw log records." in seen["prompts"][0]
 
 
-async def test_strict_revokes_the_approval_when_a_selected_file_changes(project, tmp_path):
-    service, _, _ = make_service(tmp_path, project)
+async def test_launch_needs_a_backend_and_refuses_one_that_cannot_run_the_plan(project, tmp_path):
+    writes = plan_for_roles()
+    writes["graph"]["steps"][0].update(agent="writer", permission="allowlist", tools=["write"])
+    service, _ = make_service(tmp_path, project, plan=writes)
+    plan_id, _ = await designed_and_approved(service)
+    with pytest.raises(ValueError, match="choose the backend"):
+        service.start_run(plan_id, {"window": "24h"})
+    with pytest.raises(PlanRefused) as refused:  # codex cannot restrict to a tool list
+        service.start_run(plan_id, {"window": "24h"}, backend="codex")
+    assert "backend_cannot_enforce" in {
+        i.code for i in refused.value.issues
+    } or "no_executable_backend" in {i.code for i in refused.value.issues}
+    run = service.start_run(plan_id, {"window": "24h"}, backend="kiro")
+    assert (await settle(service, "run", run["id"], FINISHED))["status"] == "completed"
+
+
+async def test_the_preview_says_what_a_launch_would_bind(project, tmp_path):
+    service, _ = make_service(tmp_path, project)
+    plan_id, _ = await designed_and_approved(service)
+    ok = service.binding_preview(plan_id, "kiro", [{"kind": "steering", "name": "tracked"}], "auto")
+    assert ok["resolved_mode"] == "track" and [e["name"] for e in ok["extensions"]] == ["tracked"]
+    missing = service.binding_preview(plan_id, "kiro", [{"kind": "skills", "name": "ghost"}])
+    assert "extension_missing" in {i["code"] for i in missing["issues"]}
+    assert "unknown_backend" in {
+        i["code"] for i in service.binding_preview(plan_id, "nope")["issues"]
+    }
+
+
+async def test_strict_holds_the_run_when_a_relied_on_file_changes_and_resume_accepts(
+    project, tmp_path
+):
     pick = [{"kind": "steering", "name": "tracked"}]
-    plan_id = await designed_and_approved(service, extensions=pick, mode="strict")
-    write(
-        project / ".kiro/steering/tracked.md",
-        "---\ninclusion: manual\n---\n# Changed after approval",
+    edited = {"done": False}
+
+    def edit_once(step_id):
+        if step_id == "collect" and not edited["done"]:
+            edited["done"] = True
+            write(
+                project / ".kiro/steering/tracked.md",
+                "---\ninclusion: manual\n---\n# Changed mid-run",
+            )
+
+    service, _ = make_service(tmp_path, project, on_step=edit_once)
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(
+        plan_id, {"window": "24h"}, backend="kiro", extensions=pick, mode="strict"
     )
-    run = service.start_run(plan_id, {"window": "24h"})
+    held = await settle(service, "run", run["id"], FINISHED)
+    assert held["status"] == "held" and "context_changed" in {i["code"] for i in held["issues"]}
+    assert "steering:tracked" in held["issues"][0]["message"]
+    service.resume_run(run["id"])
     done = await settle(
-        service, "run", run["id"], {"completed", "refused", "error", "failed", "partial"}
+        service, "run", run["id"], {"completed", "error", "failed", "partial", "refused"}
     )
-    assert done["status"] == "refused"
-    assert "inventory_changed" in {i["code"] for i in done["issues"]}
+    assert done["status"] == "completed"
 
 
 async def test_track_goes_on_and_reports_the_change(project, tmp_path):
-    service, _, _ = make_service(tmp_path, project)
     pick = [{"kind": "steering", "name": "tracked"}]
-    plan_id = await designed_and_approved(service, extensions=pick, mode="track")
-    write(
-        project / ".kiro/steering/tracked.md",
-        "---\ninclusion: manual\n---\n# Changed after approval",
+    edited = {"done": False}
+
+    def edit_once(step_id):
+        if step_id == "collect" and not edited["done"]:
+            edited["done"] = True
+            write(
+                project / ".kiro/steering/tracked.md",
+                "---\ninclusion: manual\n---\n# Changed mid-run",
+            )
+
+    service, _ = make_service(tmp_path, project, on_step=edit_once)
+    plan_id, _ = await designed_and_approved(service)
+    run = service.start_run(
+        plan_id, {"window": "24h"}, backend="kiro", extensions=pick, mode="track"
     )
-    run = service.start_run(plan_id, {"window": "24h"})
-    done = await settle(
-        service, "run", run["id"], {"completed", "refused", "error", "failed", "partial"}
-    )
+    done = await settle(service, "run", run["id"], FINISHED)
     assert done["status"] == "completed"
     assert done["warnings"] and "steering:tracked" in done["warnings"][0]
 
 
-async def test_choosing_a_backend_needs_an_environment_and_known_files(tmp_path, project):
-    plain = WorkflowService(
-        tmp_path / "d2",
+async def test_an_older_plan_still_runs_without_a_binding(tmp_path, project):
+    service = WorkflowService(
+        tmp_path / "legacy",
         inventory_source=make_inventory,
-        designer=Designer(orchestrator=[], creator=[], verifier=[]),
+        designer=Designer(orchestrator=[BRIEF], creator=[j(good_plan_obj())], verifier=[NO_ISSUES]),
         runner=lambda *a: None,
     )
+    d = service.start_design("x")
+    assert d["system_backend"] is None
     with pytest.raises(ValueError, match="environment"):
-        plain.start_design("x", backend="kiro")
-    service, _, _ = make_service(tmp_path, project)
-    with pytest.raises(ValueError, match="unknown"):
-        service.start_design("x", backend="kiro", extensions=[{"kind": "skills", "name": "ghost"}])
-    with pytest.raises(ValueError, match="mode"):
-        service.start_design("x", backend="kiro", mode="loose")
+        service.start_design("x", system_backend="kiro")
 
 
-async def test_the_http_form_carries_backend_extensions_and_mode(project, tmp_path):
+async def test_the_http_layer_carries_system_backend_launch_binding_and_preview(project, tmp_path):
     from agentflow.server.workflow_app import create_workflow_app
     from fastapi.testclient import TestClient
 
-    service, _, _ = make_service(tmp_path, project)
+    service, _ = make_service(tmp_path, project)
+    plan_id, _ = await designed_and_approved(service)
     with TestClient(create_workflow_app(service, workspace=project)) as client:
-        assert client.get("/environment").json()["enabled"] is True
+        env = client.get("/environment").json()
+        assert env["enabled"] is True and env["system_backend"] == "codex"
+        preview = client.get(
+            f"/plans/{plan_id}/binding", params={"backend": "kiro", "ext": ["steering:tracked"]}
+        )
+        assert preview.status_code == 200 and preview.json()["resolved_mode"] == "track"
+        assert client.get(
+            f"/plans/{plan_id}/binding", params={"backend": "kiro", "ext": ["skills:ghost"]}
+        ).json()["issues"]
+        no_backend = client.post(f"/plans/{plan_id}/runs", json={"params": {"window": "24h"}})
+        assert no_backend.status_code == 422
         body = {
-            "request": "find anomalies",
+            "params": {"window": "24h"},
             "backend": "kiro",
             "extensions": [{"kind": "steering", "name": "tracked"}],
             "mode": "strict",
         }
-        created = client.post("/designs", json=body)
-        assert created.status_code == 201
-        design = created.json()
-        assert design["backend"] == "kiro" and design["mode"] == "strict"
-        assert [e["name"] for e in design["inventory"]["context"]["extensions"]] == ["tracked"]
-        bad = client.post(
-            "/designs", json={**body, "extensions": [{"kind": "skills", "name": "ghost"}]}
-        )
+        started = client.post(f"/plans/{plan_id}/runs", json=body)
+        assert started.status_code == 201 and started.json()["binding"]["backend"] == "kiro"
+        bad = client.post(f"/plans/{plan_id}/runs", json={**body, "backend": "nope"})
         assert bad.status_code == 422
-        assert client.post("/designs", json={"request": "x", "backend": "nope"}).status_code == 422

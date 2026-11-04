@@ -34,15 +34,22 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Workflow environment: choose the backend per request and run each plan on that backend's
-  generic agent shaped by a role. `agentflow.workflow.environment` has the built-in roles
-  (`researcher`, `analyst`, `writer`, `coder`, `reviewer`; overridable by
-  `.agentflow/roles/*.md`), `build_inventory`, `Environment` and the `strict` / `track` / `auto`
-  modes: the extension files a plan relies on are part of the inventory digest (strict revokes
-  the approval when one changes; track keeps the snapshot and warns). Every run gets its own git
-  worktree on its own branch (`agentflow/<run_id>`) with the project's uncommitted extension
-  files copied in; a non-git project is used in place and the run says so.
-  `WorkflowService(environment=...)`, `start_design(backend=, extensions=, mode=)`.
+- Provider-neutral plans. A plan names roles (`researcher`, `analyst`, `writer`, `coder`,
+  `reviewer`; overridable by `.agentflow/roles/*.md`) and the permission each step needs, never
+  a backend. The three system agents (orchestrator, designer, critic) are defined in the engine
+  and run on a *system backend* (`Environment(system_backend=...)`, default the first installed)
+  in an empty directory with their whole instructions in the prompt. The executing backend is
+  chosen when a run starts: `start_run(plan_id, params, backend=, extensions=, mode=)`, bound to
+  that backend's generic agent, which applies the user's own steering, skills and
+  `AGENTS.md` / `CLAUDE.md` itself. The same approved plan runs on Kiro, Claude Code or Codex.
+  `inventory_digest` of a neutral inventory covers only the roles (description, permissions,
+  preamble), so an approval does not depend on the backend or on bound files. A plan that the
+  chosen backend cannot run (for example `allowlist` on Codex) is refused at launch with reasons;
+  `GET /plans/{id}/binding?backend=&ext=kind:name&mode=` previews the binding.
+- Run mode `strict` / `track` / `auto` for the files a run relies on: strict holds the run when
+  one changes between steps (resume accepts the new state), track warns once. Each run gets its own
+  git worktree on `agentflow/<run_id>` with the project's uncommitted extension files copied in; a
+  non-git project is used in place and the run says so.
 - `agentflow.workflow.extensions`: read-only discovery of a backend's steering, skills and
   `AGENTS.md` / `CLAUDE.md` (names, descriptions, hashes, never content), `available_backends()`,
   and `probe_backend()`, a canary check that runs the real agent in a temporary directory and
@@ -197,6 +204,9 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- The step cache key includes the executor (backend, agent, role text): the same plan on another
+  backend is a new run, not a replay of the first one's results.
+- Front matter in skill and steering files may use block scalars (`>-`, `|`) for descriptions.
 - Kiro steps may grant `disclose_context` (the permission Kiro asks before loading a skill) even
   under `read_only`; without it a skill the agent found could not be used.
 - The UI no longer carries leftover mock data or controls the server ignores (approval mode and

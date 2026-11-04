@@ -127,27 +127,6 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
         </sc-if>
       </section>
 
-      <sc-if value="{{ctxShow}}" hint-placeholder-val="{{ false }}">
-        <section style="display:flex;flex-direction:column;gap:10px;background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px 22px">
-          <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Where it runs</h2>
-          <div style="display:flex;flex-wrap:wrap;gap:22px;font-size:14px">
-            <span><span style="color:var(--muted)">backend</span> <b style="font-family:var(--mono)">{{ctxBackend}}</b></span>
-            <span><span style="color:var(--muted)">files changed after approval</span> <b>{{ctxModeLabel}}</b></span>
-          </div>
-          <div style="font-size:13px;color:var(--muted);line-height:1.55">{{ctxModeHint}}</div>
-          <sc-if value="{{ctxHasItems}}" hint-placeholder-val="{{ false }}">
-            <div style="font-size:13px;color:var(--muted)">The plan relies on these files (the agent loads them itself):</div>
-            <sc-for list="{{ctxItems}}" as="e" hint-placeholder-count="2">
-              <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;padding:6px 10px;border-radius:8px;background:var(--panel2)">
-                <span style="font-family:var(--mono);font-size:13px;min-width:150px">{{e.name}}</span>
-                <span style="font-size:12px;color:var(--muted)">{{e.kind}} · {{e.scope}}</span>
-                <span style="font-size:12.5px;color:#C9D1DB;min-width:0;overflow-wrap:anywhere">{{e.description}}</span>
-              </div>
-            </sc-for>
-          </sc-if>
-        </section>
-      </sc-if>
-
       <section style="display:flex;flex-direction:column;gap:14px">
         <h2 style="margin:0;font-size:13px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)">Step graph · where each step runs and with what rights</h2>
         <div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start">
@@ -160,7 +139,7 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
                 <div style="background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:9px">
                   <div style="font-family:var(--mono);font-size:13px;font-weight:500">{{s.id}}</div>
                   <div style="font-size:12px;color:var(--muted)">agent · <span style="color:var(--text)">{{s.agent}}</span></div>
-                  <div style="font-size:12px;color:var(--muted)">runs on · <span style="color:var(--text);font-family:var(--mono)">{{s.backend}}</span> <span style="font-size:11px">(inventory)</span></div>
+                  <div style="font-size:12px;color:var(--muted)">runs on · <span style="color:var(--text);font-family:var(--mono)">{{s.backend}}</span></div>
                   <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
                     <span style="{{s.permStyle}}">{{s.permission}}</span>
                     <sc-for list="{{s.tools}}" as="t" hint-placeholder-count="1"><span style="font-family:var(--mono);font-size:11px;padding:3px 7px;border-radius:6px;background:var(--panel2)">{{t}}</span></sc-for>
@@ -225,10 +204,52 @@ button:focus-visible,a:focus-visible,input:focus-visible{outline:2px solid #7DB0
             </sc-for>
           </div>
 
-          <div style="display:flex;flex-direction:column;gap:6px;padding:14px;border-radius:10px;background:var(--panel2);font-size:13px;line-height:1.55;color:var(--muted)">
-            <div>Backends are not chosen here. Each step runs on the first backend listed for its agent in <span style="font-family:var(--mono);color:var(--text)">inventory.json</span>.</div>
-            <div>Every step gets exactly the rights written in the approved plan.</div>
-          </div>
+          <sc-if value="{{bindShow}}" hint-placeholder-val="{{ true }}">
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="font-size:14px;font-weight:500">Run on</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <sc-for list="{{backendChoices}}" as="b" hint-placeholder-count="3">
+                  <button onClick="{{b.pick}}" aria-pressed="{{b.pressed}}" style="{{b.style}}">{{b.label}}</button>
+                </sc-for>
+              </div>
+              <div style="font-size:13px;line-height:1.55;color:var(--muted)">The plan does not know a provider. Every step runs on this backend's own agent, shaped by its role, and the backend applies your steering, skills and <span style="font-family:var(--mono)">AGENTS.md</span> / <span style="font-family:var(--mono)">CLAUDE.md</span> by itself. The run gets its own git worktree, so your checkout is not touched.</div>
+            </div>
+            <sc-if value="{{hasExtChoices}}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:10px">
+                <div style="font-size:14px;font-weight:500">Rely on <span style="color:var(--muted);font-weight:400">· optional: a change to these during the run is noticed</span></div>
+                <div style="max-height:220px;overflow:auto;display:flex;flex-direction:column;gap:6px;border:1px solid var(--line);border-radius:10px;padding:8px;background:var(--bg)">
+                  <sc-for list="{{extChoices}}" as="e" hint-placeholder-count="4">
+                    <button onClick="{{e.toggle}}" aria-pressed="{{e.on}}" style="{{e.style}}">
+                      <span style="font-family:var(--mono);font-size:13px;flex:none">{{e.mark}}</span>
+                      <span style="font-family:var(--mono);font-size:13px;flex:none;min-width:150px;text-align:left">{{e.name}}</span>
+                      <span style="font-size:12px;color:var(--muted);flex:none">{{e.kind}} · {{e.scope}}</span>
+                      <span style="font-size:12.5px;color:#C9D1DB;text-align:left;min-width:0;overflow-wrap:anywhere">{{e.description}}</span>
+                    </button>
+                  </sc-for>
+                </div>
+              </div>
+            </sc-if>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <div style="font-size:14px;font-weight:500">If one of those files changes during the run</div>
+              <div style="display:flex;flex-wrap:wrap;gap:8px">
+                <sc-for list="{{modeChoices}}" as="m" hint-placeholder-count="3">
+                  <button onClick="{{m.pick}}" aria-pressed="{{m.pressed}}" style="{{m.style}}">{{m.label}}</button>
+                </sc-for>
+              </div>
+              <div style="font-size:13px;line-height:1.55;color:var(--muted)">{{modeHint}}</div>
+            </div>
+            <sc-if value="{{hasBindIssues}}" hint-placeholder-val="{{ false }}">
+              <div style="display:flex;flex-direction:column;gap:6px;background:#2E1B12;border:1px solid #7A3E22;border-radius:10px;padding:12px 14px">
+                <div style="font-size:13px;font-weight:600;color:#FFC9A8">This plan cannot be started on {{bindBackend}} as it is</div>
+                <sc-for list="{{bindIssues}}" as="i" hint-placeholder-count="2">
+                  <div style="font-size:13px;line-height:1.5;color:#FFC9A8"><span style="font-family:var(--mono)">{{i.code}}</span> {{i.step}} {{i.message}}</div>
+                </sc-for>
+              </div>
+            </sc-if>
+          </sc-if>
+          <sc-if value="{{legacyShow}}" hint-placeholder-val="{{ false }}">
+            <div style="font-size:13px;line-height:1.55;color:var(--muted);padding:14px;border-radius:10px;background:var(--panel2)">This plan was designed for a fixed inventory: each step runs on the first backend listed for its agent there.</div>
+          </sc-if>
 
           <div style="display:flex;flex-wrap:wrap;gap:16px;border-top:1px solid var(--line)">
             <div style="flex:1 1 140px;padding-top:16px"><div style="font-size:12px;color:var(--muted)">Attempts per step</div><div style="font-size:15px;margin-top:4px">up to 3 (gate)</div></div>
@@ -293,7 +314,7 @@ class Component extends DCLogic {
     super(props);
     this.state = {
       plans: [], sel: '', records: {}, issues: {}, runs: [],
-      vals: {}, inventory: null, designs: [], dry: false, loaded: false, error: '', approveError: ''
+      vals: {}, inventory: null, designs: [], backends: [], backend: '', ext: null, picked: {}, mode: 'auto', preview: null, dry: false, loaded: false, error: '', approveError: ''
     };
   }
   async componentDidMount() {
@@ -302,6 +323,7 @@ class Component extends DCLogic {
       const sel = plans && plans.length ? plans[0].id : '';
       this.setState({ plans: plans || [], runs: runs || [], inventory, designs: designs || [], sel, loaded: true });
       if (sel) this.loadPlan(sel);
+      this.loadBackends();
     } catch (e) {
       this.setState({ error: String(e.message || e), loaded: true });
     }
@@ -313,11 +335,42 @@ class Component extends DCLogic {
         records: { ...this.state.records, [id]: rec },
         issues: { ...this.state.issues, [id]: issues || [] }
       });
+      if (id === this.state.sel) this.refresh();
     } catch (e) {
       this.setState({ error: String(e.message || e) });
     }
   }
-  select(id) { this.setState({ sel: id, approveError: '' }); if (!this.state.records[id]) this.loadPlan(id); }
+  select(id) { this.setState({ sel: id, approveError: '', preview: null }); if (!this.state.records[id]) this.loadPlan(id); else setTimeout(() => this.refresh(), 0); }
+  async loadBackends() {
+    try {
+      const all = (await AF.get('/backends')) || [];
+      const ok = all.filter((b) => b.available);
+      this.setState({ backends: all });
+      if (ok.length && !this.state.backend) await this.pickBackend(ok[0].backend);
+    } catch (e) { /* the plan can still be read */ }
+  }
+  async pickBackend(name) {
+    this.setState({ backend: name, ext: null, picked: {}, preview: null });
+    try {
+      const ext = await AF.get('/backends/' + name + '/extensions');
+      if (this.state.backend === name) this.setState({ ext });
+    } catch (e) { /* optional */ }
+    this.refresh();
+  }
+  _selection() {
+    const P = this.state.picked;
+    return Object.keys(P).filter((k) => P[k]).map((k) => { const [kind, name] = k.split('\u0001'); return { kind, name }; });
+  }
+  async refresh() {
+    const S = this.state, rec = S.records[S.sel];
+    if (!rec || !rec.neutral || !S.backend) { this.setState({ preview: null }); return; }
+    const q = new URLSearchParams({ backend: S.backend, mode: S.mode });
+    this._selection().forEach((e) => q.append('ext', e.kind + ':' + e.name));
+    try {
+      const pv = await AF.get('/plans/' + S.sel + '/binding?' + q.toString());
+      if (this.state.sel === S.sel && this.state.backend === S.backend) this.setState({ preview: pv });
+    } catch (e) { this.setState({ preview: null }); }
+  }
   async approve() {
     const id = this.state.sel;
     if (!id) return;
@@ -338,7 +391,9 @@ class Component extends DCLogic {
     const params = {};
     Object.keys(this.state.vals).forEach((k) => { if (k.indexOf(prefix) === 0) params[k.slice(prefix.length)] = this.state.vals[k]; });
     try {
-      const run = await AF.post('/plans/' + id + '/runs', { params });
+      const rec = this.state.records[id];
+      const body = rec && rec.neutral ? { params, backend: this.state.backend, extensions: this._selection(), mode: this.state.mode } : { params };
+      const run = await AF.post('/plans/' + id + '/runs', body);
       window.location.href = 'Run.dc.html?run=' + encodeURIComponent(run.id);
     } catch (e) {
       const detail = e.detail;
@@ -347,7 +402,9 @@ class Component extends DCLogic {
     }
   }
   _backendOf(agent) {
-    const inv = this.state.inventory, a = inv && inv.agents && inv.agents[agent];
+    const inv = this.state.inventory;
+    if (inv && inv.neutral) return 'chosen at launch';
+    const a = inv && inv.agents && inv.agents[agent];
     const b = a && a.backends && a.backends[0];
     return (b && b.backend) || '(not in inventory)';
   }
@@ -398,11 +455,23 @@ class Component extends DCLogic {
 
     const rec = S.records[S.sel] || null;
     const plan = (rec && rec.plan) || null;
-    const pctx = (rec && rec.context) || null;
-    const pItems = ((rec && rec.inventory && rec.inventory.context && rec.inventory.context.extensions) || []).map((e) => ({ name: e.name, kind: e.kind, scope: e.scope, description: e.description }));
-    const writes = ((plan && plan.graph && plan.graph.steps) || []).some((st) => (st.permission || 'read_only') !== 'read_only' || st.side_effects);
-    const resolvedMode = pctx ? (pctx.mode === 'auto' ? (writes ? 'strict' : 'track') : pctx.mode) : '';
-    const modeText = { strict: 'The files are part of the approval: editing one revokes it and you approve again.', track: 'The plan keeps the files as they were; a change is shown as a warning on the run and it goes on.' };
+    const neutral = !!(rec && rec.neutral);
+    const pv = S.preview;
+    const choice = (on) => 'cursor:pointer;height:40px;padding:0 16px;border-radius:10px;font-size:14px;color:#E6E9ED;border:1px solid ' + (on ? '#7DB0FF' : '#262C35') + ';background:' + (on ? '#1F2A3D' : '#161A1F') + ';';
+    const backendChoices = S.backends.filter((b) => b.available).map((b) => ({ label: b.backend, pressed: S.backend === b.backend, style: choice(S.backend === b.backend) + "font-family:'JetBrains Mono',monospace;", pick: () => this.pickBackend(b.backend) }));
+    const kindLabel = { steering: 'steering', skills: 'skill', instructions: 'instructions' };
+    const extChoices = [];
+    Object.keys((S.ext && S.ext.extensions) || {}).forEach((kind) => (S.ext.extensions[kind] || []).forEach((e) => {
+      const key = kind + '\u0001' + e.name, on = !!S.picked[key];
+      extChoices.push({ name: e.name, kind: kindLabel[kind] || kind, scope: e.scope, description: e.description, on, mark: on ? '[x]' : '[ ]',
+        style: 'cursor:pointer;display:flex;flex-wrap:wrap;gap:12px;align-items:baseline;padding:8px 10px;border-radius:8px;border:1px solid ' + (on ? '#3A5A8A' : 'transparent') + ';background:' + (on ? '#1F2A3D' : 'transparent') + ';color:#E6E9ED;text-align:left;',
+        toggle: () => { this.setState((st) => ({ picked: { ...st.picked, [key]: !st.picked[key] } })); setTimeout(() => this.refresh(), 0); } });
+    }));
+    const modeInfo = { auto: ['auto', 'Hold the run if any step writes or has side effects, otherwise only warn.'], strict: ['strict', 'Hold the run (you can resume it) when a file you rely on changes between steps.'], track: ['track', 'Keep going and show a warning when a file you rely on changes.'] };
+    const modeChoices = Object.keys(modeInfo).map((m) => ({ label: modeInfo[m][0], pressed: S.mode === m, style: choice(S.mode === m), pick: () => { this.setState({ mode: m }); setTimeout(() => this.refresh(), 0); } }));
+    const modeHint = modeInfo[S.mode][1] + (S.mode === 'auto' && pv ? ' For this plan: ' + pv.resolved_mode + '.' : '');
+    const bindIssues = ((pv && pv.issues) || []).map((i) => ({ code: i.code, step: i.step ? '· ' + i.step : '', message: i.message }));
+    const bindBlocked = neutral && (!S.backend || !pv || ((pv && pv.issues) || []).some((i) => i.severity === 'error'));
     const permCol = { read_only: 'background:#1B2027;color:#9AA3AF;', allowlist: 'background:#1F2A3D;color:#A9C9FF;', full: 'background:#3D2418;color:#FF9A62;' };
     const waves = this._waves(rec);
     const cols = waves.map((w, i) => ({
@@ -470,7 +539,7 @@ class Component extends DCLogic {
     return {
       noPlans: S.loaded && plans.length === 0, hasPlan: plans.length > 0,
       hasPending: pending.length > 0, pending,
-      ctxShow: !!pctx, ctxBackend: pctx ? pctx.backend : '', ctxModeLabel: pctx ? (pctx.mode === 'auto' ? 'auto → ' + resolvedMode : pctx.mode) : '', ctxModeHint: modeText[resolvedMode] || '', ctxHasItems: pItems.length > 0, ctxItems: pItems,
+      bindShow: neutral, legacyShow: !!rec && !neutral, backendChoices, extChoices, hasExtChoices: extChoices.length > 0, modeChoices, modeHint, hasBindIssues: bindIssues.length > 0, bindIssues, bindBackend: S.backend,
       headDigest: ((prov && prov.inventory_digest) || '').slice(0, 7) || '—', plans, planCount: plans.length, cols, pre, inputs, runs, issueSummary,
       noIssues: validationIssues.length === 0, unsup, unsupSummary, noUnsup: unsup.length === 0,
       error: S.error, approveError: S.approveError,
@@ -488,8 +557,8 @@ class Component extends DCLogic {
         apprNote: ok ? 'Approval is recorded. It is re-checked against plan_hash and inventory_digest when you launch.' : 'A manual plan is not approved silently. Approve it to record a human approval bound to this plan_hash.',
         apprIssues: [], apprOk: ok,
         apprBox: 'border-radius:14px;padding:18px 22px;display:flex;flex-direction:column;gap:14px;background:' + boxCol + ';',
-        needsApproval: !ok, canLaunch: ok && !hasErrors, cannotLaunch: !(ok && !hasErrors),
-        blockReason: !ok ? 'The plan is not approved. Approve it first.' : (hasErrors ? (errs.length + ' validation error(s). See Preflight.') : '')
+        needsApproval: !ok, canLaunch: ok && !hasErrors && !bindBlocked, cannotLaunch: !(ok && !hasErrors && !bindBlocked),
+        blockReason: !ok ? 'The plan is not approved. Approve it first.' : (hasErrors ? (errs.length + ' validation error(s). See Preflight.') : (bindBlocked ? 'Choose a backend that can run this plan (see above).' : ''))
       }
     };
   }

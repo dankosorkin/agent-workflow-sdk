@@ -63,11 +63,12 @@ from agentflow.events import (
 )
 from agentflow.store.sqlite import SqliteStore
 from agentflow.workflow.design import DesignerRunner, approve_plan, design_plan
-from agentflow.workflow.environment import MODES, Environment, drift, resolve_mode
+from agentflow.workflow.environment import MODES, Environment, drift
 from agentflow.workflow.issues import Issue
-from agentflow.workflow.plan import validate_plan
+from agentflow.workflow.plan import check_approval, validate_plan
 from agentflow.workflow.runner import (
     AgentRunner,
+    ApprovalRevoked,
     PlanRefused,
     in_workspace,
     observing,
@@ -260,25 +261,43 @@ class WorkflowService:
         task.add_done_callback(self._tasks.discard)
 
     def inventory(self) -> dict[str, Any]:
-        return self._inventory_source()
+        """What plans are designed from: the neutral role catalog when an environment is
+        configured, otherwise the inventory the caller supplied."""
+        return self._env.catalog() if self._env is not None else self._inventory_source()
 
     def _inventory_for(self, record: dict[str, Any]) -> dict[str, Any]:
-        """The inventory a plan is judged against. A plan designed for a chosen backend carries
-        its own snapshot: ``strict`` re-reads the files (so an edit revokes the approval),
-        ``track`` keeps the snapshot and only reports drift."""
-        snap = record.get("inventory")
-        if snap is None or self._env is None:
-            return self._inventory_source()
-        ctx = record["context"]
-        if resolve_mode(ctx["mode"], record["plan"]) == "strict":
-            return self._env.inventory_for(ctx["backend"], ctx["selection"])
-        return snap
+        """The inventory a plan is judged against. A plan designed with an environment is
+        provider-neutral: it is judged against the current role catalog, whatever backend will
+        run it. An older plan keeps the snapshot it was designed with."""
+        if record.get("neutral") and self._env is not None:
+            return self._env.catalog()
+        if record.get("inventory") is not None:
+            return record["inventory"]
+        return self._inventory_source()
 
     def environment_info(self) -> dict[str, Any]:
-        return {
-            "enabled": self._env is not None,
-            "project": str(self._env.project) if self._env else None,
-        }
+        if self._env is None:
+            return {"enabled": False, "project": None, "system_backend": None}
+        try:
+            system = self._env.system_backend_name()
+        except ValueError:
+            system = None
+        return {"enabled": True, "project": str(self._env.project), "system_backend": system}
+
+    def binding_preview(
+        self,
+        plan_id: str,
+        backend: str,
+        extensions: list[dict[str, str]] | None = None,
+        mode: str = "auto",
+    ) -> dict[str, Any]:
+        """What starting ``plan_id`` on ``backend`` would bind, without starting it."""
+        record = self.get_plan(plan_id)
+        if not record.get("neutral") or self._env is None:
+            raise ValueError("this plan was designed for a fixed inventory; it has no binding")
+        if mode not in MODES:
+            raise ValueError(f"mode must be one of {MODES}")
+        return self._env.preview(record["plan"], backend, extensions, mode)
 
     # -- activity ----------------------------------------------------------------------
 
@@ -416,21 +435,12 @@ class WorkflowService:
 
     # -- design ------------------------------------------------------------------------
 
-    def start_design(
-        self,
-        request: str,
-        *,
-        backend: str | None = None,
-        extensions: list[dict[str, str]] | None = None,
-        mode: str = "auto",
-    ) -> dict[str, Any]:
-        """Start designing a plan. With ``backend`` the plan is built from that backend's generic
-        agent and roles, and from the ``extensions`` (steering, skills, instructions) the user
-        picked; without it the service-wide inventory and designer are used."""
+    def start_design(self, request: str, *, system_backend: str | None = None) -> dict[str, Any]:
+        """Start designing a plan. The plan is provider-neutral: it names roles, not backends.
+        The system agents (orchestrator, designer, critic) run on ``system_backend`` (default: the
+        configured one, else the first installed); the executing backend is chosen at launch."""
         if not request.strip():
             raise ValueError("the request is empty")
-        if mode not in MODES:
-            raise ValueError(f"mode must be one of {MODES}")
         design: dict[str, Any] = {
             "id": _new_id("design"),
             "request": request,
@@ -440,18 +450,12 @@ class WorkflowService:
             "result": None,
             "plan_id": None,
             "error": None,
-            "backend": None,
+            "system_backend": None,
         }
-        if backend is not None:
-            if self._env is None:
-                raise ValueError("choosing a backend needs an environment; none is configured")
-            selection = [{"kind": e["kind"], "name": e["name"]} for e in extensions or []]
-            design.update(
-                backend=backend,
-                selection=selection,
-                mode=mode,
-                inventory=self._env.inventory_for(backend, selection),  # ValueError if unknown
-            )
+        if self._env is not None:
+            design["system_backend"] = self._env.system_backend_name(system_backend)  # may raise
+        elif system_backend is not None:
+            raise ValueError("choosing a system backend needs an environment; none is configured")
         self._records.put("design", design)
         self._spawn(self._design(design["id"]))
         return design
@@ -473,11 +477,11 @@ class WorkflowService:
                 self._pending.pop(design_id, None)
 
         self._emit(design_id, "design", state="started")
-        if design.get("backend") and self._env is not None:
-            designer, named = self._env.designer_for(design["backend"])
-            inventory = design["inventory"]
+        if self._env is not None:
+            designer, named = self._env.designer_for(design["system_backend"]), False
         else:
-            designer, named, inventory = self._designer, self._named_agents, self.inventory()
+            designer, named = self._designer, self._named_agents
+        inventory = self.inventory()
         try:
             result = await design_plan(
                 design["request"],
@@ -503,13 +507,8 @@ class WorkflowService:
         )
         if result.plan is not None:
             plan = {"id": _new_id("plan"), "design_id": design_id, "plan": result.plan}
-            if design.get("backend"):
-                plan["inventory"] = design["inventory"]
-                plan["context"] = {
-                    "backend": design["backend"],
-                    "selection": design["selection"],
-                    "mode": design["mode"],
-                }
+            if self._env is not None:
+                plan["neutral"] = True
             self._records.put("plan", plan)
             design["plan_id"] = plan["id"]
         self._records.put("design", design)
@@ -563,12 +562,49 @@ class WorkflowService:
 
     # -- runs --------------------------------------------------------------------------
 
-    def start_run(self, plan_id: str, params: dict[str, Any]) -> dict[str, Any]:
+    def start_run(
+        self,
+        plan_id: str,
+        params: dict[str, Any],
+        *,
+        backend: str | None = None,
+        extensions: list[dict[str, str]] | None = None,
+        mode: str = "auto",
+    ) -> dict[str, Any]:
+        """Start a run. A provider-neutral plan is bound HERE to one backend: every step runs on
+        its generic agent shaped by the role, and the backend applies the user's own steering,
+        skills and instructions. ``extensions`` are the files the run relies on; ``mode`` says what
+        a change to them means (``strict`` holds the run, ``track`` warns). A plan that cannot run
+        on that backend is refused now, with the reasons."""
         record = self.get_plan(plan_id)
+        binding: dict[str, Any] | None = None
+        if record.get("neutral") and self._env is not None:
+            if backend is None:
+                raise ValueError("choose the backend this run executes on")
+            if mode not in MODES:
+                raise ValueError(f"mode must be one of {MODES}")
+            selection = [{"kind": e["kind"], "name": e["name"]} for e in extensions or []]
+            preview = self._env.preview(record["plan"], backend, selection, mode)
+            bound = self._env.bind(backend, selection) if not preview["issues"] else None
+            issues = [Issue(**i) for i in preview["issues"]]
+            if bound is not None:
+                issues += check_approval(record["plan"], bound)
+            if any(i.severity == "error" for i in issues):
+                raise PlanRefused([i for i in issues if i.severity == "error"])
+            binding = {
+                "backend": backend,
+                "selection": selection,
+                "mode": mode,
+                "resolved_mode": preview["resolved_mode"],
+                "extensions": bound["context"]["extensions"] if bound else [],
+            }
+        elif backend is not None:
+            raise ValueError("this plan was designed for a fixed inventory; it has no binding")
         run: dict[str, Any] = {
             "id": _new_id("run"),
             "plan_id": plan_id,
             "params": params,
+            "binding": binding,
             "status": "running",
             "outcome": None,
             "issues": [],
@@ -586,10 +622,29 @@ class WorkflowService:
         run = self._records.get("run", run_id)
         assert run is not None
         plan = record["plan"]
-        context = record.get("context")
+        binding = run.get("binding")
 
         def inventory_now() -> dict[str, Any]:
-            return self._inventory_for(record)
+            if binding is None or self._env is None:
+                return self._inventory_for(record)
+            live = self._env.bind(binding["backend"], binding["selection"])
+            changed = drift(binding["extensions"], live["context"]["extensions"])
+            if changed and binding["resolved_mode"] == "strict":
+                raise ApprovalRevoked(
+                    [
+                        Issue(
+                            "context_changed",
+                            f"files changed since the run was bound: {', '.join(changed)}",
+                        )
+                    ]
+                )
+            if changed:  # track: say so once, keep going
+                note = f"files changed since the run was bound: {', '.join(changed)}"
+                if note not in run["warnings"]:
+                    run["warnings"].append(note)
+                    self._records.put("run", run)
+                    self._emit(run_id, "context", state="changed", files=changed)
+            return live
 
         common: dict[str, Any] = {
             "store": self._store,
@@ -599,12 +654,17 @@ class WorkflowService:
         }
         self._emit(run_id, "run", state="started" if first else "resumed")
         try:
+            if binding is not None and self._env is not None and not first:
+                # Resuming is the user's explicit go-ahead: bind to the files as they are now.
+                live = self._env.bind(binding["backend"], binding["selection"])
+                binding["extensions"] = live["context"]["extensions"]
+                run["binding"] = binding
             inventory = inventory_now()
             runner = self._watched_runner(run_id, inventory)
             workspace = run.get("workspace")
-            if workspace is None and context and self._env is not None:
+            if workspace is None and binding is not None and self._env is not None:
                 workspace = await asyncio.to_thread(
-                    self._env.prepare_workspace, run_id, context["backend"]
+                    self._env.prepare_workspace, run_id, binding["backend"]
                 )
                 run["workspace"] = workspace
                 self._records.put("run", run)
@@ -616,17 +676,6 @@ class WorkflowService:
                     branch=workspace.get("branch"),
                     note=workspace["note"],
                 )
-            if context and self._env is not None and resolve_mode(context["mode"], plan) == "track":
-                changed = drift(
-                    record["inventory"],
-                    self._env.inventory_for(context["backend"], context["selection"]),
-                )
-                if changed:
-                    run["warnings"] = [
-                        f"context changed since the plan was designed: {', '.join(changed)}"
-                    ]
-                    self._records.put("run", run)
-                    self._emit(run_id, "context", state="changed", files=changed)
             where = in_workspace(workspace["path"]) if workspace else nullcontext()
             with where:
                 if first:
@@ -641,12 +690,16 @@ class WorkflowService:
                     )
         except asyncio.CancelledError:
             raise
+        except ApprovalRevoked as exc:
+            run.update(status="held", issues=[i.to_dict() for i in exc.issues])
         except PlanRefused as exc:
             run.update(status="refused", issues=[i.to_dict() for i in exc.issues])
         except Exception as exc:
             run.update(status="error", error=f"{type(exc).__name__}: {exc}")
         else:
-            run.update(status=outcome.status, outcome=outcome.to_dict(), issues=[], error=None)
+            body = outcome.to_dict()
+            held_reasons = body["issues"] if outcome.status == "held" else []
+            run.update(status=outcome.status, outcome=body, issues=held_reasons, error=None)
         self._records.put("run", run)
         self._emit(run_id, "run", state=run["status"])
 
