@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from agentflow import END, START, ClarificationRequest, Graph, last
+from agentflow.backends.pool import BackendSpec
 from agentflow.checkpoint import MemoryCheckpointer
 from agentflow.errors import BackendError, NodeError
 from agentflow.prebuilt import (
@@ -94,6 +95,7 @@ __all__ = [
     "collect_text",
     "make_backend",
     "kiro_policy",
+    "step_policy",
     "agent_pool",
     "in_workspace",
     "observing",
@@ -208,26 +210,31 @@ def kiro_policy(step: dict[str, Any]) -> Any:
     raise ValueError(f"unknown permission {permission!r}")  # pragma: no cover
 
 
-def make_backend(entry: dict[str, Any], step: dict[str, Any], *, cwd: Path | str = "."):
-    """Build the SDK backend for one step: the step's permission becomes the policy."""
+def step_policy(backend: str, step: dict[str, Any]) -> Any:
+    """The permission policy of a step on ``backend``."""
     from agentflow.backends import AllowAll, DenyAll, ToolAllowlist
 
+    if backend == "kiro":
+        return kiro_policy(step)
     permission = step.get("permission", "read_only")
     if permission == "read_only":
-        policy: Any = DenyAll()
-    elif permission == "allowlist":
-        policy = ToolAllowlist(set(step.get("tools") or []))
-    elif permission == "full":
-        policy = AllowAll()
-    else:  # pragma: no cover - validate_plan rejects it first
-        raise ValueError(f"unknown permission {permission!r}")
+        return DenyAll()
+    if permission == "allowlist":
+        return ToolAllowlist(set(step.get("tools") or []))
+    if permission == "full":
+        return AllowAll()
+    raise ValueError(f"unknown permission {permission!r}")  # pragma: no cover
 
+
+def make_backend(entry: dict[str, Any], step: dict[str, Any], *, cwd: Path | str = "."):
+    """Build the SDK backend for one step: the step's permission becomes the policy."""
+    name = entry["backend"]
+    policy = step_policy(name, step)
     name = entry["backend"]
     if name == "kiro":
-        from agentflow.backends import ToolAllowlist
         from agentflow.backends.kiro import KiroBackend
 
-        return KiroBackend(entry["agent"], cwd=cwd, permission=kiro_policy(step))
+        return KiroBackend(entry["agent"], cwd=cwd, permission=policy)
     if name == "claude_code":
         from agentflow.backends.claude_code import ClaudeCodeBackend
 
@@ -304,15 +311,17 @@ _pool: ContextVar[Any] = ContextVar("agentflow_workflow_pool", default=None)
 
 @asynccontextmanager
 async def agent_pool(*, max_size: int = 4) -> AsyncIterator[Any]:
-    """Within this block, Kiro steps reuse long-lived processes instead of starting one each.
+    """Within this block, steps reuse long-lived agent processes instead of starting one each.
 
-    Starting ``kiro-cli`` and its MCP servers dominates a short step; on engine v3 one process
-    serves many agents in turn. Every step still gets a fresh session and its own permission
-    policy. The processes are closed when the block ends, however it ends.
+    Starting an agent CLI and its MCP servers dominates a short step. On Kiro (engine v3) one
+    process serves many agents in turn; Claude Code keeps a persistent process per (agent,
+    model, permissions); Codex has nothing to keep alive. Every step still gets a fresh
+    conversation and its own permission policy. The processes are closed when the block ends,
+    however it ends.
     """
-    from agentflow.backends.pool import KiroPool
+    from agentflow.backends.pool import BackendPool
 
-    async with KiroPool(max_size=max_size) as pool:
+    async with BackendPool(max_size=max_size) as pool:
         token = _pool.set(pool)
         try:
             yield pool
@@ -331,8 +340,10 @@ def backend_runner(*, cwd: Path | str = ".") -> AgentRunner:
     async def run(step: dict[str, Any], entry: dict[str, Any], prompt: str) -> str:
         where = _workspace.get() or cwd
         pool = _pool.get()
-        if pool is not None and entry.get("backend") == "kiro":
-            async with pool.lease(entry["agent"], cwd=where, permission=kiro_policy(step)) as be:
+        kind = entry.get("backend") or ""
+        if pool is not None and pool.supports(kind):
+            spec = BackendSpec(kind, where, step_policy(kind, step), agent=entry.get("agent"))
+            async with pool.lease(spec) as be:
                 return await _run_turn(be, prompt)
         return await collect_text(make_backend(entry, step, cwd=where), prompt)
 

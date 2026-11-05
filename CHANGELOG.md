@@ -8,6 +8,23 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- `agentflow.process.ManagedProcess`: one supervisor for every agent CLI. It owns spawn,
+  stopping the whole process tree (a process group on POSIX; a kill-on-close Job Object on
+  Windows, with `taskkill /F /T` as the fallback), the stop ladder (close stdin, terminate,
+  kill) and a registry of live processes with `kill_all()`, also run at interpreter exit.
+  `KiroBackend` and `CLIExecBackend` (Codex, Claude Code) run on it and lose their own process
+  code, so a one-shot CLI turn that times out now kills its whole tree too.
+- `PersistentClaudeBackend`: Claude Code as one long-lived process
+  (`--input-format stream-json`) serving many turns; `reset_session()` clears the
+  conversation in place with `/clear`. The agent, model and permissions are process flags,
+  so they are fixed for the process. On a live `claude` the first turn took 8.5s and later
+  ones 4.2s, i.e. the start-up is paid once.
+- `agentflow.backends.pool.BackendPool` with `BackendSpec(kind, cwd, permission, agent, model)`:
+  one way to get a backend for a step. Kiro v3 shares one process across agents
+  (`use_agent`), Claude Code keeps a persistent process per (directory, agent, model,
+  permissions), Codex is a fresh backend per lease. `KiroPool` stays as the Kiro-only
+  wrapper. Workflow runs open `agent_pool()` around the plan.
+- CI runs the offline suite on Windows too (advisory until it has passed once).
 - `KiroBackend.use_agent(name)` (engine v3): switch the running process to another
   agent with a fresh session. v3 selects the agent as a session mode, so the process
   and the MCP servers it already connected are kept.
