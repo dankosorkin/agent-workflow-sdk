@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from agentflow.backends import _winjob
+from agentflow import _winjob
 
 
 class _K32:

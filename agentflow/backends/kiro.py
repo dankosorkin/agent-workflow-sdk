@@ -30,15 +30,10 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
-import signal
-import subprocess
-import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
 
-from agentflow.backends import _winjob
 from agentflow.backends.base import BaseAgentBackend, PermissionPolicy
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
@@ -55,6 +50,7 @@ from agentflow.events import (
     ToolResult,
     TurnEnd,
 )
+from agentflow.process import ManagedProcess
 
 __all__ = ["KiroBackend"]
 
@@ -85,9 +81,7 @@ class KiroBackend(BaseAgentBackend):
         # block a caller's shutdown for seconds waiting on it.
         self._close_grace = close_grace
 
-        self._proc: asyncio.subprocess.Process | None = None
-        # Windows only: the kill-on-close Job Object holding the child's whole tree.
-        self._job: Any = None
+        self._proc: ManagedProcess | None = None
         self._session_id: str | None = None
         self._request_id = 0
 
@@ -118,26 +112,11 @@ class KiroBackend(BaseAgentBackend):
             cmd += ["--agent", self.agent]
 
         try:
-            self._proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(self.cwd),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=None,  # inherit parent's stderr
-                # ACP responses (e.g. session/new listing every available mode)
-                # can exceed asyncio's 64KiB default readline buffer; raise it.
-                limit=8 * 1024 * 1024,
-                # Put kiro-cli in its own process group so close() can signal
-                # the whole tree. The v3 CLI spawns a child (kiro-cli-chat)
-                # that outlives a kill of the parent alone, stranding the
-                # terminal; killing the group reaps it too. POSIX-only —
-                # ignored on platforms without it.
-                start_new_session=True,
-            )
+            # Supervised: own process group / Job Object, so close() reaps the whole
+            # tree (the v3 CLI spawns kiro-cli-chat, which outlives its parent).
+            self._proc = await ManagedProcess.spawn(cmd, cwd=self.cwd)
         except OSError as exc:
             raise BackendTransportError(f"could not start kiro-cli: {exc}") from exc
-        if sys.platform == "win32":
-            self._job = _winjob.attach(self._proc.pid)
 
         self._reader_task = asyncio.create_task(self._read_loop())
 
@@ -152,33 +131,16 @@ class KiroBackend(BaseAgentBackend):
         if proc is None:
             return
         try:
-            if proc.stdin and not proc.stdin.is_closing():
-                proc.stdin.close()
-            # The v3 engine often does not exit on stdin close (it waits on its
-            # own idle timeout), so don't block for seconds hoping it will.
-            # Give it a short grace to exit cleanly, then escalate by intent:
-            # ask it to terminate, then force-kill. On POSIX both operations
-            # target the whole process group so the CLI's child process
-            # (kiro-cli-chat) is reaped too, not just the parent. Each phase
-            # has a brief window so close() returns promptly.
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
-            except TimeoutError:
-                self._terminate(proc, job=self._job)
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
-                except TimeoutError:
-                    self._kill(proc, job=self._job)
+            # The v3 engine often does not exit on stdin close (it waits on its own
+            # idle timeout), so the ladder is short: close stdin, terminate, kill,
+            # each phase bounded by ``close_grace``.
+            await proc.stop(grace=self._close_grace)
         finally:
             if self._reader_task:
                 self._reader_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await self._reader_task
             self._proc = None
-            if self._job is not None:
-                # Kill-on-close: also reaps any descendant that outlived a clean exit.
-                _winjob.close(self._job)
-                self._job = None
             self._fail_pending(BackendTransportError("backend closed"))
 
     async def reset_session(self, *, delete_previous: bool = False) -> None:
@@ -238,61 +200,6 @@ class KiroBackend(BaseAgentBackend):
         except BaseException:
             self.agent = previous
             raise
-
-    @classmethod
-    def _terminate(cls, proc: asyncio.subprocess.Process, *, job: Any = None) -> None:
-        """Ask the child (and, on POSIX, its whole group) to terminate. Never raises.
-
-        POSIX: ``SIGTERM`` to the process group. Windows: ``proc.terminate()``,
-        which is already a hard ``TerminateProcess`` there — there is no softer
-        step, so the following :meth:`_kill` is a harmless repeat on Windows.
-        """
-        cls._stop(proc, hard=False, job=job)
-
-    @classmethod
-    def _kill(cls, proc: asyncio.subprocess.Process, *, job: Any = None) -> None:
-        """Force-kill the child (and, on POSIX, its whole group). Never raises.
-
-        POSIX: ``SIGKILL`` to the process group. Windows: ``proc.kill()``.
-
-        Windows: terminate the Job Object holding the whole tree, so a grandchild
-        such as ``kiro-cli-chat`` dies with its parent; if there is no job (assigning
-        failed) fall back to ``taskkill /F /T``. ``proc.kill()`` always follows as a
-        harmless repeat.
-        """
-        cls._stop(proc, hard=True, job=job)
-
-    @staticmethod
-    def _stop(proc: asyncio.subprocess.Process, *, hard: bool, job: Any = None) -> None:
-        """Stop ``proc`` by intent, never reading a platform-specific name unguarded.
-
-        The child was started with ``start_new_session=True`` so on POSIX it
-        leads its own process group and signalling the group reaches its
-        descendants. Where process groups or the signal don't exist (Windows),
-        or the group has already gone, fall back to signalling just the process.
-        """
-        killpg = getattr(os, "killpg", None)
-        getpgid = getattr(os, "getpgid", None)
-        sig = getattr(signal, "SIGKILL" if hard else "SIGTERM", None)
-        if killpg is not None and getpgid is not None and sig is not None:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
-                killpg(getpgid(proc.pid), sig)
-                return
-        if hard and sys.platform == "win32" and not (job is not None and _winjob.terminate(job)):
-            # No job (or Windows refused): kill the whole tree by pid.
-            with contextlib.suppress(OSError, subprocess.SubprocessError):
-                subprocess.run(
-                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=5,
-                    check=False,
-                )
-        with contextlib.suppress(ProcessLookupError, OSError):
-            if hard:
-                proc.kill()
-            else:
-                proc.terminate()
 
     # ------------------------------------------------------------------
     # Public API — one turn as an event stream
