@@ -32,10 +32,13 @@ import contextlib
 import json
 import os
 import signal
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
 
+from agentflow.backends import _winjob
 from agentflow.backends.base import BaseAgentBackend, PermissionPolicy
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
@@ -83,6 +86,8 @@ class KiroBackend(BaseAgentBackend):
         self._close_grace = close_grace
 
         self._proc: asyncio.subprocess.Process | None = None
+        # Windows only: the kill-on-close Job Object holding the child's whole tree.
+        self._job: Any = None
         self._session_id: str | None = None
         self._request_id = 0
 
@@ -131,6 +136,8 @@ class KiroBackend(BaseAgentBackend):
             )
         except OSError as exc:
             raise BackendTransportError(f"could not start kiro-cli: {exc}") from exc
+        if sys.platform == "win32":
+            self._job = _winjob.attach(self._proc.pid)
 
         self._reader_task = asyncio.create_task(self._read_loop())
 
@@ -157,17 +164,21 @@ class KiroBackend(BaseAgentBackend):
             try:
                 await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
             except TimeoutError:
-                self._terminate(proc)
+                self._terminate(proc, job=self._job)
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
                 except TimeoutError:
-                    self._kill(proc)
+                    self._kill(proc, job=self._job)
         finally:
             if self._reader_task:
                 self._reader_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await self._reader_task
             self._proc = None
+            if self._job is not None:
+                # Kill-on-close: also reaps any descendant that outlived a clean exit.
+                _winjob.close(self._job)
+                self._job = None
             self._fail_pending(BackendTransportError("backend closed"))
 
     async def reset_session(self, *, delete_previous: bool = False) -> None:
@@ -229,29 +240,30 @@ class KiroBackend(BaseAgentBackend):
             raise
 
     @classmethod
-    def _terminate(cls, proc: asyncio.subprocess.Process) -> None:
+    def _terminate(cls, proc: asyncio.subprocess.Process, *, job: Any = None) -> None:
         """Ask the child (and, on POSIX, its whole group) to terminate. Never raises.
 
         POSIX: ``SIGTERM`` to the process group. Windows: ``proc.terminate()``,
         which is already a hard ``TerminateProcess`` there — there is no softer
         step, so the following :meth:`_kill` is a harmless repeat on Windows.
         """
-        cls._stop(proc, hard=False)
+        cls._stop(proc, hard=False, job=job)
 
     @classmethod
-    def _kill(cls, proc: asyncio.subprocess.Process) -> None:
+    def _kill(cls, proc: asyncio.subprocess.Process, *, job: Any = None) -> None:
         """Force-kill the child (and, on POSIX, its whole group). Never raises.
 
         POSIX: ``SIGKILL`` to the process group. Windows: ``proc.kill()``.
 
-        Known limitation (Windows): only the direct child is killed. A grandchild
-        such as ``kiro-cli-chat`` can outlive it; reaping it needs
-        ``taskkill /F /T`` or a Job Object, which is deliberately left out.
+        Windows: terminate the Job Object holding the whole tree, so a grandchild
+        such as ``kiro-cli-chat`` dies with its parent; if there is no job (assigning
+        failed) fall back to ``taskkill /F /T``. ``proc.kill()`` always follows as a
+        harmless repeat.
         """
-        cls._stop(proc, hard=True)
+        cls._stop(proc, hard=True, job=job)
 
     @staticmethod
-    def _stop(proc: asyncio.subprocess.Process, *, hard: bool) -> None:
+    def _stop(proc: asyncio.subprocess.Process, *, hard: bool, job: Any = None) -> None:
         """Stop ``proc`` by intent, never reading a platform-specific name unguarded.
 
         The child was started with ``start_new_session=True`` so on POSIX it
@@ -266,6 +278,16 @@ class KiroBackend(BaseAgentBackend):
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
                 killpg(getpgid(proc.pid), sig)
                 return
+        if hard and sys.platform == "win32" and not (job is not None and _winjob.terminate(job)):
+            # No job (or Windows refused): kill the whole tree by pid.
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                )
         with contextlib.suppress(ProcessLookupError, OSError):
             if hard:
                 proc.kill()

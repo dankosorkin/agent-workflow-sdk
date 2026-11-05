@@ -361,6 +361,120 @@ async def test_close_without_posix_signals_escalates_terminate_then_kill(fake_pr
     assert fake_proc.returncode == -9
 
 
+async def test_windows_hard_kill_reaps_the_process_tree(fake_proc, monkeypatch):
+    """On Windows the hard kill runs ``taskkill /F /T`` so grandchildren die too."""
+    import subprocess
+    import sys
+
+    backend = await _started(fake_proc)
+    fake_proc.pid = 4242
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    _force_timeouts(fake_proc, monkeypatch)
+    monkeypatch.delattr(os, "killpg", raising=False)
+    monkeypatch.delattr(os, "getpgid", raising=False)
+    monkeypatch.delattr(signal, "SIGKILL", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    ran: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: ran.append(cmd))
+
+    await backend.close()
+
+    assert ran == [["taskkill", "/F", "/T", "/PID", "4242"]]
+    assert calls == ["terminate", "kill"]
+
+
+async def test_windows_hard_kill_survives_missing_taskkill(fake_proc, monkeypatch):
+    import subprocess
+    import sys
+
+    backend = await _started(fake_proc)
+    fake_proc.pid = 4242
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    _force_timeouts(fake_proc, monkeypatch)
+    monkeypatch.delattr(os, "killpg", raising=False)
+    monkeypatch.delattr(os, "getpgid", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    def _missing(cmd, **kw):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(subprocess, "run", _missing)
+
+    await backend.close()  # must not raise
+
+    assert calls == ["terminate", "kill"]
+
+
+async def test_windows_start_puts_the_child_in_a_job(fake_proc, monkeypatch):
+    import sys
+
+    from agentflow.backends import _winjob
+
+    fake_proc.pid = 777
+    attached: list[int] = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(_winjob, "attach", lambda pid: attached.append(pid) or "JOB")
+
+    backend = await _started(fake_proc)
+
+    assert attached == [777]
+    assert backend._job == "JOB"
+
+
+async def _windows_close(fake_proc, monkeypatch, *, job_terminates: bool):
+    """close() on 'Windows' with a job already attached; returns what was called."""
+    import subprocess
+    import sys
+
+    from agentflow.backends import _winjob
+
+    backend = await _started(fake_proc)
+    fake_proc.pid = 4242
+    backend._job = "JOB"
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    _force_timeouts(fake_proc, monkeypatch)
+    monkeypatch.delattr(os, "killpg", raising=False)
+    monkeypatch.delattr(os, "getpgid", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    events: list[str] = []
+    monkeypatch.setattr(
+        _winjob, "terminate", lambda job: events.append("job-terminate") or job_terminates
+    )
+    monkeypatch.setattr(_winjob, "close", lambda job: events.append("job-close"))
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: events.append("taskkill"))
+
+    await backend.close()
+    return events, calls, backend
+
+
+async def test_windows_hard_kill_terminates_the_job_not_taskkill(fake_proc, monkeypatch):
+    events, calls, backend = await _windows_close(fake_proc, monkeypatch, job_terminates=True)
+
+    assert events == ["job-terminate", "job-close"]  # no taskkill when the job did it
+    assert calls == ["terminate", "kill"]
+    assert backend._job is None
+
+
+async def test_windows_hard_kill_falls_back_to_taskkill_when_the_job_fails(fake_proc, monkeypatch):
+    events, _calls, _backend = await _windows_close(fake_proc, monkeypatch, job_terminates=False)
+
+    assert events == ["job-terminate", "taskkill", "job-close"]
+
+
+async def test_windows_clean_exit_still_releases_the_job(fake_proc, monkeypatch):
+    from agentflow.backends import _winjob
+
+    backend = await _started(fake_proc)
+    backend._job = "JOB"
+    closed: list[str] = []
+    monkeypatch.setattr(_winjob, "close", lambda job: closed.append(job))
+
+    await backend.close()  # the fake process exits at once: no escalation
+
+    assert closed == ["JOB"]
+    assert backend._job is None
+
+
 async def test_close_signals_the_process_group_on_posix(fake_proc, monkeypatch):
     """With process groups available the signals go to the group, not the process."""
     backend = await _started(fake_proc)
