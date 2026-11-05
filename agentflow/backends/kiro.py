@@ -32,6 +32,8 @@ import contextlib
 import json
 import os
 import signal
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
@@ -220,9 +222,9 @@ class KiroBackend(BaseAgentBackend):
 
         POSIX: ``SIGKILL`` to the process group. Windows: ``proc.kill()``.
 
-        Known limitation (Windows): only the direct child is killed. A grandchild
-        such as ``kiro-cli-chat`` can outlive it; reaping it needs
-        ``taskkill /F /T`` or a Job Object, which is deliberately left out.
+        Windows: ``taskkill /F /T`` first, so a grandchild such as
+        ``kiro-cli-chat`` is reaped with its parent; ``proc.kill()`` follows as a
+        harmless repeat (and the fallback if ``taskkill`` is unavailable).
         """
         cls._stop(proc, hard=True)
 
@@ -242,6 +244,16 @@ class KiroBackend(BaseAgentBackend):
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
                 killpg(getpgid(proc.pid), sig)
                 return
+        if hard and sys.platform == "win32":
+            # No process groups on Windows: kill the whole tree by pid.
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                )
         with contextlib.suppress(ProcessLookupError, OSError):
             if hard:
                 proc.kill()

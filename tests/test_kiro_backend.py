@@ -361,6 +361,50 @@ async def test_close_without_posix_signals_escalates_terminate_then_kill(fake_pr
     assert fake_proc.returncode == -9
 
 
+async def test_windows_hard_kill_reaps_the_process_tree(fake_proc, monkeypatch):
+    """On Windows the hard kill runs ``taskkill /F /T`` so grandchildren die too."""
+    import subprocess
+    import sys
+
+    backend = await _started(fake_proc)
+    fake_proc.pid = 4242
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    _force_timeouts(fake_proc, monkeypatch)
+    monkeypatch.delattr(os, "killpg", raising=False)
+    monkeypatch.delattr(os, "getpgid", raising=False)
+    monkeypatch.delattr(signal, "SIGKILL", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    ran: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: ran.append(cmd))
+
+    await backend.close()
+
+    assert ran == [["taskkill", "/F", "/T", "/PID", "4242"]]
+    assert calls == ["terminate", "kill"]
+
+
+async def test_windows_hard_kill_survives_missing_taskkill(fake_proc, monkeypatch):
+    import subprocess
+    import sys
+
+    backend = await _started(fake_proc)
+    fake_proc.pid = 4242
+    calls = _record_process_calls(fake_proc, monkeypatch)
+    _force_timeouts(fake_proc, monkeypatch)
+    monkeypatch.delattr(os, "killpg", raising=False)
+    monkeypatch.delattr(os, "getpgid", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    def _missing(cmd, **kw):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(subprocess, "run", _missing)
+
+    await backend.close()  # must not raise
+
+    assert calls == ["terminate", "kill"]
+
+
 async def test_close_signals_the_process_group_on_posix(fake_proc, monkeypatch):
     """With process groups available the signals go to the group, not the process."""
     backend = await _started(fake_proc)

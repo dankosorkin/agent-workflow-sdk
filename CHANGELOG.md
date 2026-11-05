@@ -288,6 +288,7 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   POSIX still signals the whole process group; on Windows it falls back to
   `proc.terminate()` / `proc.kill()`. Known limitation: on Windows only the direct
   child is killed, so a grandchild such as `kiro-cli-chat` may outlive it.
+  (Superseded: the hard kill now also runs `taskkill /F /T`, on Windows.)
 
 The interrupt answer-delivery path (`interrupt_answers`) is unchanged this
 release.
