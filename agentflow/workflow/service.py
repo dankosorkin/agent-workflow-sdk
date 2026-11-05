@@ -70,6 +70,7 @@ from agentflow.workflow.runner import (
     AgentRunner,
     ApprovalRevoked,
     PlanRefused,
+    agent_pool,
     in_workspace,
     observing,
     resume_plan,
@@ -681,16 +682,19 @@ class WorkflowService:
                 )
             where = in_workspace(workspace["path"]) if workspace else nullcontext()
             with where:
-                if first:
-                    outcome = await run_plan(
-                        plan, inventory, runner, params=run["params"], thread=run_id, **common
-                    )
-                elif answer is None:
-                    outcome = await resume_plan(plan, inventory, runner, thread=run_id, **common)
-                else:
-                    outcome = await resume_plan(
-                        plan, inventory, runner, thread=run_id, answer=answer, **common
-                    )
+                async with agent_pool():
+                    if first:
+                        outcome = await run_plan(
+                            plan, inventory, runner, params=run["params"], thread=run_id, **common
+                        )
+                    elif answer is None:
+                        outcome = await resume_plan(
+                            plan, inventory, runner, thread=run_id, **common
+                        )
+                    else:
+                        outcome = await resume_plan(
+                            plan, inventory, runner, thread=run_id, answer=answer, **common
+                        )
         except asyncio.CancelledError:
             raise
         except ApprovalRevoked as exc:

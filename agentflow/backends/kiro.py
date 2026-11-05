@@ -204,6 +204,30 @@ class KiroBackend(BaseAgentBackend):
         if delete_previous:
             await self._request("session/delete", {"sessionId": previous})
 
+    async def use_agent(self, agent: str, *, delete_previous: bool = False) -> None:
+        """Switch the running process to another agent, starting a fresh session.
+
+        Engine v3 selects the agent as a session mode, so one process (and the MCP
+        servers it already connected) can serve different agents one after another:
+        this creates a new session and selects ``agent`` in it, like
+        :meth:`reset_session` with a different agent. The agent has no memory of
+        earlier turns. Engine v2 fixes the agent with ``--agent`` at process start,
+        so it cannot be switched and this raises :class:`BackendError`.
+
+        On failure (an unknown agent, a turn in progress, not started) the backend
+        keeps its previous ``agent`` name; after a failed mode switch the new session
+        is already open in the default mode, so discard the backend rather than reuse it.
+        """
+        if self.engine != "v3":
+            raise BackendError("use_agent needs engine v3; engine v2 fixes the agent at start")
+        previous = self.agent
+        self.agent = agent
+        try:
+            await self.reset_session(delete_previous=delete_previous)
+        except BaseException:
+            self.agent = previous
+            raise
+
     @classmethod
     def _terminate(cls, proc: asyncio.subprocess.Process) -> None:
         """Ask the child (and, on POSIX, its whole group) to terminate. Never raises.

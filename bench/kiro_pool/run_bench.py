@@ -5,6 +5,7 @@
 
 Scenarios (the same cycle of agents in each):
   fresh   a new KiroBackend per step (what the engine does today)
+  pool    KiroPool leases, as the workflow engine does inside agent_pool()
   shared  one KiroBackend; for each step set ``backend.agent`` and call
           ``reset_session()`` (v3 selects the agent as a session mode)
 
@@ -25,6 +26,7 @@ from pathlib import Path
 
 from agentflow.backends.base import AllowAll
 from agentflow.backends.kiro import KiroBackend
+from agentflow.backends.pool import KiroPool
 from agentflow.events import ErrorEvent, TextChunk, TurnEnd
 
 HERE = Path(__file__).resolve().parent
@@ -52,6 +54,42 @@ def _spawns(log: Path) -> dict[str, int]:
         for line in log.read_text(encoding="utf-8").splitlines():
             counts[line.split("\t")[0]] = counts.get(line.split("\t")[0], 0) + 1
     return counts
+
+
+async def run_pool(steps: int, sandbox: Path, engine: str) -> dict:
+    log = sandbox / "spawns.log"
+    log.write_text("", encoding="utf-8")
+    rows: list[dict] = []
+    wall0 = time.perf_counter()
+    async with KiroPool(engine=engine) as pool:
+        for i in range(steps):
+            agent = AGENTS[i % len(AGENTS)]
+            t0 = time.perf_counter()
+            async with pool.lease(agent, cwd=sandbox, permission=AllowAll()) as backend:
+                start = time.perf_counter() - t0
+                first, turn, err = await _turn(backend)
+            rows.append(
+                {
+                    "step": i + 1,
+                    "agent": agent,
+                    "start": start,
+                    "first_token": first,
+                    "turn": turn,
+                    "close": 0.0,
+                    "error": err,
+                }
+            )
+            print(
+                f"  [pool] step {i + 1} {agent:13s} start={start:5.1f}s first={first or 0:5.1f}s "
+                f"turn={turn:5.1f}s {('ERR ' + err) if err else ''}",
+                flush=True,
+            )
+    return {
+        "mode": "pool",
+        "wall": time.perf_counter() - wall0,
+        "rows": rows,
+        "spawns": _spawns(log),
+    }
 
 
 async def run(mode: str, steps: int, sandbox: Path, engine: str) -> dict:
@@ -108,22 +146,30 @@ def _summary(res: dict) -> str:
 
 async def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--mode", choices=["fresh", "shared", "both"], default="both")
+    ap.add_argument("--mode", choices=["fresh", "shared", "pool", "both"], default="both")
     ap.add_argument("--steps", type=int, default=6)
     ap.add_argument("--engine", default="v3")
     ap.add_argument("--sandbox", type=Path, default=HERE / ".sandbox")
     args = ap.parse_args()
-    modes = ["fresh", "shared"] if args.mode == "both" else [args.mode]
+    modes = ["fresh", "shared", "pool"] if args.mode == "both" else [args.mode]
     results = []
     for m in modes:
         print(f"== {m}")
-        results.append(await run(m, args.steps, args.sandbox.resolve(), args.engine))
+        sandbox = args.sandbox.resolve()
+        results.append(
+            await (
+                run_pool(args.steps, sandbox, args.engine)
+                if m == "pool"
+                else run(m, args.steps, sandbox, args.engine)
+            )
+        )
     print()
     for r in results:
         print(_summary(r))
-    if len(results) == 2:
-        a, b = results
-        print(f"speedup (wall): {a['wall'] / b['wall']:.2f}x")
+    if len(results) > 1:
+        base = results[0]["wall"]
+        for r in results[1:]:
+            print(f"speedup {r['mode']} vs {results[0]['mode']} (wall): {base / r['wall']:.2f}x")
     out = HERE / "results"
     out.mkdir(exist_ok=True)
     (out / f"{int(time.time())}.json").write_text(json.dumps(results, indent=2), encoding="utf-8")

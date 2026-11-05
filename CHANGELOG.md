@@ -6,6 +6,18 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [0.7.0] - unreleased
 
+### Added
+
+- `KiroBackend.use_agent(name)` (engine v3): switch the running process to another
+  agent with a fresh session. v3 selects the agent as a session mode, so the process
+  and the MCP servers it already connected are kept.
+- `agentflow.backends.pool.KiroPool`: reuses Kiro processes across steps and agents
+  (a fresh session and the step's own permission per lease; a backend whose lease
+  failed is closed, never reused). Workflow runs open `agent_pool()` around the plan,
+  so Kiro steps no longer start a process each. On a live `kiro-cli` with three custom
+  agents and MCP servers, six steps went from 28s to 15s (about 1.9x), and each MCP
+  server started once instead of once per step.
+
 ### Changed (breaking)
 
 - `RunQueue.heartbeat` and `RunQueue.complete` now take a required positional
