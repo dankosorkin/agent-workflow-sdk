@@ -339,6 +339,87 @@ async def test_close_on_windows_has_no_posix_signals(fake_proc, monkeypatch):
     assert fake_proc.returncode == -9
 
 
+async def _windows_close_with_job(fake_proc, monkeypatch, *, job_terminates: bool):
+    """close() on 'Windows' that must escalate, with a Job Object already attached."""
+    from agentflow.backends import _winjob
+
+    backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())
+    setup = asyncio.create_task(_drive_setup(fake_proc))
+    await backend.start()
+    await setup
+    fake_proc.pid = 4242
+    backend._job = "JOB"
+
+    async def _never() -> int:
+        await asyncio.sleep(3600)
+        return 0
+
+    async def _fast_wait_for(coro, timeout):
+        coro.close()
+        raise TimeoutError
+
+    monkeypatch.setattr(fake_proc, "wait", _never)
+    monkeypatch.setattr(asyncio, "wait_for", _fast_wait_for)
+    monkeypatch.delattr(os, "killpg", raising=False)
+    monkeypatch.delattr(os, "getpgid", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    events: list[str] = []
+    monkeypatch.setattr(
+        _winjob, "terminate", lambda job: events.append("job-terminate") or job_terminates
+    )
+    monkeypatch.setattr(_winjob, "close", lambda job: events.append("job-close"))
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: events.append("taskkill"))
+
+    await backend.close()
+    return events, backend
+
+
+async def test_windows_start_puts_the_child_in_a_job(fake_proc, monkeypatch):
+    from agentflow.backends import _winjob
+
+    fake_proc.pid = 777
+    attached: list[int] = []
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(_winjob, "attach", lambda pid: attached.append(pid) or "JOB")
+    backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())
+    setup = asyncio.create_task(_drive_setup(fake_proc))
+    await backend.start()
+    await setup
+
+    assert attached == [777]
+    assert backend._job == "JOB"
+
+
+async def test_windows_hard_kill_terminates_the_job_not_taskkill(fake_proc, monkeypatch):
+    events, backend = await _windows_close_with_job(fake_proc, monkeypatch, job_terminates=True)
+
+    assert events == ["job-terminate", "job-close"]
+    assert backend._job is None
+
+
+async def test_windows_hard_kill_falls_back_to_taskkill_when_the_job_fails(fake_proc, monkeypatch):
+    events, _ = await _windows_close_with_job(fake_proc, monkeypatch, job_terminates=False)
+
+    assert events == ["job-terminate", "taskkill", "job-close"]
+
+
+async def test_windows_clean_exit_still_releases_the_job(fake_proc, monkeypatch):
+    from agentflow.backends import _winjob
+
+    backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())
+    setup = asyncio.create_task(_drive_setup(fake_proc))
+    await backend.start()
+    await setup
+    backend._job = "JOB"
+    closed: list[str] = []
+    monkeypatch.setattr(_winjob, "close", lambda job: closed.append(job))
+
+    await backend.close()  # the fake process exits at once: no escalation
+
+    assert closed == ["JOB"]
+    assert backend._job is None
+
+
 async def test_turn_rpc_failure_yields_error_event(fake_proc):
     backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())
     setup = asyncio.create_task(_drive_setup(fake_proc))

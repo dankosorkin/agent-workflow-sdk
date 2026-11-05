@@ -4,6 +4,16 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.2] - 2026-11-05
+
+### Fixed
+
+- On Windows the `kiro-cli` child now runs in a kill-on-close Job Object. A hard
+  kill ends the whole tree (`kiro-cli-chat` included), and if the host Python
+  process dies the OS ends it too. `taskkill /F /T` stays as the fallback. A
+  grandchild spawned in the first instant before the child joins the job is only
+  covered by that fallback.
+
 ## [0.6.1] - 2026-11-05
 
 ### Fixed

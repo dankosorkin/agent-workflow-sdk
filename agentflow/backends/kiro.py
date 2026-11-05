@@ -38,6 +38,7 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
 
+from agentflow.backends import _winjob
 from agentflow.backends.base import BaseAgentBackend, PermissionPolicy
 from agentflow.errors import BackendError, BackendTransportError
 from agentflow.events import (
@@ -85,6 +86,8 @@ class KiroBackend(BaseAgentBackend):
         self._close_grace = close_grace
 
         self._proc: asyncio.subprocess.Process | None = None
+        # Windows only: the kill-on-close Job Object holding the child's whole tree.
+        self._job: Any = None
         self._session_id: str | None = None
         self._request_id = 0
 
@@ -133,6 +136,8 @@ class KiroBackend(BaseAgentBackend):
             )
         except OSError as exc:
             raise BackendTransportError(f"could not start kiro-cli: {exc}") from exc
+        if sys.platform == "win32":
+            self._job = _winjob.attach(self._proc.pid)
 
         self._reader_task = asyncio.create_task(self._read_loop())
 
@@ -158,28 +163,32 @@ class KiroBackend(BaseAgentBackend):
             try:
                 await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
             except TimeoutError:
-                self._stop(proc, hard=False)
+                self._stop(proc, hard=False, job=self._job)
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
                 except TimeoutError:
-                    self._stop(proc, hard=True)
+                    self._stop(proc, hard=True, job=self._job)
         finally:
             if self._reader_task:
                 self._reader_task.cancel()
                 with contextlib.suppress(asyncio.CancelledError, Exception):
                     await self._reader_task
             self._proc = None
+            if self._job is not None:
+                # Kill-on-close: also reaps any descendant that outlived a clean exit.
+                _winjob.close(self._job)
+                self._job = None
             self._fail_pending(BackendTransportError("backend closed"))
 
     @staticmethod
-    def _stop(proc: asyncio.subprocess.Process, *, hard: bool) -> None:
+    def _stop(proc: asyncio.subprocess.Process, *, hard: bool, job: Any = None) -> None:
         """Stop ``proc`` by intent (soft: terminate, hard: kill). Never raises.
 
         POSIX: SIGTERM/SIGKILL to the child's process group (it leads its own
         via ``start_new_session=True``), reaching its descendants. Windows has
         no ``signal.SIGKILL``/``os.killpg``/``os.getpgid``, so nothing
-        platform-specific is read unguarded: the hard kill runs
-        ``taskkill /F /T`` to reap the whole tree, then ``proc.kill()``.
+        platform-specific is read unguarded: the hard kill terminates the Job Object
+        holding the whole tree (``taskkill /F /T`` if there is none), then ``proc.kill()``.
         """
         killpg = getattr(os, "killpg", None)
         getpgid = getattr(os, "getpgid", None)
@@ -188,7 +197,7 @@ class KiroBackend(BaseAgentBackend):
             with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
                 killpg(getpgid(proc.pid), sig)
                 return
-        if hard and sys.platform == "win32":
+        if hard and sys.platform == "win32" and not (job is not None and _winjob.terminate(job)):
             with contextlib.suppress(OSError, subprocess.SubprocessError):
                 subprocess.run(
                     ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
