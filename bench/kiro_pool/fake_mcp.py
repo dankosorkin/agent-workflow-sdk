@@ -59,7 +59,9 @@ def main() -> None:
                     "jsonrpc": "2.0",
                     "id": rid,
                     "result": {
-                        "protocolVersion": req.get("params", {}).get("protocolVersion", "2024-11-05"),
+                        "protocolVersion": req.get("params", {}).get(
+                            "protocolVersion", "2024-11-05"
+                        ),
                         "capabilities": {"tools": {}},
                         "serverInfo": {"name": args.name, "version": "0.0.1"},
                     },
@@ -68,11 +70,23 @@ def main() -> None:
         elif method == "tools/list":
             send({"jsonrpc": "2.0", "id": rid, "result": {"tools": tools}})
         elif method == "tools/call":
-            send({"jsonrpc": "2.0", "id": rid, "result": {"content": [{"type": "text", "text": "ok"}]}})
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": rid,
+                    "result": {"content": [{"type": "text", "text": "ok"}]},
+                }
+            )
         elif method == "ping":
             send({"jsonrpc": "2.0", "id": rid, "result": {}})
         else:
-            send({"jsonrpc": "2.0", "id": rid, "error": {"code": -32601, "message": "method not found"}})
+            send(
+                {
+                    "jsonrpc": "2.0",
+                    "id": rid,
+                    "error": {"code": -32601, "message": "method not found"},
+                }
+            )
 
 
 if __name__ == "__main__":

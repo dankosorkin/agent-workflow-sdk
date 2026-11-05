@@ -64,10 +64,7 @@ async def run(mode: str, steps: int, sandbox: Path, engine: str) -> dict:
         for i in range(steps):
             agent = AGENTS[i % len(AGENTS)]
             t0 = time.perf_counter()
-            if mode == "fresh":
-                backend = KiroBackend(agent, engine=engine, cwd=sandbox, permission=AllowAll())
-                await backend.start()
-            elif backend is None:
+            if mode == "fresh" or backend is None:
                 backend = KiroBackend(agent, engine=engine, cwd=sandbox, permission=AllowAll())
                 await backend.start()
             else:
@@ -79,10 +76,22 @@ async def run(mode: str, steps: int, sandbox: Path, engine: str) -> dict:
             if mode == "fresh":
                 await backend.close()
             close = time.perf_counter() - t1
-            rows.append({"step": i + 1, "agent": agent, "start": start, "first_token": first,
-                         "turn": turn, "close": close, "error": err})
-            print(f"  [{mode}] step {i + 1} {agent:13s} start={start:5.1f}s first={first or 0:5.1f}s "
-                  f"turn={turn:5.1f}s {('ERR ' + err) if err else ''}", flush=True)
+            rows.append(
+                {
+                    "step": i + 1,
+                    "agent": agent,
+                    "start": start,
+                    "first_token": first,
+                    "turn": turn,
+                    "close": close,
+                    "error": err,
+                }
+            )
+            print(
+                f"  [{mode}] step {i + 1} {agent:13s} start={start:5.1f}s first={first or 0:5.1f}s "
+                f"turn={turn:5.1f}s {('ERR ' + err) if err else ''}",
+                flush=True,
+            )
     finally:
         if mode == "shared" and backend is not None:
             await backend.close()
@@ -91,8 +100,10 @@ async def run(mode: str, steps: int, sandbox: Path, engine: str) -> dict:
 
 def _summary(res: dict) -> str:
     starts = [r["start"] for r in res["rows"]]
-    return (f"{res['mode']:7s} wall={res['wall']:6.1f}s  start: first={starts[0]:.1f}s "
-            f"median-after={statistics.median(starts[1:] or starts):.1f}s  mcp spawns={res['spawns']}")
+    return (
+        f"{res['mode']:7s} wall={res['wall']:6.1f}s  start: first={starts[0]:.1f}s "
+        f"median-after={statistics.median(starts[1:] or starts):.1f}s  mcp spawns={res['spawns']}"
+    )
 
 
 async def main() -> None:

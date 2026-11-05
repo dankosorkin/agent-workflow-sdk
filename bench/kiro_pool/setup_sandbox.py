@@ -20,13 +20,23 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-PROMPT = "You are a terse benchmark agent. Follow the user's instruction literally and never use tools."
+PROMPT = (
+    "You are a terse benchmark agent. Follow the user's instruction literally and never use tools."
+)
 
 
 def fake(name: str, startup_ms: int, tools: int, log: Path) -> dict:
     return {
         "command": sys.executable,
-        "args": [str(HERE / "fake_mcp.py"), "--name", name, "--tools", str(tools), "--startup-ms", str(startup_ms)],
+        "args": [
+            str(HERE / "fake_mcp.py"),
+            "--name",
+            name,
+            "--tools",
+            str(tools),
+            "--startup-ms",
+            str(startup_ms),
+        ],
         "env": {"BENCH_SPAWN_LOG": str(log)},
     }
 
