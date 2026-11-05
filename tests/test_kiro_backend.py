@@ -24,6 +24,10 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
+import signal
+import subprocess
+import sys
 
 import pytest
 from agentflow.backends.base import AllowAll, DenyAll
@@ -301,6 +305,38 @@ async def test_close_terminates_then_kills_on_timeout(fake_proc, monkeypatch):
     monkeypatch.setattr(asyncio, "wait_for", _fast_wait_for)
     await backend.close()
     assert fake_proc.returncode == -9  # kill() was reached
+
+
+async def test_close_on_windows_has_no_posix_signals(fake_proc, monkeypatch):
+    """Windows shape: no signal.SIGKILL / os.killpg / os.getpgid. close() must not
+    raise AttributeError and must reap the tree with taskkill, then kill."""
+    backend = KiroBackend("fake-agent", engine="v2", permission=AllowAll())
+    setup = asyncio.create_task(_drive_setup(fake_proc))
+    await backend.start()
+    await setup
+    fake_proc.pid = 4242
+
+    async def _never() -> int:
+        await asyncio.sleep(3600)
+        return 0
+
+    async def _fast_wait_for(coro, timeout):
+        coro.close()
+        raise TimeoutError
+
+    monkeypatch.setattr(fake_proc, "wait", _never)
+    monkeypatch.setattr(asyncio, "wait_for", _fast_wait_for)
+    monkeypatch.delattr(os, "killpg", raising=False)
+    monkeypatch.delattr(os, "getpgid", raising=False)
+    monkeypatch.delattr(signal, "SIGKILL", raising=False)
+    monkeypatch.setattr(sys, "platform", "win32")
+    ran: list[list[str]] = []
+    monkeypatch.setattr(subprocess, "run", lambda cmd, **kw: ran.append(cmd))
+
+    await backend.close()
+
+    assert ran == [["taskkill", "/F", "/T", "/PID", "4242"]]
+    assert fake_proc.returncode == -9
 
 
 async def test_turn_rpc_failure_yields_error_event(fake_proc):

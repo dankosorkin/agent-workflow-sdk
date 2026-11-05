@@ -32,6 +32,8 @@ import contextlib
 import json
 import os
 import signal
+import subprocess
+import sys
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
@@ -156,11 +158,11 @@ class KiroBackend(BaseAgentBackend):
             try:
                 await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
             except TimeoutError:
-                self._signal_group(proc, signal.SIGTERM)
+                self._stop(proc, hard=False)
                 try:
                     await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
                 except TimeoutError:
-                    self._signal_group(proc, signal.SIGKILL)
+                    self._stop(proc, hard=True)
         finally:
             if self._reader_task:
                 self._reader_task.cancel()
@@ -170,21 +172,33 @@ class KiroBackend(BaseAgentBackend):
             self._fail_pending(BackendTransportError("backend closed"))
 
     @staticmethod
-    def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
-        """Send ``sig`` to the child's whole process group, if possible.
+    def _stop(proc: asyncio.subprocess.Process, *, hard: bool) -> None:
+        """Stop ``proc`` by intent (soft: terminate, hard: kill). Never raises.
 
-        The child was started with ``start_new_session=True`` so it leads its
-        own group; signalling ``-pgid`` reaches its descendants too. Falls back
-        to signalling just the process where process groups aren't available
-        (e.g. Windows) or the group has already gone. Never raises.
+        POSIX: SIGTERM/SIGKILL to the child's process group (it leads its own
+        via ``start_new_session=True``), reaching its descendants. Windows has
+        no ``signal.SIGKILL``/``os.killpg``/``os.getpgid``, so nothing
+        platform-specific is read unguarded: the hard kill runs
+        ``taskkill /F /T`` to reap the whole tree, then ``proc.kill()``.
         """
-        with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
-            pgid = os.getpgid(proc.pid)
-            os.killpg(pgid, sig)
-            return
-        # Fallback: signal the process directly.
+        killpg = getattr(os, "killpg", None)
+        getpgid = getattr(os, "getpgid", None)
+        sig = getattr(signal, "SIGKILL" if hard else "SIGTERM", None)
+        if killpg is not None and getpgid is not None and sig is not None:
+            with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
+                killpg(getpgid(proc.pid), sig)
+                return
+        if hard and sys.platform == "win32":
+            with contextlib.suppress(OSError, subprocess.SubprocessError):
+                subprocess.run(
+                    ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                )
         with contextlib.suppress(ProcessLookupError, OSError):
-            if sig == signal.SIGKILL:
+            if hard:
                 proc.kill()
             else:
                 proc.terminate()

@@ -4,6 +4,16 @@ All notable changes to `agent-workflow-sdk` are documented here. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the
 project aims to follow [Semantic Versioning](https://semver.org/).
 
+## [0.6.1] - 2026-11-05
+
+### Fixed
+
+- `KiroBackend.close()` no longer raises `AttributeError` on Windows, where
+  `signal.SIGKILL`, `os.killpg` and `os.getpgid` do not exist. Shutdown escalates
+  by intent (terminate, then kill): POSIX still signals the process group; on
+  Windows the hard kill runs `taskkill /F /T` so grandchildren such as
+  `kiro-cli-chat` are reaped, then `proc.kill()`.
+
 ## [0.6.0] - 2026-09-29
 
 ### Changed (breaking)
