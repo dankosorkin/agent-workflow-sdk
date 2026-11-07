@@ -105,7 +105,10 @@ class ManagedProcess:
             # signalled. Ignored where it does not apply.
             start_new_session=True,
         )
-        job = _winjob.attach(proc.pid) if sys.platform == "win32" else None
+        pid = getattr(proc, "pid", None)  # test doubles may not carry one
+        job = None
+        if sys.platform == "win32" and isinstance(pid, int):
+            job = _winjob.attach(pid)
         return cls(proc, job)
 
     # -- the wrapped process ------------------------------------------------
