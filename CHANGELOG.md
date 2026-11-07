@@ -31,8 +31,7 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   1.9x) and each MCP server started once instead of once per step.
 - Reuse can be turned off: `agent_pool(enabled=False)` or `AGENTFLOW_NO_POOL=1`, after which every
   step starts its own backend as in 0.6.
-- CI runs the offline suite on Windows too (advisory until the first release has shipped with it
-  green).
+- CI runs the offline suite on Windows too, as a required check.
 
 ### Fixed
 

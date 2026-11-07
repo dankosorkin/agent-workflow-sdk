@@ -29,10 +29,8 @@ jobs:
   test:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 15
-    # Windows is advisory until it has run green once: process handling (signals,
-    # process groups, Job Objects) is where the platforms differ, and the offline
-    # suite has never run there. Drop continue-on-error once it passes.
-    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    # Windows is a required leg: process handling (signals, process groups, Job Objects)
+    # is where the platforms differ, so it must keep passing.
     strategy:
       fail-fast: false
       matrix:
