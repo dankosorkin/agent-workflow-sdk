@@ -1,4 +1,8 @@
 site_name: AgentFlow
+
+# Internal working notes, not part of the published site.
+exclude_docs: |
+  workflow-from-request-design-notes.md
 site_description: The async-first, graph-based SDK for building agent workflows.
 site_author: Daniel Sorkin
 copyright: Copyright &copy; 2026 Daniel Sorkin — Apache-2.0
