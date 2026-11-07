@@ -54,6 +54,7 @@ async def test_timer_wait_not_fired_early():
     await app.run_until_done({"done": False, "runs": 0}, thread="t", max_sleep=0.01)
     elapsed = time.monotonic() - t0
 
-    assert elapsed >= 0.05, f"timer fired early after {elapsed:.3f}s"
+    # datetime.now() has ~15 ms resolution on Windows, so allow that much slack.
+    assert elapsed >= 0.03, f"timer fired early after {elapsed:.3f}s"
     # The node ran exactly twice: once to park, once after the real deadline.
     assert counter["n"] == 2

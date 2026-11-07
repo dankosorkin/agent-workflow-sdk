@@ -50,6 +50,7 @@ from agentflow.events import (
     TurnEnd,
     Usage,
 )
+from agentflow.process import ManagedProcess
 
 __all__ = ["CLIExecBackend", "TurnAccumulator"]
 
@@ -160,21 +161,16 @@ class CLIExecBackend(BaseAgentBackend):
         stdin_text = self._stdin_text
 
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(self.cwd),
+            proc = await ManagedProcess.spawn(
+                cmd,
+                cwd=self.cwd,
+                env=self.subprocess_env(),
                 stdin=(
                     asyncio.subprocess.PIPE
                     if stdin_text is not None
                     else asyncio.subprocess.DEVNULL
                 ),
-                stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
-                env=self.subprocess_env(),
-                # Some CLIs emit very large single lines (e.g. Claude's init
-                # event lists every tool/skill). Raise the line buffer well
-                # past asyncio's 64KiB default so readline() doesn't overflow.
-                limit=8 * 1024 * 1024,
             )
         except OSError as exc:
             raise BackendTransportError(f"could not start {self.cli_name}: {exc}") from exc
@@ -206,7 +202,7 @@ class CLIExecBackend(BaseAgentBackend):
     # ------------------------------------------------------------------
 
     async def _read_stream(
-        self, proc: asyncio.subprocess.Process, acc: TurnAccumulator
+        self, proc: ManagedProcess, acc: TurnAccumulator
     ) -> AsyncIterator[BackendEvent]:
         assert proc.stdout is not None
         while True:
@@ -236,7 +232,13 @@ class CLIExecBackend(BaseAgentBackend):
             for event in self.parse_line(obj, acc):
                 yield event
 
-    async def _reap(self, proc: asyncio.subprocess.Process) -> None:
+    async def _reap(self, proc: ManagedProcess) -> None:
+        try:
+            await self._reap_inner(proc)
+        finally:
+            proc.release()
+
+    async def _reap_inner(self, proc: ManagedProcess) -> None:
         if proc.returncode is None:
             try:
                 await asyncio.wait_for(proc.wait(), timeout=5)

@@ -6,6 +6,35 @@ project aims to follow [Semantic Versioning](https://semver.org/).
 
 ## [0.7.0] - unreleased
 
+### Added
+
+- `agentflow.process.ManagedProcess`: one supervisor for every agent CLI. It owns spawn,
+  stopping the whole process tree (a process group on POSIX; a kill-on-close Job Object on
+  Windows, with `taskkill /F /T` as the fallback), the stop ladder (close stdin, terminate,
+  kill) and a registry of live processes with `kill_all()`, also run at interpreter exit.
+  `KiroBackend` and `CLIExecBackend` (Codex, Claude Code) run on it and lose their own process
+  code, so a one-shot CLI turn that times out now kills its whole tree too.
+- `PersistentClaudeBackend`: Claude Code as one long-lived process
+  (`--input-format stream-json`) serving many turns; `reset_session()` clears the
+  conversation in place with `/clear`. The agent, model and permissions are process flags,
+  so they are fixed for the process. On a live `claude` the first turn took 8.5s and later
+  ones 4.2s, i.e. the start-up is paid once.
+- `agentflow.backends.pool.BackendPool` with `BackendSpec(kind, cwd, permission, agent, model)`:
+  one way to get a backend for a step. Kiro v3 shares one process across agents
+  (`use_agent`), Claude Code keeps a persistent process per (directory, agent, model,
+  permissions), Codex is a fresh backend per lease. `KiroPool` stays as the Kiro-only
+  wrapper. Workflow runs open `agent_pool()` around the plan.
+- CI runs the offline suite on Windows too (advisory until it has passed once).
+- `KiroBackend.use_agent(name)` (engine v3): switch the running process to another
+  agent with a fresh session. v3 selects the agent as a session mode, so the process
+  and the MCP servers it already connected are kept.
+- `agentflow.backends.pool.KiroPool`: reuses Kiro processes across steps and agents
+  (a fresh session and the step's own permission per lease; a backend whose lease
+  failed is closed, never reused). Workflow runs open `agent_pool()` around the plan,
+  so Kiro steps no longer start a process each. On a live `kiro-cli` with three custom
+  agents and MCP servers, six steps went from 28s to 15s (about 1.9x), and each MCP
+  server started once instead of once per step.
+
 ### Changed (breaking)
 
 - `RunQueue.heartbeat` and `RunQueue.complete` now take a required positional
@@ -288,6 +317,7 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   POSIX still signals the whole process group; on Windows it falls back to
   `proc.terminate()` / `proc.kill()`. Known limitation: on Windows only the direct
   child is killed, so a grandchild such as `kiro-cli-chat` may outlive it.
+  (Superseded: on Windows the child now runs in a kill-on-close Job Object, so the whole tree is reaped on a hard kill and by the OS if the host process dies; `taskkill /F /T` is the fallback.)
 
 The interrupt answer-delivery path (`interrupt_answers`) is unchanged this
 release.

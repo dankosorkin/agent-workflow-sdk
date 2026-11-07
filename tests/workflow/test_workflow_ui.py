@@ -122,20 +122,20 @@ MOCK_LEFTOVERS = (
 
 def test_the_ui_carries_no_leftover_mock_data():
     for path in sorted(UI_DIR.glob("*.html")):
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         found = [m for m in MOCK_LEFTOVERS if m in text]
         assert not found, f"{path.name} still contains mock data: {found}"
 
 
 def test_the_create_screen_sends_only_what_the_server_reads():
     # A control that is sent but ignored is decorative (the old rounds/mode toggles were).
-    text = (UI_DIR / "Create.dc.html").read_text()
+    text = (UI_DIR / "Create.dc.html").read_text(encoding="utf-8")
     assert "max_rounds" not in text and "max_design_rounds" not in text
     # what the form sends is exactly what POST /designs reads
     assert "{ request, system_backend: this.state.system }" in text
     # the executing backend is chosen at launch, not at design time
     assert "extChoices" not in text and "pickBackend" not in text
-    main = (UI_DIR / "Main.dc.html").read_text()
+    main = (UI_DIR / "Main.dc.html").read_text(encoding="utf-8")
     assert (
         "backend: this.state.backend, extensions: this._selection(), mode: this.state.mode" in main
     )
@@ -143,12 +143,12 @@ def test_the_create_screen_sends_only_what_the_server_reads():
 
 def test_the_create_screen_can_resume_a_design_from_the_url():
     # A design left waiting for an answer must be reachable again after leaving the tab.
-    text = (UI_DIR / "Create.dc.html").read_text()
+    text = (UI_DIR / "Create.dc.html").read_text(encoding="utf-8")
     assert ".get('design')" in text and "AF.get('/designs')" in text
 
 
 def test_the_plans_screen_has_an_empty_state_instead_of_a_dead_approve_button():
-    text = (UI_DIR / "Main.dc.html").read_text()
+    text = (UI_DIR / "Main.dc.html").read_text(encoding="utf-8")
     assert "There is no plan to approve yet" in text and "{{hasPlan}}" in text
 
 

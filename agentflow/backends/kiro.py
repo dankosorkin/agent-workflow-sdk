@@ -30,8 +30,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
-import os
-import signal
 from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any, Literal
@@ -52,6 +50,7 @@ from agentflow.events import (
     ToolResult,
     TurnEnd,
 )
+from agentflow.process import ManagedProcess
 
 __all__ = ["KiroBackend"]
 
@@ -82,7 +81,7 @@ class KiroBackend(BaseAgentBackend):
         # block a caller's shutdown for seconds waiting on it.
         self._close_grace = close_grace
 
-        self._proc: asyncio.subprocess.Process | None = None
+        self._proc: ManagedProcess | None = None
         self._session_id: str | None = None
         self._request_id = 0
 
@@ -113,22 +112,9 @@ class KiroBackend(BaseAgentBackend):
             cmd += ["--agent", self.agent]
 
         try:
-            self._proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(self.cwd),
-                stdin=asyncio.subprocess.PIPE,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=None,  # inherit parent's stderr
-                # ACP responses (e.g. session/new listing every available mode)
-                # can exceed asyncio's 64KiB default readline buffer; raise it.
-                limit=8 * 1024 * 1024,
-                # Put kiro-cli in its own process group so close() can signal
-                # the whole tree. The v3 CLI spawns a child (kiro-cli-chat)
-                # that outlives a kill of the parent alone, stranding the
-                # terminal; killing the group reaps it too. POSIX-only —
-                # ignored on platforms without it.
-                start_new_session=True,
-            )
+            # Supervised: own process group / Job Object, so close() reaps the whole
+            # tree (the v3 CLI spawns kiro-cli-chat, which outlives its parent).
+            self._proc = await ManagedProcess.spawn(cmd, cwd=self.cwd)
         except OSError as exc:
             raise BackendTransportError(f"could not start kiro-cli: {exc}") from exc
 
@@ -145,23 +131,10 @@ class KiroBackend(BaseAgentBackend):
         if proc is None:
             return
         try:
-            if proc.stdin and not proc.stdin.is_closing():
-                proc.stdin.close()
-            # The v3 engine often does not exit on stdin close (it waits on its
-            # own idle timeout), so don't block for seconds hoping it will.
-            # Give it a short grace to exit cleanly, then escalate by intent:
-            # ask it to terminate, then force-kill. On POSIX both operations
-            # target the whole process group so the CLI's child process
-            # (kiro-cli-chat) is reaped too, not just the parent. Each phase
-            # has a brief window so close() returns promptly.
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
-            except TimeoutError:
-                self._terminate(proc)
-                try:
-                    await asyncio.wait_for(proc.wait(), timeout=self._close_grace)
-                except TimeoutError:
-                    self._kill(proc)
+            # The v3 engine often does not exit on stdin close (it waits on its own
+            # idle timeout), so the ladder is short: close stdin, terminate, kill,
+            # each phase bounded by ``close_grace``.
+            await proc.stop(grace=self._close_grace)
         finally:
             if self._reader_task:
                 self._reader_task.cancel()
@@ -204,49 +177,29 @@ class KiroBackend(BaseAgentBackend):
         if delete_previous:
             await self._request("session/delete", {"sessionId": previous})
 
-    @classmethod
-    def _terminate(cls, proc: asyncio.subprocess.Process) -> None:
-        """Ask the child (and, on POSIX, its whole group) to terminate. Never raises.
+    async def use_agent(self, agent: str, *, delete_previous: bool = False) -> None:
+        """Switch the running process to another agent, starting a fresh session.
 
-        POSIX: ``SIGTERM`` to the process group. Windows: ``proc.terminate()``,
-        which is already a hard ``TerminateProcess`` there — there is no softer
-        step, so the following :meth:`_kill` is a harmless repeat on Windows.
+        Engine v3 selects the agent as a session mode, so one process (and the MCP
+        servers it already connected) can serve different agents one after another:
+        this creates a new session and selects ``agent`` in it, like
+        :meth:`reset_session` with a different agent. The agent has no memory of
+        earlier turns. Engine v2 fixes the agent with ``--agent`` at process start,
+        so it cannot be switched and this raises :class:`BackendError`.
+
+        On failure (an unknown agent, a turn in progress, not started) the backend
+        keeps its previous ``agent`` name; after a failed mode switch the new session
+        is already open in the default mode, so discard the backend rather than reuse it.
         """
-        cls._stop(proc, hard=False)
-
-    @classmethod
-    def _kill(cls, proc: asyncio.subprocess.Process) -> None:
-        """Force-kill the child (and, on POSIX, its whole group). Never raises.
-
-        POSIX: ``SIGKILL`` to the process group. Windows: ``proc.kill()``.
-
-        Known limitation (Windows): only the direct child is killed. A grandchild
-        such as ``kiro-cli-chat`` can outlive it; reaping it needs
-        ``taskkill /F /T`` or a Job Object, which is deliberately left out.
-        """
-        cls._stop(proc, hard=True)
-
-    @staticmethod
-    def _stop(proc: asyncio.subprocess.Process, *, hard: bool) -> None:
-        """Stop ``proc`` by intent, never reading a platform-specific name unguarded.
-
-        The child was started with ``start_new_session=True`` so on POSIX it
-        leads its own process group and signalling the group reaches its
-        descendants. Where process groups or the signal don't exist (Windows),
-        or the group has already gone, fall back to signalling just the process.
-        """
-        killpg = getattr(os, "killpg", None)
-        getpgid = getattr(os, "getpgid", None)
-        sig = getattr(signal, "SIGKILL" if hard else "SIGTERM", None)
-        if killpg is not None and getpgid is not None and sig is not None:
-            with contextlib.suppress(ProcessLookupError, PermissionError, OSError, AttributeError):
-                killpg(getpgid(proc.pid), sig)
-                return
-        with contextlib.suppress(ProcessLookupError, OSError):
-            if hard:
-                proc.kill()
-            else:
-                proc.terminate()
+        if self.engine != "v3":
+            raise BackendError("use_agent needs engine v3; engine v2 fixes the agent at start")
+        previous = self.agent
+        self.agent = agent
+        try:
+            await self.reset_session(delete_previous=delete_previous)
+        except BaseException:
+            self.agent = previous
+            raise
 
     # ------------------------------------------------------------------
     # Public API — one turn as an event stream
