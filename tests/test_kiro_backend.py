@@ -83,6 +83,8 @@ class _FakeStdout:
 
 
 class _FakeProc:
+    pid = 4242
+
     def __init__(self) -> None:
         self.stdin = _FakeStdin()
         self.stdout = _FakeStdout()
