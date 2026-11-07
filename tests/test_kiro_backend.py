@@ -83,7 +83,7 @@ class _FakeStdout:
 
 
 class _FakeProc:
-    pid = 4242
+    pid = 2_000_000_000  # not a live pid: a group kill must find nothing
 
     def __init__(self) -> None:
         self.stdin = _FakeStdin()

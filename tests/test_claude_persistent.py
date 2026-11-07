@@ -50,7 +50,9 @@ class _Claude:
         self.stdout = _Stream()
         self.stderr = _Stream()
         self.stdin = _Stdin(self)
-        self.pid = 1
+        # Never a real pid: killing a fake's process group must not hit a live one (pid 1 is
+        # the CI container's init, so the group kill took the whole runner down).
+        self.pid = 2_000_000_000
         self.returncode: int | None = None
         self.sessions = 1
         self.history: list[str] = []
