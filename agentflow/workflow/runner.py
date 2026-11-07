@@ -48,6 +48,7 @@ and refused up front, never ignored: ``semantic_check``, budgets, timeouts, arti
 
 from __future__ import annotations
 
+import os
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator, Mapping
 from contextlib import asynccontextmanager, contextmanager, suppress
@@ -307,10 +308,11 @@ async def _run_turn(backend: Any, prompt: str) -> str:
 
 #: The Kiro pool of the current run, when it has one. Read when a step starts.
 _pool: ContextVar[Any] = ContextVar("agentflow_workflow_pool", default=None)
+_TRUE = frozenset({"1", "true", "yes", "on"})
 
 
 @asynccontextmanager
-async def agent_pool(*, max_size: int = 4) -> AsyncIterator[Any]:
+async def agent_pool(*, max_size: int = 4, enabled: bool | None = None) -> AsyncIterator[Any]:
     """Within this block, steps reuse long-lived agent processes instead of starting one each.
 
     Starting an agent CLI and its MCP servers dominates a short step. On Kiro (engine v3) one
@@ -318,9 +320,18 @@ async def agent_pool(*, max_size: int = 4) -> AsyncIterator[Any]:
     model, permissions); Codex has nothing to keep alive. Every step still gets a fresh
     conversation and its own permission policy. The processes are closed when the block ends,
     however it ends.
+
+    ``enabled=False`` (or ``AGENTFLOW_NO_POOL=1`` in the environment when ``enabled`` is left
+    unset) turns reuse off: every step starts its own backend, as before 0.7.0. The block then
+    yields ``None``.
     """
     from agentflow.backends.pool import BackendPool
 
+    if enabled is None:
+        enabled = os.environ.get("AGENTFLOW_NO_POOL", "").strip().lower() not in _TRUE
+    if not enabled:
+        yield None
+        return
     async with BackendPool(max_size=max_size) as pool:
         token = _pool.set(pool)
         try:

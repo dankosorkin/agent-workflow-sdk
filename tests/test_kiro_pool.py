@@ -52,6 +52,7 @@ class _Proc:
         self.requests: list[dict] = []
         self.sessions = 0
         self.mode: str | None = None
+        self.crash_on_prompt = False
 
     def _reply(self, msg: dict, result: dict) -> None:
         line = json.dumps({"jsonrpc": "2.0", "id": msg["id"], "result": result}) + "\n"
@@ -71,6 +72,10 @@ class _Proc:
             self.mode = msg["params"]["modeId"]
             self._reply(msg, {})
         elif method == "session/prompt":
+            if self.crash_on_prompt:  # the process dies without answering
+                self.returncode = -9
+                self.stdout.q.put_nowait(b"")
+                return
             self._reply(msg, {"stopReason": "end_turn"})
 
     def terminate(self) -> None:
@@ -226,3 +231,38 @@ async def test_backend_runner_without_a_pool_starts_one_process_per_step(procs):
     await run(step, {"backend": "kiro", "agent": "alpha"}, "hi")
     await run(step, {"backend": "kiro", "agent": "beta"}, "hi")
     assert len(procs) == 2
+
+
+async def test_a_crashed_shared_process_fails_only_that_step(procs):
+    from agentflow.workflow.runner import agent_pool, backend_runner
+
+    run = backend_runner(cwd=".")
+    step = {"id": "s", "permission": "read_only"}
+    async with agent_pool():
+        await run(step, {"backend": "kiro", "agent": "alpha"}, "hi")
+        procs[0].crash_on_prompt = True
+        with pytest.raises(BackendError):
+            await run(step, {"backend": "kiro", "agent": "beta"}, "hi")
+        # The dead process is not handed out again: the next step gets a new one and works.
+        await run(step, {"backend": "kiro", "agent": "gamma"}, "hi")
+        assert len(procs) == 2
+        assert procs[1].returncode is None
+
+
+async def test_agent_pool_can_be_turned_off(procs, monkeypatch):
+    from agentflow.workflow.runner import agent_pool, backend_runner
+
+    run = backend_runner(cwd=".")
+    step = {"id": "s", "permission": "read_only"}
+    async with agent_pool(enabled=False) as pool:
+        assert pool is None
+        await run(step, {"backend": "kiro", "agent": "alpha"}, "hi")
+        await run(step, {"backend": "kiro", "agent": "beta"}, "hi")
+    assert len(procs) == 2
+
+    monkeypatch.setenv("AGENTFLOW_NO_POOL", "1")
+    async with agent_pool() as pool:
+        assert pool is None
+    monkeypatch.setenv("AGENTFLOW_NO_POOL", "0")
+    async with agent_pool() as pool:
+        assert pool is not None

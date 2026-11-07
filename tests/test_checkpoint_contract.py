@@ -227,3 +227,13 @@ async def test_invocations_survives_redaction():
         assert got.invocations == {"child": 1}  # NOT masked
         assert got.state == "***"  # masked
         assert "human-answer" not in got.interrupt_answers  # masked
+
+
+def test_serde_ignores_fields_it_does_not_know():
+    """A payload written by a newer version (extra top-level keys) still loads, so a later
+    release can add checkpoint fields without breaking readers of this one."""
+    from agentflow.checkpoint._serde import from_payload
+
+    newer = {"thread": "t", "step": 2, "state": {"n": 1}, "barrier_epoch": 7, "tasks": [{"id": 1}]}
+    cp = from_payload(newer)
+    assert cp.thread == "t" and cp.step == 2 and cp.state == {"n": 1}

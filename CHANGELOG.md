@@ -21,19 +21,25 @@ project aims to follow [Semantic Versioning](https://semver.org/).
   ones 4.2s, i.e. the start-up is paid once.
 - `agentflow.backends.pool.BackendPool` with `BackendSpec(kind, cwd, permission, agent, model)`:
   one way to get a backend for a step. Kiro v3 shares one process across agents
-  (`use_agent`), Claude Code keeps a persistent process per (directory, agent, model,
-  permissions), Codex is a fresh backend per lease. `KiroPool` stays as the Kiro-only
-  wrapper. Workflow runs open `agent_pool()` around the plan.
-- CI runs the offline suite on Windows too (advisory until it has passed once).
-- `KiroBackend.use_agent(name)` (engine v3): switch the running process to another
-  agent with a fresh session. v3 selects the agent as a session mode, so the process
-  and the MCP servers it already connected are kept.
-- `agentflow.backends.pool.KiroPool`: reuses Kiro processes across steps and agents
-  (a fresh session and the step's own permission per lease; a backend whose lease
-  failed is closed, never reused). Workflow runs open `agent_pool()` around the plan,
-  so Kiro steps no longer start a process each. On a live `kiro-cli` with three custom
-  agents and MCP servers, six steps went from 28s to 15s (about 1.9x), and each MCP
-  server started once instead of once per step.
+  (`KiroBackend.use_agent(name)` switches the agent as a session mode, so the MCP servers the
+  process already connected are kept), Claude Code keeps a persistent process per (directory,
+  agent, model, permissions), Codex is a fresh backend per lease. Every lease gets a fresh
+  session and the step's own permission; a backend whose lease failed or whose process died is
+  closed, never handed out again, so a crash fails only the step that was running. `KiroPool`
+  stays as the Kiro-only wrapper. Workflow runs open `agent_pool()` around the plan. On a live
+  `kiro-cli` with three custom agents and MCP servers, six steps went from 28s to 15s (about
+  1.9x) and each MCP server started once instead of once per step.
+- Reuse can be turned off: `agent_pool(enabled=False)` or `AGENTFLOW_NO_POOL=1`, after which every
+  step starts its own backend as in 0.6.
+- CI runs the offline suite on Windows too (advisory until the first release has shipped with it
+  green).
+
+### Fixed
+
+- Windows: stopping a backend now ends its whole process tree (`taskkill /F /T`, then a
+  kill-on-close Job Object), so `kiro-cli-chat` no longer outlives `kiro-cli`. Worktree overlay
+  paths use git's `/` form, so copied extension files are not mistaken for an agent's work.
+- The eight `mypy` errors in `agentflow/workflow` are gone; `mypy agentflow` is clean.
 
 ### Changed (breaking)
 
