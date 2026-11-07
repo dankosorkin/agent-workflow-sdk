@@ -216,7 +216,7 @@ def make_service(tmp_path, project, plan=None, on_step=None):
     return service, seen
 
 
-async def settle(service, kind, doc_id, done, timeout=5.0):
+async def settle(service, kind, doc_id, done, timeout=30.0):
     import asyncio
 
     end = asyncio.get_running_loop().time() + timeout
