@@ -526,7 +526,7 @@ def build_workflow_graph(
                 raise ApprovalRevoked(revoked)
 
         step, entry = steps[task.id], entries[task.id]
-        executor = _executor(step, entry, inventory)
+        executor = _executor(step, entry or {}, inventory)
         results = {r["task_id"]: r for r in (state.get("plan") or {}).get("results") or ()}
         inputs, problems = resolve_inputs(step, results, state.get("params") or {})
         if problems:
