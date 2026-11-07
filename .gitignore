@@ -16,3 +16,6 @@ coverage.xml
 site/
 # Local reference examples and workflow briefs (not shipped)
 bundle/
+
+# Local working notes, not part of the repo
+/docs/workflow-from-request-design-notes.md
