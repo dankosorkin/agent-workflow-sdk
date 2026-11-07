@@ -447,7 +447,7 @@ class Environment:
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 data = src.read_bytes()
                 dest.write_bytes(data)
-                copied[str(dest.relative_to(root))] = hashlib.sha256(data).hexdigest()
+                copied[dest.relative_to(root).as_posix()] = hashlib.sha256(data).hexdigest()  # git's form
         return copied
 
     # -- what is left when a run is over ---------------------------------------------------
