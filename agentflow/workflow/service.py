@@ -70,6 +70,7 @@ from agentflow.workflow.runner import (
     AgentRunner,
     ApprovalRevoked,
     PlanRefused,
+    agent_pool,
     in_workspace,
     observing,
     resume_plan,
@@ -328,7 +329,7 @@ class WorkflowService:
         is a few rows, not thousands. Never raises into the agent call.
         """
         buf: list[str] = []
-        state = {"last": time.monotonic(), "streamed": False}
+        state: dict[str, Any] = {"last": time.monotonic(), "streamed": False}
 
         def flush() -> None:
             if buf:
@@ -509,7 +510,11 @@ class WorkflowService:
             error=None if result.plan is not None else result.reason,
         )
         if result.plan is not None:
-            plan = {"id": _new_id("plan"), "design_id": design_id, "plan": result.plan}
+            plan: dict[str, Any] = {
+                "id": _new_id("plan"),
+                "design_id": design_id,
+                "plan": result.plan,
+            }
             if self._env is not None:
                 plan["neutral"] = True
             self._records.put("plan", plan)
@@ -666,9 +671,10 @@ class WorkflowService:
             runner = self._watched_runner(run_id, inventory)
             workspace = run.get("workspace")
             if workspace is None and binding is not None and self._env is not None:
-                workspace = await asyncio.to_thread(
+                fresh: dict[str, Any] = await asyncio.to_thread(
                     self._env.prepare_workspace, run_id, binding["backend"]
                 )
+                workspace = fresh
                 run["workspace"] = workspace
                 self._records.put("run", run)
                 self._emit(
@@ -681,16 +687,19 @@ class WorkflowService:
                 )
             where = in_workspace(workspace["path"]) if workspace else nullcontext()
             with where:
-                if first:
-                    outcome = await run_plan(
-                        plan, inventory, runner, params=run["params"], thread=run_id, **common
-                    )
-                elif answer is None:
-                    outcome = await resume_plan(plan, inventory, runner, thread=run_id, **common)
-                else:
-                    outcome = await resume_plan(
-                        plan, inventory, runner, thread=run_id, answer=answer, **common
-                    )
+                async with agent_pool():
+                    if first:
+                        outcome = await run_plan(
+                            plan, inventory, runner, params=run["params"], thread=run_id, **common
+                        )
+                    elif answer is None:
+                        outcome = await resume_plan(
+                            plan, inventory, runner, thread=run_id, **common
+                        )
+                    else:
+                        outcome = await resume_plan(
+                            plan, inventory, runner, thread=run_id, answer=answer, **common
+                        )
         except asyncio.CancelledError:
             raise
         except ApprovalRevoked as exc:
@@ -775,6 +784,7 @@ class WorkflowService:
         run, ws = self._workspace_run(run_id)
         if run["status"] not in _FINISHED:
             raise Conflict(f"run {run_id} is {run['status']}: its worktree is still needed")
+        assert self._env is not None  # _workspace_run raised NotFound otherwise
         try:
             done = self._env.remove_workspace(ws, branch)
         except ValueError as exc:

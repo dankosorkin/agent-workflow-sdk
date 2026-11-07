@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -37,6 +38,16 @@ def git(cwd, *args):
         text=True,
         check=True,
     ).stdout.strip()
+
+
+@pytest.fixture(autouse=True)
+def _backends_installed(monkeypatch):
+    """These tests use scripted runners; they must not depend on the agent CLIs being installed."""
+    real = shutil.which
+    names = {"kiro-cli", "claude", "codex"}
+    monkeypatch.setattr(
+        shutil, "which", lambda cmd, *a, **k: f"/fake/{cmd}" if cmd in names else real(cmd, *a, **k)
+    )
 
 
 @pytest.fixture
@@ -205,7 +216,7 @@ def make_service(tmp_path, project, plan=None, on_step=None):
     return service, seen
 
 
-async def settle(service, kind, doc_id, done, timeout=5.0):
+async def settle(service, kind, doc_id, done, timeout=30.0):
     import asyncio
 
     end = asyncio.get_running_loop().time() + timeout

@@ -32,14 +32,29 @@ deltas require ``--include-partial-messages``. Requires ``claude`` on PATH.
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import json
+from collections import deque
+from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
 from agentflow.backends.base import PermissionPolicy, policy_intent
-from agentflow.backends.cli_exec import CLIExecBackend, TurnAccumulator
-from agentflow.events import BackendEvent, TextChunk, ToolCall
+from agentflow.backends.cli_exec import CLIExecBackend, TurnAccumulator, _readline
+from agentflow.errors import BackendError, BackendTransportError
+from agentflow.events import (
+    BackendEvent,
+    BackendRequest,
+    ErrorEvent,
+    TextChunk,
+    TextRequest,
+    ToolCall,
+    TurnEnd,
+)
+from agentflow.process import ManagedProcess
 
-__all__ = ["ClaudeCodeBackend"]
+__all__ = ["ClaudeCodeBackend", "PersistentClaudeBackend"]
 
 
 class ClaudeCodeBackend(CLIExecBackend):
@@ -89,15 +104,19 @@ class ClaudeCodeBackend(CLIExecBackend):
         # possibly-deprecated model, so scrub them all for the child process.
         return {k: v for k, v in os.environ.items() if not k.startswith("ANTHROPIC_")}
 
-    def build_command(self, prompt: str, session_id: str | None) -> list[str]:
-        cmd = [
-            "claude",
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--include-partial-messages",
-        ]
+    _HEAD = [
+        "claude",
+        "-p",
+        "--output-format",
+        "stream-json",
+        "--verbose",
+        "--include-partial-messages",
+    ]
+
+    def _flags(self) -> list[str]:
+        """Process-level flags: model, agent, tools and permissions. Fixed for the life of
+        one process, which is why a persistent process is keyed by them."""
+        cmd: list[str] = []
         if self.model:
             cmd += ["--model", self.model]
         if self.agent:
@@ -130,6 +149,10 @@ class ClaudeCodeBackend(CLIExecBackend):
             cmd += ["--permission-mode", permission_mode]
         if self.skip_permissions:
             cmd.append("--allow-dangerously-skip-permissions")
+        return cmd
+
+    def build_command(self, prompt: str, session_id: str | None) -> list[str]:
+        cmd = [*self._HEAD, *self._flags()]
         if session_id:
             cmd += ["--resume", session_id]
         cmd += self.extra_args
@@ -199,3 +222,164 @@ class ClaudeCodeBackend(CLIExecBackend):
                     acc.add_text(text)
                     events.append(TextChunk(text=text))
         return events
+
+
+class PersistentClaudeBackend(ClaudeCodeBackend):
+    """Claude Code as ONE long-lived process serving many turns.
+
+    ``claude -p --input-format stream-json`` reads user messages from stdin and keeps
+    its MCP servers, tools and caches between them, so only the first turn pays the
+    start-up cost. A conversation is cleared in place with ``/clear`` (new session id,
+    no memory of earlier turns), which is what :meth:`reset_session` does.
+
+    The agent, model, tools and permissions are command-line flags, so they are fixed
+    for the process: pool processes by them (see ``agentflow.backends.pool``). A turn
+    abandoned before its result leaves the output stream at an unknown position, so
+    the process is stopped and the backend reports ``reusable = False``.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self._proc: ManagedProcess | None = None
+        self._stderr_tail: deque[str] = deque(maxlen=40)
+        self._stderr_task: asyncio.Task[None] | None = None
+        self._busy = False
+        self._dirty = False  # a turn has run since the last clear
+        self._broken = False
+
+    @property
+    def reusable(self) -> bool:
+        """False once the process died or a turn was abandoned mid-stream."""
+        return not self._broken and self._proc is not None
+
+    async def start(self) -> None:
+        if self._proc is not None:
+            return
+        cmd = [*self._HEAD, "--input-format", "stream-json", *self._flags(), *self.extra_args]
+        try:
+            self._proc = await ManagedProcess.spawn(
+                cmd, cwd=self.cwd, env=self.subprocess_env(), stderr=asyncio.subprocess.PIPE
+            )
+        except OSError as exc:
+            raise BackendTransportError(f"could not start {self.cli_name}: {exc}") from exc
+        self._stderr_task = asyncio.create_task(self._drain_stderr())
+
+    async def close(self) -> None:
+        proc, self._proc = self._proc, None
+        self._broken = True
+        if proc is not None:
+            await proc.stop(grace=0.5)
+        task, self._stderr_task = self._stderr_task, None
+        if task is not None:
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
+
+    async def reset_session(self) -> None:
+        await super().reset_session()
+        if self._proc is None or not self._dirty or self._broken:
+            return
+        await self._run_to_result("/clear", acc=TurnAccumulator())
+        self._dirty = False
+
+    async def invoke(
+        self, request: BackendRequest, *, session: str | None = None
+    ) -> AsyncIterator[BackendEvent]:
+        if not isinstance(request, TextRequest):
+            raise BackendError(
+                f"{type(self).__name__} accepts TextRequest, got {type(request).__name__}"
+            )
+        if session is not None:
+            raise BackendError("a persistent Claude process cannot resume a session; reset it")
+        if self._proc is None or self._broken:
+            raise BackendError("PersistentClaudeBackend is not running (start() was not called)")
+        if self._busy:
+            raise BackendError("a turn is already in progress")
+        self._busy = True
+        acc = TurnAccumulator()
+        self._streamed_any = False
+        finished = False
+        try:
+            async for event in self._stream_turn(request.text, acc):
+                yield event
+            finished = True
+            self._dirty = True
+            # Free the backend BEFORE the terminal event, so a consumer that stops at
+            # TurnEnd cannot leave it busy (same rule as KiroBackend).
+            self._busy = False
+            yield TurnEnd(
+                text=acc.text,
+                stop_reason=acc.stop_reason or ("error" if acc.is_error else "end_turn"),
+                usage=acc.usage,
+            )
+        finally:
+            self._busy = False
+            if not finished:
+                await self._abandon()
+
+    # -- internals ------------------------------------------------------------
+
+    async def _run_to_result(self, text: str, *, acc: TurnAccumulator) -> None:
+        try:
+            async for _ in self._stream_turn(text, acc):
+                pass
+        except BaseException:
+            await self._abandon()
+            raise
+
+    async def _stream_turn(self, text: str, acc: TurnAccumulator) -> AsyncIterator[BackendEvent]:
+        proc = self._proc
+        assert proc is not None and proc.stdin is not None and proc.stdout is not None
+        message = {"type": "user", "message": {"role": "user", "content": text}}
+        try:
+            proc.stdin.write((json.dumps(message) + "\n").encode("utf-8"))
+            await proc.stdin.drain()
+        except (ConnectionError, OSError) as exc:
+            raise BackendTransportError(f"{self.cli_name} is gone: {self._tail()}") from exc
+        while True:
+            try:
+                line = await _readline(proc.stdout, self.timeout)
+            except TimeoutError as exc:
+                raise BackendTransportError(
+                    f"{self.cli_name} produced no output within {self.timeout}s"
+                ) from exc
+            if line == b"":
+                raise BackendTransportError(f"{self.cli_name} exited mid-turn: {self._tail()}")
+            raw = line.strip()
+            if not raw:
+                continue
+            try:
+                obj = json.loads(raw)
+            except json.JSONDecodeError:
+                yield ErrorEvent(
+                    message=f"non-JSON line from {self.cli_name}",
+                    detail={"line": raw.decode("utf-8", "replace")},
+                )
+                continue
+            if not isinstance(obj, dict):
+                continue
+            for event in self.parse_line(obj, acc):
+                yield event
+            if obj.get("type") == "result":
+                return
+
+    async def _abandon(self) -> None:
+        """The stream position is unknown: stop the process rather than reuse it."""
+        self._broken = True
+        proc = self._proc
+        if proc is not None:
+            proc.kill()
+            proc.release()
+
+    async def _drain_stderr(self) -> None:
+        proc = self._proc
+        if proc is None or proc.stderr is None:
+            return
+        while True:
+            line = await proc.stderr.readline()
+            if not line:
+                return
+            self._stderr_tail.append(line.decode("utf-8", "replace").rstrip())
+
+    def _tail(self) -> str:
+        return " | ".join(self._stderr_tail)[-2000:] or "no stderr"

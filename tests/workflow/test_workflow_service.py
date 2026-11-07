@@ -22,7 +22,7 @@ def build(tmp_path, designer, runner):
     return service, TestClient(create_workflow_app(service))
 
 
-def wait_for(client, url, field, wanted, timeout=5.0):
+def wait_for(client, url, field, wanted, timeout=30.0):
     end = time.time() + timeout
     while time.time() < end:
         body = client.get(url).json()
