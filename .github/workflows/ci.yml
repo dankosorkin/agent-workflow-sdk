@@ -56,6 +56,7 @@ jobs:
           pip install -e '.[ollama,dev]'
 
       - name: Run offline test suite with coverage
+        timeout-minutes: 8
         # The default addopts (-m 'not live') skips backend smoke tests, so CI
         # stays hermetic — no agent CLIs or network required.
         run: pytest -v -o faulthandler_timeout=120 --cov --cov-report=term-missing --cov-report=xml
